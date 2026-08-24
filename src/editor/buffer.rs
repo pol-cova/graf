@@ -462,31 +462,26 @@ mod tests {
     fn test_multibyte_utf8_fuzz_operations() {
         let mut buf = TextBuffer::new();
 
-        // Multi-byte Unicode: Japanese, Emojis, Accents, Math symbols
-        let sample = "🦀 Rust ⚡ Graf\nこんにちは世界 🌸\nFormula: ∑_{i=1}^n x_i\n";
+        // Exercise CJK, accented text, and mathematical symbols.
+        let sample = "café Graf\nこんにちは世界\nFormula: ∑_{i=1}^n x_i\n";
         buf.insert(0, sample);
         assert_eq!(buf.line_count(), 4);
 
-        // Delete multibyte segment inside line 1 (emoji & Japanese)
-        let _line1_range = buf.line_range(1).unwrap();
         let line1_text = buf.line_content(1).unwrap();
         assert!(line1_text.contains("こんにちは"));
 
-        // Delete "世界 "
-        let target = "世界 ";
+        let target = "世界";
         let start = buf.content().find(target).unwrap();
         let end = start + target.len();
         buf.delete(start..end);
 
-        assert!(!buf.content().contains("世界 "));
+        assert!(!buf.content().contains(target));
         assert!(buf.content().contains("こんにちは"));
 
-        // Undo deletion
         buf.undo();
-        assert!(buf.content().contains("世界 "));
+        assert!(buf.content().contains(target));
 
-        // Redo deletion
         buf.redo();
-        assert!(!buf.content().contains("世界 "));
+        assert!(!buf.content().contains(target));
     }
 }

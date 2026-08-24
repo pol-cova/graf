@@ -27,12 +27,4 @@ impl EngineKind {
             Self::Typst => "Typst",
         }
     }
-
-    /// Display icon for this engine.
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Self::Latex => "📄",
-            Self::Typst => "⚡",
-        }
-    }
 }

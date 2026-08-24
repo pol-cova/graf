@@ -11,19 +11,15 @@ impl Workspace {
     pub fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         let (status_icon, status_color, status_text) = match self.controller.state() {
             CompileState::Idle => ("○", theme::TEXT_MUTED, "ready".to_string()),
-            CompileState::Waiting => ("●", theme::ACCENT_ORANGE, "typing...".to_string()),
-            CompileState::Compiling { revision, .. } => (
-                "●",
-                theme::ACCENT_ORANGE,
-                format!("compiling rev {revision}..."),
-            ),
+            CompileState::Waiting => ("●", theme::ACCENT_ORANGE, "Pending".to_string()),
+            CompileState::Compiling { .. } => ("●", theme::ACCENT_ORANGE, "Building".to_string()),
             CompileState::Success {
                 revision, duration, ..
             } => (
                 "●",
                 theme::ACCENT_GREEN,
                 format!(
-                    "ready (rev {revision}, {:.0}ms)",
+                    "Built rev {revision} in {:.0}ms",
                     duration.as_secs_f64() * 1000.0
                 ),
             ),
@@ -92,9 +88,7 @@ impl Workspace {
                         div()
                             .flex()
                             .items_center()
-                            .gap_1()
                             .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child(engine.icon())
                             .child(engine.display_name()),
                     ),
             )
@@ -112,7 +106,7 @@ impl Workspace {
                             .ends_with(".typ");
                         let stats = crate::project::stats::DocumentStats::compute(text, is_typst);
                         format!(
-                            "Ln {line}, Col {col} • {} words • {:.1} pgs",
+                            "Ln {line}, Col {col}  {} words  {:.1} pages",
                             stats.word_count, stats.estimated_pages
                         )
                     })
@@ -120,7 +114,7 @@ impl Workspace {
                     .child(
                         div()
                             .text_color(theme::color(theme::ACCENT_GREEN))
-                            .child("⚡ Hot Reload"),
+                            .child("Auto compile"),
                     ),
             )
     }

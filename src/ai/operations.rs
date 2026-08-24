@@ -24,11 +24,11 @@ pub enum AiOperationKind {
 impl AiOperationKind {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::RewriteAcademic => "✨ AI: Polish Academic Tone",
-            Self::Shorten => "✂️ AI: Shorten & Condense",
-            Self::Explain => "💡 AI: Explain Formula / Section",
-            Self::FixDiagnostic { .. } => "🔧 AI: Fix Compiler Error",
-            Self::GenerateDiagram { .. } => "🎨 AI: Generate Vector Diagram",
+            Self::RewriteAcademic => "Polish Academic Tone",
+            Self::Shorten => "Shorten and Condense",
+            Self::Explain => "Explain Formula or Section",
+            Self::FixDiagnostic { .. } => "Fix Compiler Error",
+            Self::GenerateDiagram { .. } => "Generate Vector Diagram",
         }
     }
 }
@@ -88,11 +88,29 @@ pub fn parse_canvas_response(response: &str) -> Result<CanvasDocument, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::provider::{AcpAiProvider, AcpConfig};
+    use crate::ai::provider::{AiError, AiResponse};
+
+    struct StubProvider;
+
+    impl AiProvider for StubProvider {
+        fn complete(&self, request: &AiRequest) -> Result<AiResponse, AiError> {
+            let text = if request.user_prompt.contains("Generate .graf") {
+                CanvasDocument::new().to_json().unwrap()
+            } else if request.user_prompt.contains("Fix LaTeX") {
+                "\\begin{equation}\nE = mc^2\n\\end{equation}".to_string()
+            } else {
+                "Rewritten text".to_string()
+            };
+            Ok(AiResponse {
+                text,
+                model: "test".to_string(),
+            })
+        }
+    }
 
     #[test]
     fn test_execute_ai_operations() {
-        let provider = AcpAiProvider::new(AcpConfig::default());
+        let provider = StubProvider;
 
         let rewritten = execute_operation(
             &provider,
@@ -100,7 +118,7 @@ mod tests {
             "we did this because it is faster",
         )
         .unwrap();
-        assert!(!rewritten.is_empty());
+        assert_eq!(rewritten, "Rewritten text");
 
         let fixed = execute_operation(
             &provider,
@@ -116,8 +134,8 @@ mod tests {
 
     #[test]
     fn test_generate_canvas_diagram_parsing() {
-        let provider = AcpAiProvider::new(AcpConfig::default());
-        let json_resp = execute_operation(
+        let provider = StubProvider;
+        let json = execute_operation(
             &provider,
             &AiOperationKind::GenerateDiagram {
                 prompt: "Transformer architecture".to_string(),
@@ -126,7 +144,7 @@ mod tests {
         )
         .unwrap();
 
-        let doc = parse_canvas_response(&json_resp).expect("Failed to parse canvas document");
-        assert_eq!(doc.elements.len(), 2);
+        let document = parse_canvas_response(&json).expect("valid canvas document");
+        assert!(document.elements.is_empty());
     }
 }

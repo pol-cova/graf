@@ -1,8 +1,8 @@
 //! Diagnostics problems drawer component for compiler errors and linter warnings.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{Context, CursorStyle, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
-use super::{DiagnosticsFilter, Workspace};
+use super::{DiagnosticsFilter, ResizingPanel, Workspace};
 use crate::compiler::diagnostics::{Diagnostic, Severity};
 use crate::ui::theme;
 
@@ -14,7 +14,7 @@ impl Workspace {
             .flex()
             .flex_none()
             .flex_col()
-            .max_h(px(180.0))
+            .h(px(self.diagnostics_height))
             .bg(theme::color(theme::BG_BAR))
             .border_t_1()
             .border_color(theme::color(theme::BORDER))
@@ -31,7 +31,23 @@ impl Workspace {
             .filter(|d| d.severity == Severity::Warning)
             .count();
 
-        // Header with filter tabs
+        drawer = drawer.child(
+            div()
+                .id("diagnostics-resize-handle")
+                .flex_none()
+                .h(px(5.0))
+                .w_full()
+                .bg(theme::color(theme::BORDER))
+                .cursor(CursorStyle::ResizeUpDown)
+                .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.begin_panel_resize(ResizingPanel::Diagnostics, cx);
+                    }),
+                ),
+        );
+
         drawer = drawer.child(
             div()
                 .flex()

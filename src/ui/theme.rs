@@ -65,12 +65,12 @@ impl ThemePalette {
             border: 0x2b2b2b,
             line_highlight: 0x202020,
             text: 0xe0e0e0,
-            text_muted: 0x7c7c7c,
+            text_muted: 0x9a9a9a,
             accent_green: 0x49aa63,
             accent_orange: 0xe59c38,
             accent_red: 0xe05555,
             accent_blue: 0x4f8cc9,
-            hover_bg: 0x272727,
+            hover_bg: 0x292929,
             syntax_command: 0x569cd6,
             syntax_math: 0xdcdcaa,
             syntax_comment: 0x6a9955,
@@ -136,12 +136,13 @@ pub const TAB_ACTIVE: u32 = 0x181818;
 pub const BORDER: u32 = 0x2b2b2b;
 pub const LINE_HIGHLIGHT: u32 = 0x202020;
 pub const TEXT: u32 = 0xe0e0e0;
-pub const TEXT_MUTED: u32 = 0x7c7c7c;
+pub const TEXT_MUTED: u32 = 0x9a9a9a;
 pub const ACCENT_GREEN: u32 = 0x49aa63;
 pub const ACCENT_ORANGE: u32 = 0xe59c38;
 pub const ACCENT_RED: u32 = 0xe05555;
 pub const ACCENT_BLUE: u32 = 0x4f8cc9;
-pub const HOVER_BG: u32 = 0x272727;
+pub const HOVER_BG: u32 = 0x292929;
+pub const SELECTION: u32 = 0x264f7880;
 pub const SYNTAX_COMMAND: u32 = 0x569cd6;
 pub const SYNTAX_MATH: u32 = 0xdcdcaa;
 pub const SYNTAX_COMMENT: u32 = 0x6a9955;

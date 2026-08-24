@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+#[cfg(test)]
 use crate::editor::buffer::TextBuffer;
 
 /// State for document search and replacement.
@@ -102,6 +103,7 @@ impl FindState {
     }
 
     /// Returns the currently active match range.
+    #[cfg(test)]
     pub fn active_match(&self) -> Option<&Range<usize>> {
         self.active_match_idx.and_then(|idx| self.matches.get(idx))
     }
@@ -117,6 +119,7 @@ impl FindState {
     }
 
     /// Replaces the currently active match with `replace_with` in `buffer`.
+    #[cfg(test)]
     pub fn replace_current(&mut self, buffer: &mut TextBuffer) -> Option<usize> {
         let range = self.active_match()?.clone();
         buffer.begin_transaction(range.start);
@@ -130,6 +133,7 @@ impl FindState {
     }
 
     /// Replaces all matches in the buffer within an atomic transaction. Returns count of replacements.
+    #[cfg(test)]
     pub fn replace_all(&mut self, buffer: &mut TextBuffer) -> usize {
         if self.matches.is_empty() {
             return 0;

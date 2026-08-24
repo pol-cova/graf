@@ -21,13 +21,13 @@ pub enum CompletionKind {
 }
 
 impl CompletionKind {
-    /// Returns the icon for this completion kind.
-    pub fn icon(&self) -> &'static str {
+    /// Returns a compact label for this completion kind.
+    pub fn label(&self) -> &'static str {
         match self {
-            Self::Citation => "📚",
-            Self::Reference => "🔗",
-            Self::Environment => "📦",
-            Self::Command => "⚡",
+            Self::Citation => "CITE",
+            Self::Reference => "REF",
+            Self::Environment => "ENV",
+            Self::Command => "CMD",
         }
     }
 }
@@ -57,7 +57,7 @@ pub fn compute_completions(
                 .map(|e| CompletionItem {
                     label: e.key.clone(),
                     detail: e.display_summary(),
-                    insert_text: format!("{}}}", e.key),
+                    insert_text: format!("{}}}", completion_suffix(&e.key, after)),
                     kind: CompletionKind::Citation,
                 })
                 .collect();
@@ -75,7 +75,7 @@ pub fn compute_completions(
                     .map(|l| CompletionItem {
                         label: l.to_string(),
                         detail: "Cross-reference label".to_string(),
-                        insert_text: format!("{l}}}"),
+                        insert_text: format!("{}}}", completion_suffix(l, after)),
                         kind: CompletionKind::Reference,
                     })
                     .collect();
@@ -107,7 +107,10 @@ pub fn compute_completions(
                 .map(|(name, detail)| CompletionItem {
                     label: name.to_string(),
                     detail: detail.to_string(),
-                    insert_text: format!("{name}}}\n    \n\\end{{{name}}}"),
+                    insert_text: format!(
+                        "{}}}\n    \n\\end{{{name}}}",
+                        completion_suffix(name, after)
+                    ),
                     kind: CompletionKind::Environment,
                 })
                 .collect();
@@ -147,7 +150,7 @@ pub fn compute_completions(
                 .map(|(name, detail, snippet)| CompletionItem {
                     label: format!("\\{name}"),
                     detail: detail.to_string(),
-                    insert_text: snippet.to_string(),
+                    insert_text: completion_suffix(snippet, after).to_string(),
                     kind: CompletionKind::Command,
                 })
                 .collect();
@@ -155,6 +158,10 @@ pub fn compute_completions(
     }
 
     Vec::new()
+}
+
+fn completion_suffix<'a>(candidate: &'a str, typed: &str) -> &'a str {
+    candidate.strip_prefix(typed).unwrap_or(candidate)
 }
 
 #[cfg(test)]

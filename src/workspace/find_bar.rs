@@ -1,4 +1,4 @@
-//! In-editor Find & Replace bar component.
+//! In-editor search bar component.
 
 use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*};
 
@@ -6,7 +6,7 @@ use super::Workspace;
 use crate::ui::theme;
 
 impl Workspace {
-    /// Floating in-editor Find and Replace toolbar.
+    /// In-editor search toolbar.
     pub fn render_find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let count_label = self.find_state.count_label();
 
@@ -33,19 +33,14 @@ impl Workspace {
                     )
                     .child(
                         div()
-                            .px_2()
-                            .py_0p5()
+                            .w(gpui::px(240.0))
+                            .h(gpui::px(26.0))
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
+                            .bg(theme::color(theme::BG))
                             .border_1()
                             .border_color(theme::color(theme::BORDER))
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT))
-                            .child(if self.find_state.query.is_empty() {
-                                "Type to find...".to_string()
-                            } else {
-                                self.find_state.query.clone()
-                            }),
+                            .overflow_hidden()
+                            .child(self.prompt_editor.clone()),
                     )
                     .child(
                         div()
@@ -68,11 +63,9 @@ impl Workspace {
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    if let Some(m) = this.find_state.prev_match() {
-                                        let start = m.start;
-                                        this.editor.update(cx, |ed, cx| {
-                                            ed.jump_to_line(ed.cursor_line_col().0, cx);
-                                            let _ = start;
+                                    if let Some(matched) = this.find_state.prev_match() {
+                                        this.editor.update(cx, |editor, cx| {
+                                            editor.select_range(matched.start..matched.end, cx);
                                         });
                                     }
                                     cx.notify();
@@ -95,11 +88,9 @@ impl Workspace {
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    if let Some(m) = this.find_state.next_match() {
-                                        let start = m.start;
-                                        this.editor.update(cx, |ed, cx| {
-                                            ed.jump_to_line(ed.cursor_line_col().0, cx);
-                                            let _ = start;
+                                    if let Some(matched) = this.find_state.next_match() {
+                                        this.editor.update(cx, |editor, cx| {
+                                            editor.select_range(matched.start..matched.end, cx);
                                         });
                                     }
                                     cx.notify();
@@ -132,54 +123,6 @@ impl Workspace {
                                 }),
                             )
                             .child("Aa"),
-                    )
-                    .child(
-                        div()
-                            .id("find-replace-btn")
-                            .px_2()
-                            .py_0p5()
-                            .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_xs()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.editor.update(cx, |ed, cx| {
-                                        this.find_state.replace_current(ed.buffer_mut());
-                                        cx.notify();
-                                    });
-                                    cx.notify();
-                                }),
-                            )
-                            .child("Replace"),
-                    )
-                    .child(
-                        div()
-                            .id("find-replace-all-btn")
-                            .px_2()
-                            .py_0p5()
-                            .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_xs()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
-                            .on_mouse_down(
-                                gpui::MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.editor.update(cx, |ed, cx| {
-                                        this.find_state.replace_all(ed.buffer_mut());
-                                        cx.notify();
-                                    });
-                                    cx.notify();
-                                }),
-                            )
-                            .child("All"),
                     ),
             )
             .child(

@@ -16,11 +16,10 @@ impl Workspace {
             .flex()
             .flex_none()
             .flex_col()
-            .w(px(220.0))
+            .w(px(self.sidebar_width))
             .bg(theme::color(theme::BG_SURFACE))
             .border_r_1()
             .border_color(theme::color(theme::BORDER))
-            // Tab switcher: FILES | OUTLINE
             .child(
                 div()
                     .flex()
@@ -57,7 +56,7 @@ impl Workspace {
                                     cx.notify();
                                 }),
                             )
-                            .child("FILES"),
+                            .child("Project"),
                     )
                     .child(
                         div()
@@ -88,7 +87,7 @@ impl Workspace {
                                     cx.notify();
                                 }),
                             )
-                            .child("OUTLINE"),
+                            .child("Outline"),
                     ),
             );
 
@@ -182,16 +181,17 @@ impl Workspace {
 
         match node {
             FileNode::Directory {
+                path,
                 name,
                 children,
                 is_expanded,
-                ..
             } => {
+                let directory_path = path.clone();
                 let mut dir_div = div().flex().flex_col().child(
                     div()
                         .flex()
                         .items_center()
-                        .gap_1p5()
+                        .gap_2()
                         .pl(indent)
                         .pr_3()
                         .py_1()
@@ -199,8 +199,20 @@ impl Workspace {
                         .text_color(theme::color(theme::TEXT_MUTED))
                         .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
                         .cursor_pointer()
-                        .child(if *is_expanded { "📂" } else { "📁" })
-                        .child(name.clone()),
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.project_tree.toggle_directory(&directory_path);
+                                cx.notify();
+                            }),
+                        )
+                        .child(
+                            div()
+                                .w(px(12.0))
+                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .child(if *is_expanded { "⌄" } else { "›" }),
+                        )
+                        .child(div().flex_1().min_w_0().truncate().child(name.clone())),
                 );
 
                 if *is_expanded {
@@ -221,7 +233,7 @@ impl Workspace {
                 div()
                     .flex()
                     .items_center()
-                    .gap_1p5()
+                    .gap_2()
                     .pl(indent)
                     .pr_3()
                     .py_1()
@@ -244,8 +256,13 @@ impl Workspace {
                             this.open_file(path_buf.clone(), cx);
                         }),
                     )
-                    .child(kind.icon())
-                    .child(name.clone())
+                    .child(
+                        div()
+                            .w(px(28.0))
+                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .child(kind.label()),
+                    )
+                    .child(div().flex_1().min_w_0().truncate().child(name.clone()))
             }
         }
     }

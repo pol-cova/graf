@@ -124,6 +124,10 @@ impl CompilerController {
         self.debounce_duration
     }
 
+    pub fn set_debounce_duration(&mut self, duration: Duration) {
+        self.debounce_duration = duration;
+    }
+
     /// Called when the editor content is modified with a new revision number.
     pub fn on_source_edited(&mut self, new_revision: u64, now: Instant) {
         if new_revision > self.current_revision {

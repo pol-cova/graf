@@ -95,74 +95,70 @@ impl DocumentEngine for TypstEngine {
         let output_pdf = build_path.join(&output_pdf_name);
         let _ = fs::remove_file(&output_pdf);
 
-        // If native Typst CLI is installed, execute it
-        if let Some(exe) = &self.executable {
-            let cmd_output = Command::new(exe)
-                .arg("compile")
-                .arg(&input_file)
-                .arg(&output_pdf)
-                .arg("--diagnostic-format")
-                .arg("short")
-                .current_dir(cwd)
-                .output();
+        let Some(executable) = &self.executable else {
+            let message = "Typst is not installed or configured".to_string();
+            return Err(CompileError {
+                compile_id,
+                revision,
+                diagnostics: vec![Diagnostic {
+                    id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
+                    severity: Severity::Error,
+                    source: DiagnosticSource::Typst,
+                    message: message.clone(),
+                    file: request.root_document,
+                    line: None,
+                }],
+                message,
+                duration: start.elapsed(),
+            });
+        };
 
-            if let Ok(output) = cmd_output {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let log = format!("{stderr}\n{stdout}");
-                let diagnostics = parse_typst_diagnostics(&log);
+        let output = Command::new(executable)
+            .arg("compile")
+            .arg(&input_file)
+            .arg(&output_pdf)
+            .arg("--diagnostic-format")
+            .arg("short")
+            .current_dir(cwd)
+            .output()
+            .map_err(|error| CompileError {
+                compile_id,
+                revision,
+                diagnostics: Vec::new(),
+                message: format!("Failed to execute Typst: {error}"),
+                duration: start.elapsed(),
+            })?;
 
-                if output.status.success() && output_pdf.exists() {
-                    let pdf_bytes = fs::read(&output_pdf).unwrap_or_default();
-                    return Ok(CompileOutput {
-                        compile_id,
-                        revision,
-                        artifact: pdf_bytes,
-                        artifact_kind: ArtifactKind::Pdf,
-                        diagnostics,
-                        duration: start.elapsed(),
-                    });
-                } else {
-                    return Err(CompileError {
-                        compile_id,
-                        revision,
-                        diagnostics,
-                        message: if stderr.trim().is_empty() {
-                            "Typst compilation failed".to_string()
-                        } else {
-                            stderr.trim().to_string()
-                        },
-                        duration: start.elapsed(),
-                    });
-                }
-            }
-        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let diagnostics = parse_typst_diagnostics(&format!("{stderr}\n{stdout}"));
 
-        // Built-in Pure Rust Typst Parser & Fallback PDF Generator
-        let (diagnostics, is_valid) = check_typst_syntax(&request.source);
-        if !is_valid {
-            let first_err = diagnostics
-                .iter()
-                .find(|d| d.severity == Severity::Error)
-                .map(|d| d.message.clone())
-                .unwrap_or_else(|| "Typst syntax error".to_string());
-
+        if !output.status.success() || !output_pdf.exists() {
             return Err(CompileError {
                 compile_id,
                 revision,
                 diagnostics,
-                message: first_err,
+                message: if stderr.trim().is_empty() {
+                    "Typst compilation failed".to_string()
+                } else {
+                    stderr.trim().to_string()
+                },
                 duration: start.elapsed(),
             });
         }
 
-        let synthetic_pdf = generate_typst_preview_pdf(&request.source);
-        let _ = fs::write(&output_pdf, &synthetic_pdf);
+        let artifact = fs::read(&output_pdf).map_err(|error| CompileError {
+            compile_id,
+            revision,
+            diagnostics: diagnostics.clone(),
+            message: format!("Failed to read Typst PDF output: {error}"),
+            duration: start.elapsed(),
+        })?;
 
         Ok(CompileOutput {
             compile_id,
             revision,
-            artifact: synthetic_pdf,
+            artifact,
             artifact_kind: ArtifactKind::Pdf,
             diagnostics,
             duration: start.elapsed(),
@@ -264,113 +260,6 @@ pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Checks Typst syntax correctness in offline / built-in mode.
-fn check_typst_syntax(source: &str) -> (Vec<Diagnostic>, bool) {
-    let mut diagnostics = Vec::new();
-    let mut is_valid = true;
-
-    for (line_idx, line) in source.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let trimmed = line.trim();
-
-        // Check for unbalanced math delimiters $ on a single line (unless multiline)
-        let dollar_count = trimmed.chars().filter(|&c| c == '$').count();
-        if dollar_count % 2 != 0 {
-            diagnostics.push(Diagnostic {
-                id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
-                severity: Severity::Error,
-                source: DiagnosticSource::Typst,
-                message: "Unclosed math delimiter '$'".to_string(),
-                file: Some(PathBuf::from("document.typ")),
-                line: Some(line_num),
-            });
-            is_valid = false;
-        }
-
-        // Check for invalid function call syntax
-        if trimmed.starts_with('#') && !trimmed.starts_with("//") {
-            let func_name = trimmed
-                .trim_start_matches('#')
-                .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .next()
-                .unwrap_or("");
-            if !func_name.is_empty() {
-                let known_typst_keywords = [
-                    "set",
-                    "show",
-                    "let",
-                    "import",
-                    "include",
-                    "text",
-                    "rect",
-                    "circle",
-                    "ellipse",
-                    "image",
-                    "align",
-                    "table",
-                    "grid",
-                    "page",
-                    "par",
-                    "list",
-                    "enum",
-                    "heading",
-                    "figure",
-                    "quote",
-                    "footnote",
-                    "cite",
-                    "bibliography",
-                    "eval",
-                    "context",
-                ];
-                if !known_typst_keywords.contains(&func_name)
-                    && !func_name.chars().next().unwrap_or('a').is_uppercase()
-                {
-                    diagnostics.push(Diagnostic {
-                        id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
-                        severity: Severity::Warning,
-                        source: DiagnosticSource::Typst,
-                        message: format!("Unknown function or variable '#{func_name}'"),
-                        file: Some(PathBuf::from("document.typ")),
-                        line: Some(line_num),
-                    });
-                }
-            }
-        }
-    }
-
-    (diagnostics, is_valid)
-}
-
-/// Generates a valid PDF byte stream representing the rendered Typst document.
-fn generate_typst_preview_pdf(source: &str) -> Vec<u8> {
-    let title_line = source
-        .lines()
-        .find(|l| l.starts_with("= "))
-        .map(|l| l.trim_start_matches("= ").trim())
-        .unwrap_or("Typst Document");
-
-    let clean_title = title_line.replace(['(', ')', '\\'], "");
-
-    // Generates a well-formed PDF 1.4 object structure with font dictionary and stream
-    let stream_content = format!(
-        "BT\n/F1 18 Tf\n50 740 Td\n({clean_title}) Tj\n/F1 11 Tf\n0 -28 Td\n(Typeset natively with Graf Typst Engine) Tj\nET"
-    );
-    let stream_len = stream_content.len();
-
-    let pdf_str = format!(
-        "%PDF-1.4\n\
-1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n\
-2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n\
-3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n\
-4 0 obj\n<< /Length {stream_len} >>\nstream\n{stream_content}\nendstream\nendobj\n\
-5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n\
-xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000244 00000 n \n0000000320 00000 n \n\
-trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n395\n%%EOF"
-    );
-
-    pdf_str.into_bytes()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,28 +285,17 @@ warning: variable 'x' is never used
     }
 
     #[test]
-    fn test_typst_compile_valid_document() {
-        let engine = TypstEngine::new();
-        let source = "= Introduction to Typst\n#set page(paper: \"a4\")\nTypst is fast and expressive.\n$ E = m c^2 $";
-        let request = CompileRequest::simple(source, 1);
+    fn reports_when_typst_is_unavailable() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = TypstEngine {
+            executable: None,
+            build_dir: directory.path().to_path_buf(),
+        };
+        let request = CompileRequest::simple("= Document", 1);
 
-        let output = engine.compile(request).expect("Typst compile failed");
-        assert_eq!(output.revision, 1);
-        assert_eq!(output.artifact_kind, ArtifactKind::Pdf);
-        assert!(!output.artifact.is_empty());
-        assert!(output.artifact.starts_with(b"%PDF"));
-    }
+        let error = engine.compile(request).unwrap_err();
 
-    #[test]
-    fn test_typst_compile_syntax_error() {
-        let engine = TypstEngine::new();
-        let source = "= Title\nInvalid math $ E = mc^2 without closing";
-        let request = CompileRequest::simple(source, 1);
-
-        let result = engine.compile(request);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(!err.diagnostics.is_empty());
-        assert_eq!(err.diagnostics[0].line, Some(2));
+        assert_eq!(error.message, "Typst is not installed or configured");
+        assert_eq!(error.diagnostics.len(), 1);
     }
 }

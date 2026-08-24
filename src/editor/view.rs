@@ -138,6 +138,9 @@ pub struct EditorView {
     diagnostics: Vec<crate::compiler::diagnostics::Diagnostic>,
     /// Whether the active document uses Typst syntax.
     pub is_typst: bool,
+    font_size: f32,
+    tab_size: usize,
+    line_numbers: bool,
 }
 
 impl EditorView {
@@ -167,7 +170,23 @@ impl EditorView {
             goal_x: None,
             diagnostics: Vec::new(),
             is_typst: false,
+            font_size: 14.0,
+            tab_size: 2,
+            line_numbers: true,
         }
+    }
+
+    pub fn set_preferences(
+        &mut self,
+        font_size: f32,
+        tab_size: usize,
+        line_numbers: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.font_size = font_size.clamp(10.0, 24.0);
+        self.tab_size = tab_size.clamp(1, 8);
+        self.line_numbers = line_numbers;
+        cx.notify();
     }
 
     /// Updates active diagnostics for inline gutter error markers.
@@ -182,6 +201,9 @@ impl EditorView {
 
     /// Computes dynamic gutter width in pixels to fit all line digits cleanly.
     pub fn gutter_width(&self) -> f32 {
+        if !self.line_numbers {
+            return 0.0;
+        }
         let line_count = self.buffer.line_count();
         let digits = line_count.to_string().len().max(2);
         (digits as f32 * 9.0 + 26.0).max(48.0)
@@ -192,6 +214,17 @@ impl EditorView {
         let line_0 = line.saturating_sub(1);
         let offset = self.buffer.line_start_offset(line_0);
         self.move_to(offset, cx);
+        self.ensure_cursor_visible();
+        cx.notify();
+    }
+
+    pub fn select_range(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let start = range.start.min(self.buffer.len());
+        let end = range.end.min(self.buffer.len()).max(start);
+        self.selected_range = start..end;
+        self.cursor = end;
+        self.selection_reversed = false;
+        self.goal_x = None;
         self.ensure_cursor_visible();
         cx.notify();
     }
@@ -710,7 +743,7 @@ impl EditorView {
     }
 
     fn on_tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
-        self.insert_text("    ");
+        self.insert_text(&" ".repeat(self.tab_size));
         self.ensure_cursor_visible();
         cx.notify();
     }
@@ -774,16 +807,44 @@ impl EditorView {
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.is_selecting = true;
+        window.focus(&self.focus_handle, cx);
         let offset = self.offset_for_position(event.position);
-        if event.modifiers.shift {
-            self.select_to(offset, cx);
-        } else {
-            self.move_to(offset, cx);
+
+        match event.click_count {
+            count if count >= 3 => {
+                let (line, _) = self.line_col_for_offset(offset);
+                let range = self.buffer.line_range(line).unwrap_or(offset..offset);
+                self.selected_range = range.clone();
+                self.cursor = range.end;
+                self.selection_reversed = false;
+                self.is_selecting = false;
+                cx.notify();
+            }
+            2 => {
+                self.select_word_at(offset, cx);
+                self.is_selecting = false;
+            }
+            _ => {
+                self.is_selecting = true;
+                if event.modifiers.shift {
+                    self.select_to(offset, cx);
+                } else {
+                    self.move_to(offset, cx);
+                }
+            }
         }
+    }
+
+    fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let range = word_range_at(self.buffer.content(), offset);
+        self.selected_range = range.clone();
+        self.cursor = range.end;
+        self.selection_reversed = false;
+        self.goal_x = None;
+        cx.notify();
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
@@ -843,19 +904,56 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Returns a mutable reference to the underlying text buffer.
-    pub fn buffer_mut(&mut self) -> &mut TextBuffer {
-        &mut self.buffer
-    }
-
     /// Returns the current revision of the buffer.
     pub fn revision(&self) -> u64 {
         self.buffer.revision()
     }
 }
 
+fn word_range_at(content: &str, offset: usize) -> Range<usize> {
+    if content.is_empty() {
+        return 0..0;
+    }
+
+    let mut position = offset.min(content.len());
+    while position > 0 && !content.is_char_boundary(position) {
+        position -= 1;
+    }
+    if position == content.len() {
+        position = content
+            .char_indices()
+            .next_back()
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+    }
+
+    let is_word = |character: char| character.is_alphanumeric() || character == '_';
+    let selected_is_word = content[position..].chars().next().is_some_and(is_word);
+
+    let mut start = position;
+    while start > 0 {
+        let Some((previous, character)) = content[..start].char_indices().next_back() else {
+            break;
+        };
+        if is_word(character) != selected_is_word {
+            break;
+        }
+        start = previous;
+    }
+
+    let mut end = position;
+    for (relative, character) in content[position..].char_indices() {
+        if is_word(character) != selected_is_word {
+            break;
+        }
+        end = position + relative + character.len_utf8();
+    }
+
+    start..end
+}
+
 /// Left padding inside the text area.
-const TEXT_PADDING: f32 = 10.0;
+const TEXT_PADDING: f32 = 14.0;
 
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -864,8 +962,8 @@ impl Render for EditorView {
             .key_context("Editor")
             .track_focus(&self.focus_handle)
             .font_family("Menlo")
-            .text_size(px(13.5))
-            .line_height(px(22.0))
+            .text_size(px(self.font_size))
+            .line_height(px(23.0))
             .on_action(cx.listener(Self::on_backspace))
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_left))
@@ -1233,7 +1331,7 @@ impl Element for EditorElement {
                 point(bounds.left() + px(gutter_width), bounds.top()),
                 size(px(1.0), bounds.size.height),
             ),
-            theme::color(theme::BORDER),
+            theme::color(theme::BG),
         );
 
         let cursor_quad = if editor.selected_range.is_empty() && is_focused {
@@ -1290,7 +1388,7 @@ impl Element for EditorElement {
                                 bounds.top() + px(y + line_height),
                             ),
                         ),
-                        rgba(0x264f7850),
+                        rgba(theme::SELECTION),
                     ));
                 }
             }
@@ -1332,8 +1430,10 @@ impl Element for EditorElement {
             window.paint_quad(active_line);
         }
 
-        // Paint gutter separator
-        window.paint_quad(prepaint.gutter_separator_quad.clone());
+        let show_line_numbers = self.editor.read(cx).line_numbers;
+        if show_line_numbers {
+            window.paint_quad(prepaint.gutter_separator_quad.clone());
+        }
 
         let lh = prepaint.line_height;
         let scroll_offset = self.editor.read(cx).scroll_offset;
@@ -1345,54 +1445,56 @@ impl Element for EditorElement {
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let font = text_style.font();
 
-        // Paint gutter line numbers & error badges
-        for (i, _) in prepaint.line_layouts.iter().enumerate() {
-            let line_idx = prepaint.first_line + i;
-            let y = line_idx as f32 * lh - scroll_offset;
-            let num_str = (line_idx + 1).to_string();
-            let is_active = prepaint.is_focused && line_idx == prepaint.cursor_line;
+        if show_line_numbers {
+            for (i, _) in prepaint.line_layouts.iter().enumerate() {
+                let line_idx = prepaint.first_line + i;
+                let y = line_idx as f32 * lh - scroll_offset;
+                let num_str = (line_idx + 1).to_string();
+                let is_active = prepaint.is_focused && line_idx == prepaint.cursor_line;
 
-            let has_error = self.editor.read(cx).diagnostics.iter().any(|d| {
-                d.line == Some(line_idx + 1)
-                    && d.severity == crate::compiler::diagnostics::Severity::Error
-            });
-            let has_warn = self.editor.read(cx).diagnostics.iter().any(|d| {
-                d.line == Some(line_idx + 1)
-                    && d.severity == crate::compiler::diagnostics::Severity::Warning
-            });
+                let has_error = self.editor.read(cx).diagnostics.iter().any(|d| {
+                    d.line == Some(line_idx + 1)
+                        && d.severity == crate::compiler::diagnostics::Severity::Error
+                });
+                let has_warn = self.editor.read(cx).diagnostics.iter().any(|d| {
+                    d.line == Some(line_idx + 1)
+                        && d.severity == crate::compiler::diagnostics::Severity::Warning
+                });
 
-            let line_num_color = if has_error {
-                theme::color(theme::ACCENT_RED)
-            } else if has_warn {
-                theme::color(theme::ACCENT_ORANGE)
-            } else if is_active {
-                theme::color(theme::TEXT)
-            } else {
-                theme::color(theme::TEXT_MUTED)
-            };
+                let line_num_color = if has_error {
+                    theme::color(theme::ACCENT_RED)
+                } else if has_warn {
+                    theme::color(theme::ACCENT_ORANGE)
+                } else if is_active {
+                    theme::color(theme::TEXT)
+                } else {
+                    theme::color(theme::TEXT_MUTED)
+                };
 
-            let run = TextRun {
-                len: num_str.len(),
-                font: font.clone(),
-                color: line_num_color.into(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let shaped = window
-                .text_system()
-                .shape_line(num_str.into(), font_size, &[run], None);
-            let gutter_x = px(gutter_width - 10.0) - shaped.width;
-            shaped
-                .paint(
-                    point(bounds.left() + gutter_x, bounds.top() + px(y)),
-                    line_height_px,
-                    gpui::TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                )
-                .ok();
+                let run = TextRun {
+                    len: num_str.len(),
+                    font: font.clone(),
+                    color: line_num_color.into(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(num_str.into(), font_size, &[run], None);
+                let gutter_x = px(gutter_width - 10.0) - shaped.width;
+                shaped
+                    .paint(
+                        point(bounds.left() + gutter_x, bounds.top() + px(y)),
+                        line_height_px,
+                        gpui::TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+            }
         }
 
         for quad in prepaint.selection_quads.drain(..) {
@@ -1426,5 +1528,20 @@ impl Element for EditorElement {
             editor.last_bounds = Some(bounds);
             editor.last_line_height = line_height;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::word_range_at;
+
+    #[test]
+    fn word_selection_handles_words_punctuation_and_unicode() {
+        let text = "alpha beta, café";
+
+        assert_eq!(&text[word_range_at(text, 2)], "alpha");
+        assert_eq!(&text[word_range_at(text, 7)], "beta");
+        assert_eq!(&text[word_range_at(text, 10)], ", ");
+        assert_eq!(&text[word_range_at(text, text.len())], "café");
     }
 }

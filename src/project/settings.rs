@@ -1,20 +1,37 @@
 //! Workspace configuration and persistent user preferences.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::persistence::atomic_write;
 
 /// Root configuration settings for the Graf workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GrafSettings {
+    #[serde(default)]
     pub editor: EditorSettings,
+    #[serde(default)]
     pub ai: AiSettings,
+    #[serde(default)]
     pub canvas: CanvasSettings,
+    #[serde(default)]
     pub theme: ThemeSettings,
+    #[serde(default)]
+    pub layout: LayoutSettings,
 }
 
 impl GrafSettings {
+    pub fn default_path() -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("Graf")
+                .join("settings.json"),
+        )
+    }
+
     /// Loads settings from JSON string or falls back to defaults.
     pub fn from_json(json: &str) -> Self {
         serde_json::from_str(json).unwrap_or_default()
@@ -43,6 +60,23 @@ impl GrafSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LayoutSettings {
+    pub sidebar_width: f32,
+    pub preview_width: f32,
+    pub diagnostics_height: f32,
+}
+
+impl Default for LayoutSettings {
+    fn default() -> Self {
+        Self {
+            sidebar_width: 236.0,
+            preview_width: 460.0,
+            diagnostics_height: 180.0,
+        }
+    }
+}
+
 /// Editor display and behavior preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EditorSettings {
@@ -56,7 +90,7 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
-            font_size: 13.5,
+            font_size: 14.0,
             tab_size: 2,
             line_numbers: true,
             auto_compile_on_save: true,
@@ -122,7 +156,7 @@ mod tests {
     #[test]
     fn test_settings_serialization_and_defaults() {
         let settings = GrafSettings::default();
-        assert_eq!(settings.editor.font_size, 13.5);
+        assert_eq!(settings.editor.font_size, 14.0);
         assert_eq!(settings.editor.tab_size, 2);
         assert!(settings.editor.line_numbers);
         assert!(settings.canvas.grid_enabled);

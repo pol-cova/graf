@@ -50,17 +50,17 @@ impl FileKind {
         }
     }
 
-    /// Returns the display icon for this file kind.
-    pub fn icon(&self) -> &'static str {
+    /// Returns a compact label for this file kind.
+    pub fn label(&self) -> &'static str {
         match self {
-            Self::Latex => "📄",
-            Self::Typst => "⚡",
-            Self::Bibtex => "📚",
-            Self::Style => "⚙️",
-            Self::Image => "🖼️",
-            Self::Pdf => "📕",
-            Self::GrafCanvas => "🎨",
-            Self::Other => "📝",
+            Self::Latex => "TEX",
+            Self::Typst => "TYP",
+            Self::Bibtex => "BIB",
+            Self::Style => "STY",
+            Self::Image => "IMG",
+            Self::Pdf => "PDF",
+            Self::GrafCanvas => "GRF",
+            Self::Other => "",
         }
     }
 }
@@ -110,10 +110,53 @@ impl ProjectTree {
         &self.root_node
     }
 
+    pub fn file_paths(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        collect_file_paths(&self.root_node, &mut paths);
+        paths
+    }
+
     /// Returns the detected main root document (e.g. `main.tex`), if any.
     pub fn root_document(&self) -> Option<&Path> {
         self.root_document.as_deref()
     }
+
+    /// Toggles a directory in the project tree.
+    pub fn toggle_directory(&mut self, path: &Path) -> bool {
+        toggle_directory_node(&mut self.root_node, path)
+    }
+}
+
+fn collect_file_paths(node: &FileNode, paths: &mut Vec<PathBuf>) {
+    match node {
+        FileNode::Directory { children, .. } => {
+            for child in children {
+                collect_file_paths(child, paths);
+            }
+        }
+        FileNode::File { path, .. } => paths.push(path.clone()),
+    }
+}
+
+fn toggle_directory_node(node: &mut FileNode, path: &Path) -> bool {
+    let FileNode::Directory {
+        path: node_path,
+        is_expanded,
+        children,
+        ..
+    } = node
+    else {
+        return false;
+    };
+
+    if node_path == path {
+        *is_expanded = !*is_expanded;
+        return true;
+    }
+
+    children
+        .iter_mut()
+        .any(|child| toggle_directory_node(child, path))
 }
 
 fn scan_directory(dir: &Path) -> Vec<FileNode> {
@@ -250,12 +293,15 @@ mod tests {
         fs::write(dir.join("refs.bib"), "@article{key, title={Test}}").unwrap();
         fs::write(dir.join(".hidden"), "hidden").unwrap();
 
-        let tree = ProjectTree::scan(dir);
+        let mut tree = ProjectTree::scan(dir);
         assert_eq!(tree.root_document(), Some(dir.join("main.tex").as_path()));
+        assert!(tree.toggle_directory(&dir.join("sections")));
 
         if let FileNode::Directory { children, .. } = tree.root_node() {
             assert!(children.iter().any(|c| match c {
-                FileNode::Directory { name, .. } => name == "sections",
+                FileNode::Directory {
+                    name, is_expanded, ..
+                } => name == "sections" && *is_expanded,
                 _ => false,
             }));
             assert!(children.iter().any(|c| match c {

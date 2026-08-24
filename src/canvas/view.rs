@@ -38,7 +38,7 @@ impl CanvasTool {
             Self::Select => "↖",
             Self::Rectangle => "▢",
             Self::Ellipse => "◯",
-            Self::Arrow => "➔",
+            Self::Arrow => "→",
             Self::Line => "―",
             Self::Text => "T",
         }
@@ -495,7 +495,7 @@ impl CanvasView {
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.delete_selected(cx)),
                             )
-                            .child("🗑 Delete"),
+                            .child("Delete"),
                     )
                     // Zoom
                     .child(

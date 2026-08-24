@@ -103,23 +103,14 @@ impl PreviewView {
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_3()
                     .child(
                         div()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child(page_label),
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(theme::color(theme::TEXT))
+                            .child("PDF Preview"),
                     )
-                    .child(
-                        div()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("2× Retina"),
-                    ),
+                    .child(page_label),
             )
             .child(
                 div()
@@ -132,11 +123,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::color(theme::TEXT_MUTED))
                             .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.zoom_out(cx)),
@@ -149,11 +138,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::color(theme::TEXT_MUTED))
                             .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.reset_zoom(cx)),
@@ -166,11 +153,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
-                            .border_1()
-                            .border_color(theme::color(theme::BORDER))
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::color(theme::TEXT_MUTED))
                             .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.zoom_in(cx)),

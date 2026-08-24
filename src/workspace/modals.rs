@@ -26,11 +26,11 @@ impl Workspace {
         } else if is_cmd_palette {
             "Command Palette (⌘K)"
         } else if is_ai_assist {
-            "✨ AI Technical Writing Assistant (⌘I)"
+            "Writing Assistant  ⌘I"
         } else if is_settings {
-            "⚙️ Graf Settings & Preferences (⌘,)"
+            "Graf Settings  ⌘,"
         } else {
-            "🔍 AI Diff Review — Accept (⌘Enter) or Reject (Esc)"
+            "Review edit  Accept with ⌘Enter or reject with Esc"
         };
 
         let mut modal_content = div()
@@ -43,6 +43,10 @@ impl Workspace {
             .border_1()
             .border_color(theme::color(theme::BORDER))
             .shadow_lg()
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|_, _, _, cx| cx.stop_propagation()),
+            )
             .child(
                 div()
                     .flex()
@@ -67,14 +71,27 @@ impl Workspace {
                     ),
             );
 
+        if is_quick_open || is_cmd_palette {
+            modal_content = modal_content.child(
+                div()
+                    .h(px(34.0))
+                    .mx_3()
+                    .my_2()
+                    .rounded_xs()
+                    .bg(theme::color(theme::BG))
+                    .border_1()
+                    .border_color(theme::color(theme::BORDER))
+                    .overflow_hidden()
+                    .child(self.prompt_editor.clone()),
+            );
+        }
+
         if is_settings {
             if let ActiveModal::Settings(tab) = self.active_modal {
                 let tabs = [
                     (SettingsTab::General, "General"),
                     (SettingsTab::Editor, "Editor"),
-                    (SettingsTab::Ai, "AI & ACP"),
-                    (SettingsTab::Canvas, "Canvas"),
-                    (SettingsTab::Licenses, "About & Licenses"),
+                    (SettingsTab::Licenses, "About and Licenses"),
                 ];
 
                 let tab_header = div()
@@ -176,31 +193,61 @@ impl Workspace {
                                         div()
                                             .text_xs()
                                             .text_color(theme::color(theme::ACCENT_GREEN))
-                                            .child("✓ Active (.graf/recovery)"),
+                                            .child("Active (.graf/recovery)"),
                                     ),
                             );
                     }
                     SettingsTab::Editor => {
+                        let setting_button = || {
+                            div()
+                                .px_2()
+                                .py_1()
+                                .rounded_xs()
+                                .bg(theme::color(theme::BG_BAR))
+                                .border_1()
+                                .border_color(theme::color(theme::BORDER))
+                                .text_xs()
+                                .cursor_pointer()
+                                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                        };
+
                         settings_body = settings_body
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Editor Font Size:"))
+                                    .child(div().text_xs().child("Font size"))
                                     .child(
                                         div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child(format!(
-                                                "{:.1} px",
-                                                self.settings.editor.font_size
-                                            )),
+                                            .flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(
+                                                setting_button()
+                                                    .id("font-size-down")
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.adjust_editor_font_size(-1.0, cx);
+                                                        }),
+                                                    )
+                                                    .child("−"),
+                                            )
+                                            .child(div().w(px(64.0)).text_center().text_xs().child(
+                                                format!("{:.0} px", self.settings.editor.font_size),
+                                            ))
+                                            .child(
+                                                setting_button()
+                                                    .id("font-size-up")
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.adjust_editor_font_size(1.0, cx);
+                                                        }),
+                                                    )
+                                                    .child("+"),
+                                            ),
                                     ),
                             )
                             .child(
@@ -208,16 +255,16 @@ impl Workspace {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Tab Size:"))
+                                    .child(div().text_xs().child("Tab width"))
                                     .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
+                                        setting_button()
+                                            .id("tab-size-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.cycle_tab_size(cx);
+                                                }),
+                                            )
                                             .child(format!(
                                                 "{} spaces",
                                                 self.settings.editor.tab_size
@@ -229,15 +276,20 @@ impl Workspace {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Auto-compile on Save (⌘S):"))
+                                    .child(div().text_xs().child("Line numbers"))
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme::color(theme::ACCENT_GREEN))
-                                            .child(if self.settings.editor.auto_compile_on_save {
-                                                "✓ Enabled"
+                                        setting_button()
+                                            .id("line-numbers-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_line_numbers_setting(cx);
+                                                }),
+                                            )
+                                            .child(if self.settings.editor.line_numbers {
+                                                "On"
                                             } else {
-                                                "✗ Disabled"
+                                                "Off"
                                             }),
                                     ),
                             )
@@ -246,16 +298,38 @@ impl Workspace {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Debounce Compile Delay:"))
+                                    .child(div().text_xs().child("Auto compile while editing"))
                                     .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
+                                        setting_button()
+                                            .id("auto-compile-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_auto_compile_setting(cx);
+                                                }),
+                                            )
+                                            .child(if self.settings.editor.auto_compile_on_save {
+                                                "On"
+                                            } else {
+                                                "Off"
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(div().text_xs().child("Compile delay"))
+                                    .child(
+                                        setting_button()
+                                            .id("compile-delay-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.cycle_compile_debounce(cx);
+                                                }),
+                                            )
                                             .child(format!(
                                                 "{} ms",
                                                 self.settings.editor.compile_debounce_ms
@@ -263,119 +337,8 @@ impl Workspace {
                                     ),
                             );
                     }
-                    SettingsTab::Ai => {
-                        settings_body = settings_body
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Protocol Protocol:"))
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::ACCENT_BLUE))
-                                            .text_xs()
-                                            .text_color(theme::color(theme::ACCENT_BLUE))
-                                            .child("Agent Client Protocol (ACP v1)"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("ACP Agent Command:"))
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child(if self.settings.ai.acp_command.is_empty() {
-                                                "Built-in Local ACP Runtime".to_string()
-                                            } else {
-                                                self.settings.ai.acp_command.clone()
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Sampling Temperature:"))
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child(format!("{:.2}", self.settings.ai.temperature)),
-                                    ),
-                            );
-                    }
-                    SettingsTab::Canvas => {
-                        settings_body = settings_body
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Dot Grid Background:"))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme::color(theme::ACCENT_GREEN))
-                                            .child("✓ 20px Grid Enabled"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Snap to Grid on Drag:"))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme::color(theme::ACCENT_GREEN))
-                                            .child("✓ Snap Enabled"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Default Stroke Accent:"))
-                                    .child(
-                                        div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child(
-                                                self.settings.canvas.default_stroke_color.clone(),
-                                            ),
-                                    ),
-                            );
-                    }
                     SettingsTab::Licenses => {
-                        let licenses = crate::project::licenses::audited_licenses();
+                        let licenses = crate::project::licenses::direct_dependency_licenses();
                         let mut lic_div = div().flex().flex_col().gap_2();
 
                         lic_div = lic_div.child(
@@ -390,8 +353,8 @@ impl Workspace {
                                 )
                                 .child(
                                     div()
-                                        .text_color(theme::color(theme::ACCENT_BLUE))
-                                        .child("MIT License"),
+                                        .text_color(theme::color(theme::ACCENT_ORANGE))
+                                        .child("Apache-2.0"),
                                 ),
                         );
 
@@ -549,17 +512,17 @@ impl Workspace {
             let ai_ops = [
                 (
                     AiOperationKind::RewriteAcademic,
-                    "✨ Polish Academic Tone",
+                    "Polish Academic Tone",
                     "Rewrite buffer with formal tone & mathematical rigor",
                 ),
                 (
                     AiOperationKind::Shorten,
-                    "✂️ Shorten & Condense",
+                    "Shorten and Condense",
                     "Tighten prose while retaining formulas and key claims",
                 ),
                 (
                     AiOperationKind::Explain,
-                    "💡 Explain Section / Formula",
+                    "Explain Section or Formula",
                     "Generate clear walkthrough of selected technical concepts",
                 ),
                 (
@@ -567,14 +530,14 @@ impl Workspace {
                         message: "Auto-detected diagnostic".to_string(),
                         line: None,
                     },
-                    "🔧 Fix LaTeX Compiler Errors",
+                    "Fix LaTeX Compiler Errors",
                     "Analyze errors and apply automated syntax patch",
                 ),
                 (
                     AiOperationKind::GenerateDiagram {
                         prompt: "System Architecture Pipeline".to_string(),
                     },
-                    "🎨 Generate Vector Diagram (.graf)",
+                    "Generate Vector Diagram",
                     "Create structured vector scene from description",
                 ),
             ];
@@ -622,16 +585,13 @@ impl Workspace {
                     .child(
                         div()
                             .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child("Run ➔"),
+                            .child("Run"),
                     );
                 list = list.child(row);
             }
             modal_content = modal_content.child(list);
         } else if is_cmd_palette {
-            let filter = match &self.active_modal {
-                ActiveModal::CommandPalette(f) => f.to_lowercase(),
-                _ => String::new(),
-            };
+            let filter = self.prompt_editor.read(cx).text().to_lowercase();
 
             let commands = all_commands();
             let mut list = div()
@@ -702,10 +662,7 @@ impl Workspace {
             modal_content = modal_content.child(list);
         } else {
             // Quick Open list of project files
-            let filter = match &self.active_modal {
-                ActiveModal::QuickOpen(f) => f.to_lowercase(),
-                _ => String::new(),
-            };
+            let filter = self.prompt_editor.read(cx).text().to_lowercase();
 
             let mut list = div()
                 .id("quick-open-list")
@@ -714,15 +671,19 @@ impl Workspace {
                 .py_1()
                 .overflow_scroll();
 
-            for doc in &self.documents {
-                let title = doc.title().to_string();
+            for path in self.project_tree.file_paths() {
+                let title = path
+                    .strip_prefix(self.project_tree.root_path())
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
                 if !filter.is_empty() && !title.to_lowercase().contains(&filter) {
                     continue;
                 }
 
-                let doc_path = doc.path().map(Path::to_path_buf);
+                let row_id = title.clone();
                 let row = div()
-                    .id(format!("quick-open-doc-{}", doc.id().0))
+                    .id(format!("quick-open-{row_id}"))
                     .flex()
                     .items_center()
                     .gap_2()
@@ -730,19 +691,25 @@ impl Workspace {
                     .py_2()
                     .text_xs()
                     .text_color(theme::color(theme::TEXT))
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
                             this.active_modal = ActiveModal::None;
-                            if let Some(path) = doc_path.clone() {
-                                this.open_file(path, cx);
-                            }
+                            this.open_file(path.clone(), cx);
                             cx.notify();
                         }),
                     )
-                    .child("📄")
+                    .child(
+                        div()
+                            .w(px(32.0))
+                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .child(
+                                crate::project::tree::FileKind::from_path(Path::new(&title))
+                                    .label(),
+                            ),
+                    )
                     .child(title);
                 list = list.child(row);
             }

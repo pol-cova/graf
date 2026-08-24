@@ -1,9 +1,9 @@
 //! Central editor viewport and document tabs component.
 
-use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{Context, CursorStyle, IntoElement, ParentElement, Styled, div, prelude::*, px};
 use std::path::Path;
 
-use super::{ActiveViewKind, Workspace};
+use super::{ActiveViewKind, ResizingPanel, Workspace};
 use crate::project::tree::FileKind;
 use crate::ui::theme;
 
@@ -13,16 +13,43 @@ impl Workspace {
         let mut body = div().flex().flex_1().min_h_0();
 
         if self.sidebar_visible {
-            body = body.child(self.render_sidebar(cx));
+            body = body
+                .child(self.render_sidebar(cx))
+                .child(self.render_vertical_resize_handle(ResizingPanel::Sidebar, cx));
         }
 
         body = body.child(self.render_editor_and_diagnostics(cx));
 
         if self.preview_visible {
-            body = body.child(self.render_preview());
+            body = body
+                .child(self.render_vertical_resize_handle(ResizingPanel::Preview, cx))
+                .child(self.render_preview());
         }
 
         body
+    }
+
+    fn render_vertical_resize_handle(
+        &self,
+        panel: ResizingPanel,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id(match panel {
+                ResizingPanel::Sidebar => "sidebar-resize-handle",
+                ResizingPanel::Preview => "preview-resize-handle",
+                ResizingPanel::Diagnostics => "diagnostics-vertical-resize-handle",
+            })
+            .flex_none()
+            .w(px(5.0))
+            .h_full()
+            .bg(theme::color(theme::BORDER))
+            .cursor(CursorStyle::ResizeLeftRight)
+            .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, _, _, cx| this.begin_panel_resize(panel, cx)),
+            )
     }
 
     /// Center area with multi-document tab bar, Canvas view or Text editor, and problems drawer.
@@ -55,6 +82,8 @@ impl Workspace {
                 .items_center()
                 .gap_2()
                 .h_full()
+                .max_w(px(220.0))
+                .min_w_0()
                 .px_3()
                 .bg(if is_active {
                     theme::color(theme::TAB_ACTIVE)
@@ -62,7 +91,12 @@ impl Workspace {
                     theme::color(theme::BG_BAR)
                 })
                 .border_r_1()
-                .border_color(theme::color(theme::BORDER))
+                .border_t_1()
+                .border_color(if is_active {
+                    theme::color(theme::ACCENT_BLUE)
+                } else {
+                    theme::color(theme::BORDER)
+                })
                 .text_xs()
                 .text_color(if is_active {
                     theme::color(theme::TEXT)
@@ -80,9 +114,9 @@ impl Workspace {
                 .child(
                     div()
                         .text_color(theme::color(theme::ACCENT_BLUE))
-                        .child(FileKind::from_path(Path::new(&title)).icon()),
+                        .child(FileKind::from_path(Path::new(&title)).label()),
                 )
-                .child(title)
+                .child(div().flex_1().min_w_0().truncate().child(title))
                 .child(if is_dirty {
                     div()
                         .text_color(theme::color(theme::ACCENT_ORANGE))
@@ -153,7 +187,12 @@ impl Workspace {
                                 .flex()
                                 .items_center()
                                 .gap_2()
-                                .child(item.kind.icon())
+                                .child(
+                                    div()
+                                        .w(px(32.0))
+                                        .text_color(theme::color(theme::ACCENT_BLUE))
+                                        .child(item.kind.label()),
+                                )
                                 .child(
                                     div()
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -185,9 +224,10 @@ impl Workspace {
     pub fn render_preview(&self) -> impl IntoElement {
         div()
             .flex()
-            .flex_1()
+            .flex_none()
             .flex_col()
-            .min_w(px(360.0))
+            .w(px(self.preview_width))
+            .min_w(px(320.0))
             .bg(theme::color(theme::BG_SURFACE))
             .border_l_1()
             .border_color(theme::color(theme::BORDER))
