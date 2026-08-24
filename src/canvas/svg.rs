@@ -1,8 +1,5 @@
-//! Zero-dependency native SVG export engine (spec §M4.10).
-
 use crate::canvas::scene::{CanvasDocument, ElementKind, StrokeStyle};
 
-/// Exports a [`CanvasDocument`] to clean, standalone SVG markup.
 pub fn export_to_svg(doc: &CanvasDocument) -> String {
     let padding = 16.0;
     let (min_x, min_y, max_x, max_y) = doc.bounding_box().unwrap_or((0.0, 0.0, 400.0, 300.0));
@@ -17,7 +14,6 @@ pub fn export_to_svg(doc: &CanvasDocument) -> String {
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{vb_x:.1} {vb_y:.1} {vb_width:.1} {vb_height:.1}\" width=\"{vb_width:.1}\" height=\"{vb_height:.1}\">\n"
     ));
 
-    // Generate dynamic arrowhead markers for all stroke colors used in arrows
     let mut arrow_colors: Vec<String> = doc
         .elements
         .iter()

@@ -1,14 +1,12 @@
-//! Central editor viewport and document tabs component.
-
-use gpui::{Context, CursorStyle, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{Context, CursorStyle, IntoElement, ParentElement, Role, Styled, div, prelude::*, px};
 use std::path::Path;
 
 use super::{ActiveViewKind, ResizingPanel, Workspace};
 use crate::project::tree::FileKind;
+use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
 impl Workspace {
-    /// Three-column panel area: Files/Outline Sidebar | Center Canvas / Editor | Preview.
     pub fn render_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut body = div().flex().flex_1().min_h_0();
 
@@ -41,9 +39,9 @@ impl Workspace {
                 ResizingPanel::Diagnostics => "diagnostics-vertical-resize-handle",
             })
             .flex_none()
-            .w(px(5.0))
+            .w(px(3.0))
             .h_full()
-            .bg(theme::color(theme::BORDER))
+            .bg(theme::color(theme::BG_BAR))
             .cursor(CursorStyle::ResizeLeftRight)
             .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
             .on_mouse_down(
@@ -52,7 +50,6 @@ impl Workspace {
             )
     }
 
-    /// Center area with multi-document tab bar, Canvas view or Text editor, and problems drawer.
     pub fn render_editor_and_diagnostics(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut area = div()
             .flex()
@@ -61,7 +58,6 @@ impl Workspace {
             .min_w_0()
             .bg(theme::color(theme::BG));
 
-        // Tab bar
         let mut tab_bar = div()
             .flex()
             .flex_none()
@@ -78,6 +74,7 @@ impl Workspace {
 
             let tab = div()
                 .id(format!("tab-{}", doc.id().0))
+                .group("document-tab")
                 .flex()
                 .items_center()
                 .gap_2()
@@ -119,19 +116,59 @@ impl Workspace {
                 .child(div().flex_1().min_w_0().truncate().child(title))
                 .child(if is_dirty {
                     div()
-                        .text_color(theme::color(theme::ACCENT_ORANGE))
-                        .child("●")
+                        .id(format!("modified-tab-{idx}"))
+                        .relative()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .child(
+                            div()
+                                .w(px(6.0))
+                                .h(px(6.0))
+                                .rounded_full()
+                                .bg(theme::color(theme::TEXT_MUTED))
+                                .group_hover("document-tab", |style| style.invisible()),
+                        )
+                        .child(
+                            div()
+                                .id(format!("close-dirty-tab-{idx}"))
+                                .absolute()
+                                .inset_0()
+                                .invisible()
+                                .group_hover("document-tab", |style| style.visible())
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .role(Role::Button)
+                                .aria_label("Close modified document")
+                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .hover(|style| style.text_color(theme::color(theme::TEXT)))
+                                .on_mouse_down(
+                                    gpui::MouseButton::Left,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.close_tab(idx, cx);
+                                    }),
+                                )
+                                .child(div().w(px(13.0)).h(px(13.0)).child(icon(Icon::Close))),
+                        )
                 } else {
                     div()
+                        .id(format!("close-tab-{idx}"))
+                        .w(px(14.0))
+                        .text_center()
+                        .role(Role::Button)
+                        .aria_label("Close document")
                         .text_color(theme::color(theme::TEXT_MUTED))
-                        .hover(|s| s.text_color(theme::color(theme::TEXT)))
+                        .hover(|style| style.text_color(theme::color(theme::TEXT)))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
                                 this.close_tab(idx, cx);
                             }),
                         )
-                        .child("×")
+                        .child(div().w(px(13.0)).h(px(13.0)).child(icon(Icon::Close)))
                 });
 
             tab_bar = tab_bar.child(tab);
@@ -139,40 +176,63 @@ impl Workspace {
 
         area = area.child(tab_bar);
 
-        // Center Viewport: Vector Canvas vs Text Editor
         if self.active_view_kind == ActiveViewKind::Canvas {
             area = area.child(self.canvas.clone());
         } else {
-            // Find and Replace Bar (if open)
+            let mut editor_layer = div()
+                .relative()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(self.editor.clone());
+
             if self.find_bar_open {
-                area = area.child(self.render_find_bar(cx));
+                editor_layer = editor_layer.child(self.render_find_bar(cx));
             }
 
-            // Editor canvas
-            area = area.child(div().flex().flex_1().min_h_0().child(self.editor.clone()));
-
-            // Autocompletion Candidate List (if active)
             if self.completion_open && !self.completions.is_empty() {
+                let (anchor_x, anchor_y) = self.editor.read(cx).completion_anchor();
                 let mut comp_list = div()
                     .id("completion-popup")
+                    .role(Role::ListBox)
+                    .aria_label("Completions")
+                    .absolute()
+                    .left(px(anchor_x))
+                    .top(px(anchor_y))
                     .flex()
                     .flex_col()
-                    .max_h(px(180.0))
+                    .w(px(320.0))
+                    .max_h(px(220.0))
+                    .rounded_md()
                     .bg(theme::color(theme::BG_SURFACE))
-                    .border_t_1()
+                    .border_1()
                     .border_color(theme::color(theme::BORDER))
+                    .shadow_lg()
                     .overflow_scroll();
 
-                for item in &self.completions {
+                for (index, item) in self.completions.iter().enumerate() {
                     let item_clone = item.clone();
                     let row = div()
                         .id(format!("comp-row-{}", item.label))
+                        .role(Role::ListBoxOption)
+                        .aria_label(format!("{}: {}", item.label, item.detail))
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .px_3()
-                        .py_1p5()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
                         .text_xs()
+                        .border_l_2()
+                        .border_color(theme::color(if index == self.completion_selected {
+                            theme::ACCENT_BLUE
+                        } else {
+                            theme::BG_SURFACE
+                        }))
+                        .bg(if index == self.completion_selected {
+                            theme::color(theme::HOVER_BG)
+                        } else {
+                            theme::color(theme::BG_SURFACE)
+                        })
                         .text_color(theme::color(theme::TEXT))
                         .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
                         .cursor_pointer()
@@ -185,22 +245,29 @@ impl Workspace {
                         .child(
                             div()
                                 .flex()
+                                .flex_1()
+                                .min_w_0()
                                 .items_center()
                                 .gap_2()
                                 .child(
                                     div()
-                                        .w(px(32.0))
-                                        .text_color(theme::color(theme::ACCENT_BLUE))
+                                        .w(px(30.0))
+                                        .flex_none()
+                                        .text_color(theme::color(theme::TEXT_MUTED))
                                         .child(item.kind.label()),
                                 )
                                 .child(
                                     div()
+                                        .min_w_0()
+                                        .truncate()
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(item.label.clone()),
                                 ),
                         )
                         .child(
                             div()
+                                .max_w(px(120.0))
+                                .truncate()
                                 .text_color(theme::color(theme::TEXT_MUTED))
                                 .child(item.detail.clone()),
                         );
@@ -208,10 +275,11 @@ impl Workspace {
                     comp_list = comp_list.child(row);
                 }
 
-                area = area.child(comp_list);
+                editor_layer = editor_layer.child(comp_list);
             }
 
-            // Diagnostics Drawer (if open)
+            area = area.child(editor_layer);
+
             if self.diagnostics_drawer_open && !self.latest_diagnostics.is_empty() {
                 area = area.child(self.render_diagnostics_drawer(cx));
             }
@@ -220,7 +288,6 @@ impl Workspace {
         area
     }
 
-    /// Right preview pane showing rendered PDF document pages.
     pub fn render_preview(&self) -> impl IntoElement {
         div()
             .flex()

@@ -1,5 +1,3 @@
-//! GPUI Interactive Vector Canvas View (spec §M4.2–M4.8).
-
 use gpui::{
     Context, FocusHandle, Focusable, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Render, Window, div, prelude::*, px,
@@ -8,9 +6,9 @@ use gpui::{
 use crate::canvas::history::CanvasHistory;
 use crate::canvas::scene::{CanvasDocument, CanvasElement, ElementKind};
 use crate::canvas::svg::export_to_svg;
+use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
-/// Active drawing or selection tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasTool {
     Select,
@@ -45,7 +43,6 @@ impl CanvasTool {
     }
 }
 
-/// The GPUI interactive Canvas view component.
 pub struct CanvasView {
     focus_handle: FocusHandle,
     document: CanvasDocument,
@@ -58,47 +55,19 @@ pub struct CanvasView {
 }
 
 impl CanvasView {
-    /// Creates a new canvas view with initial sample shapes.
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut document = CanvasDocument::new();
-        // Sample starter diagram elements
-        document.add_element(CanvasElement::new_rectangle(
-            "elem-1", 120.0, 80.0, 160.0, 70.0, 6.0,
-        ));
-        document.add_element(CanvasElement::new_text(
-            "elem-2",
-            145.0,
-            105.0,
-            "Neural Encoder",
-            14.0,
-        ));
-        document.add_element(CanvasElement::new_arrow(
-            "elem-3", 280.0, 115.0, 360.0, 115.0,
-        ));
-        document.add_element(CanvasElement::new_rectangle(
-            "elem-4", 360.0, 80.0, 160.0, 70.0, 6.0,
-        ));
-        document.add_element(CanvasElement::new_text(
-            "elem-5",
-            385.0,
-            105.0,
-            "Attention Pool",
-            14.0,
-        ));
-
         Self {
             focus_handle: cx.focus_handle(),
-            document,
+            document: CanvasDocument::new(),
             history: CanvasHistory::new(),
             active_tool: CanvasTool::Select,
-            selected_element_id: Some("elem-1".to_string()),
+            selected_element_id: None,
             is_dragging: false,
             drag_start: None,
-            revision: 1,
+            revision: 0,
         }
     }
 
-    /// Loads document from `.graf` JSON text.
     pub fn load_from_json(&mut self, json: &str, cx: &mut Context<Self>) -> Result<(), String> {
         match CanvasDocument::from_json(json) {
             Ok(doc) => {
@@ -113,40 +82,33 @@ impl CanvasView {
         }
     }
 
-    /// Serializes document to `.graf` JSON text.
     pub fn save_to_json(&self) -> Result<String, String> {
         self.document
             .to_json()
             .map_err(|e| format!("Failed to serialize .graf: {e}"))
     }
 
-    /// Exports current scene to SVG string.
     pub fn export_svg(&self) -> String {
         export_to_svg(&self.document)
     }
 
-    /// Exports current scene to TikZ LaTeX code.
     pub fn export_tikz(&self) -> String {
         crate::canvas::tikz::export_to_tikz(&self.document)
     }
 
-    /// Returns a reference to the inner canvas document.
     pub fn document(&self) -> &CanvasDocument {
         &self.document
     }
 
-    /// Returns the document revision counter.
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
-    /// Sets the active tool.
     pub fn set_tool(&mut self, tool: CanvasTool, cx: &mut Context<Self>) {
         self.active_tool = tool;
         cx.notify();
     }
 
-    /// Undo last canvas action.
     pub fn undo(&mut self, cx: &mut Context<Self>) {
         if let Some(prev) = self.history.undo(self.document.clone()) {
             self.document = prev;
@@ -156,7 +118,6 @@ impl CanvasView {
         }
     }
 
-    /// Redo last undone canvas action.
     pub fn redo(&mut self, cx: &mut Context<Self>) {
         if let Some(next) = self.history.redo(self.document.clone()) {
             self.document = next;
@@ -166,19 +127,16 @@ impl CanvasView {
         }
     }
 
-    /// Zoom in by 10%.
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
         self.document.viewport.zoom = (self.document.viewport.zoom + 0.1).min(4.0);
         cx.notify();
     }
 
-    /// Zoom out by 10%.
     pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
         self.document.viewport.zoom = (self.document.viewport.zoom - 0.1).max(0.25);
         cx.notify();
     }
 
-    /// Reset zoom to 100%.
     pub fn reset_zoom(&mut self, cx: &mut Context<Self>) {
         self.document.viewport.zoom = 1.0;
         self.document.viewport.pan_x = 0.0;
@@ -186,7 +144,6 @@ impl CanvasView {
         cx.notify();
     }
 
-    /// Deletes the currently selected element.
     pub fn delete_selected(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.selected_element_id.take() {
             self.history.push_snapshot(self.document.clone());
@@ -355,7 +312,6 @@ impl Render for CanvasView {
 }
 
 impl CanvasView {
-    /// Canvas top toolbar with tools, undo/redo, and zoom controls.
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tools = [
             CanvasTool::Select,
@@ -425,7 +381,6 @@ impl CanvasView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    // Undo
                     .child(
                         div()
                             .id("canvas-undo-btn")
@@ -449,7 +404,6 @@ impl CanvasView {
                             )
                             .child("↶ Undo"),
                     )
-                    // Redo
                     .child(
                         div()
                             .id("canvas-redo-btn")
@@ -473,7 +427,6 @@ impl CanvasView {
                             )
                             .child("↷ Redo"),
                     )
-                    // Delete selected
                     .child(
                         div()
                             .id("canvas-delete-btn")
@@ -497,7 +450,6 @@ impl CanvasView {
                             )
                             .child("Delete"),
                     )
-                    // Zoom
                     .child(
                         div()
                             .flex()
@@ -519,7 +471,7 @@ impl CanvasView {
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.zoom_out(cx)),
                                     )
-                                    .child("−"),
+                                    .child(div().w(px(14.0)).h(px(14.0)).child(icon(Icon::Minus))),
                             )
                             .child(
                                 div()
@@ -555,13 +507,12 @@ impl CanvasView {
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.zoom_in(cx)),
                                     )
-                                    .child("+"),
+                                    .child(div().w(px(14.0)).h(px(14.0)).child(icon(Icon::Plus))),
                             ),
                     ),
             )
     }
 
-    /// Renders vector shapes in canvas viewport.
     fn render_viewport(&self) -> impl IntoElement {
         let zoom = self.document.viewport.zoom;
 
@@ -572,7 +523,6 @@ impl CanvasView {
             .size_full()
             .overflow_hidden();
 
-        // Render shapes
         for elem in &self.document.elements {
             let is_selected = self.selected_element_id.as_deref() == Some(&elem.id);
             let left = px(elem.x * zoom);

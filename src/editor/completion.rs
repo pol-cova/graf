@@ -1,8 +1,5 @@
-//! Context-aware LaTeX autocompletion engine (spec §M3.5–M3.7).
-
 use crate::project::bibtex::{BibtexIndex, LabelIndex};
 
-/// A single autocompletion candidate item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionItem {
     pub label: String,
@@ -11,7 +8,6 @@ pub struct CompletionItem {
     pub kind: CompletionKind,
 }
 
-/// Category of completion proposal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionKind {
     Citation,
@@ -21,7 +17,6 @@ pub enum CompletionKind {
 }
 
 impl CompletionKind {
-    /// Returns a compact label for this completion kind.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Citation => "CITE",
@@ -32,7 +27,6 @@ impl CompletionKind {
     }
 }
 
-/// Computes contextual completions for the cursor position in `buffer`.
 pub fn compute_completions(
     buffer_content: &str,
     cursor_offset: usize,
@@ -119,13 +113,15 @@ pub fn compute_completions(
 
     if let Some(slash_pos) = prefix.rfind('\\') {
         let after = &prefix[slash_pos + 1..];
-        if !after.contains(' ')
+        if after.chars().count() >= 2
+            && !after.contains(' ')
             && !after.contains('{')
             && !after.contains('}')
             && !after.contains('\n')
             && after.chars().all(|c| c.is_alphabetic())
         {
             let common_commands = [
+                ("begin", "Environment", "begin{}"),
                 ("section", "Section heading", "section{}"),
                 ("subsection", "Subsection heading", "subsection{}"),
                 ("subsubsection", "Subsubsection heading", "subsubsection{}"),
@@ -203,6 +199,27 @@ mod tests {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].label, "eq:maxwell");
         assert_eq!(completions[0].kind, CompletionKind::Reference);
+    }
+
+    #[test]
+    fn waits_for_two_command_characters() {
+        let bib = BibtexIndex::new();
+        let labels = LabelIndex::default();
+
+        assert!(compute_completions("\\", 1, &bib, &labels).is_empty());
+        assert!(compute_completions("\\b", 2, &bib, &labels).is_empty());
+    }
+
+    #[test]
+    fn completes_begin_command() {
+        let bib = BibtexIndex::new();
+        let labels = LabelIndex::default();
+        let content = "\\beg";
+
+        let completions = compute_completions(content, content.len(), &bib, &labels);
+
+        assert_eq!(completions[0].label, "\\begin");
+        assert_eq!(completions[0].insert_text, "in{}");
     }
 
     #[test]

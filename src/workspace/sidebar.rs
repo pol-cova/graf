@@ -1,14 +1,12 @@
-//! Left sidebar component with project file tree and document outline navigation.
-
 use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use super::{SidebarTab, Workspace};
 use crate::project::outline::{OutlineItem, parse_latex_outline};
 use crate::project::tree::FileNode;
+use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
 impl Workspace {
-    /// Left sidebar with toggleable Files tree and Document Outline tabs.
     pub fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_files = self.sidebar_tab == SidebarTab::Files;
 
@@ -112,7 +110,6 @@ impl Workspace {
         sidebar
     }
 
-    /// Renders the section outline items parsed from active editor document.
     pub fn render_outline_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let text = self.editor.read(cx).text().to_string();
         let items: Vec<OutlineItem> = parse_latex_outline(&text);
@@ -131,7 +128,7 @@ impl Workspace {
                     .py_2()
                     .text_xs()
                     .text_color(theme::color(theme::TEXT_MUTED))
-                    .child("No sections found in document."),
+                    .child("No headings"),
             );
         } else {
             for item in items {
@@ -170,7 +167,6 @@ impl Workspace {
         list
     }
 
-    /// Recursively renders a node in the project file tree.
     pub fn render_file_node(
         &self,
         node: &FileNode,
@@ -209,8 +205,13 @@ impl Workspace {
                         .child(
                             div()
                                 .w(px(12.0))
+                                .h(px(12.0))
                                 .text_color(theme::color(theme::TEXT_MUTED))
-                                .child(if *is_expanded { "⌄" } else { "›" }),
+                                .child(icon(if *is_expanded {
+                                    Icon::ChevronDown
+                                } else {
+                                    Icon::ChevronRight
+                                })),
                         )
                         .child(div().flex_1().min_w_0().truncate().child(name.clone())),
                 );

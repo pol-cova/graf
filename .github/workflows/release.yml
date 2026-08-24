@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake g++ libasound2-dev libfontconfig-dev libglib2.0-dev \
+            libssl-dev libvulkan1 libwayland-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libzstd-dev lld llvm pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Linux archive
+        run: |
+          cargo build --release
+          archive="graf-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          tar -czf "$archive" -C target/release graf -C ../.. README.md LICENSE
+          shasum -a 256 "$archive" > "${archive}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            graf-*-linux-x86_64.tar.gz
+            graf-*-linux-x86_64.tar.gz.sha256
+
+  release:
+    needs: linux
+    runs-on: macos-14
+    env:
+      GRAF_CODESIGN_IDENTITY: Developer ID Application
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+
+      - name: Require release credentials
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          for value in CERTIFICATE CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD TAP_TOKEN; do
+            test -n "${!value}" || { echo "Missing required secret: ${value}" >&2; exit 1; }
+          done
+
+      - name: Install signing certificate
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/certificate.p12"
+          keychain_path="$RUNNER_TEMP/graf-signing.keychain-db"
+          echo "$CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+
+      - name: Build, sign, and notarize
+        run: ./scripts/build_app.sh
+
+      - name: Create checksum
+        run: |
+          dmg="target/release/graf-${GITHUB_REF_NAME}-arm64.dmg"
+          shasum -a 256 "$dmg" > "${dmg}.sha256"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: target/release
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg="target/release/graf-${GITHUB_REF_NAME}-arm64.dmg"
+          linux="target/release/graf-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          gh release create "$GITHUB_REF_NAME" \
+            "$dmg" "${dmg}.sha256" "$linux" "${linux}.sha256" \
+            --verify-tag --generate-notes --title "graf ${GITHUB_REF_NAME}"
+
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          dmg="target/release/graf-${GITHUB_REF_NAME}-arm64.dmg"
+          checksum="$(shasum -a 256 "$dmg" | awk '{print $1}')"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/pol-cova/homebrew-tap.git" "$RUNNER_TEMP/homebrew-tap"
+          mkdir -p "$RUNNER_TEMP/homebrew-tap/Casks"
+          sed -E "s/sha256 .*/sha256 \"${checksum}\"/" scripts/homebrew_cask.rb > "$RUNNER_TEMP/homebrew-tap/Casks/graf.rb"
+          cd "$RUNNER_TEMP/homebrew-tap"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Casks/graf.rb
+          git commit -m "graf ${GITHUB_REF_NAME}"
+          git push

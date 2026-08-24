@@ -1,16 +1,10 @@
-//! Agent Client Protocol (ACP) specification implementation (https://github.com/agentclientprotocol/agent-client-protocol).
-//!
-//! Provides JSON-RPC 2.0 client and protocol types for connecting Graf to any ACP-compliant agent.
-
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Current supported Agent Client Protocol version.
 pub const ACP_PROTOCOL_VERSION: u32 = 1;
 
 static NEXT_RPC_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Standard JSON-RPC 2.0 Request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JsonRpcRequest<T> {
     pub jsonrpc: String,
@@ -30,7 +24,6 @@ impl<T: Serialize> JsonRpcRequest<T> {
     }
 }
 
-/// Standard JSON-RPC 2.0 Response.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JsonRpcResponse<T> {
     pub jsonrpc: String,
@@ -41,7 +34,6 @@ pub struct JsonRpcResponse<T> {
     pub error: Option<JsonRpcError>,
 }
 
-/// Standard JSON-RPC 2.0 Error.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JsonRpcError {
     pub code: i64,
@@ -50,7 +42,6 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
-/// `initialize` request params sent by client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct InitializeParams {
     pub protocol_version: u32,
@@ -67,7 +58,7 @@ pub struct ClientInfo {
 impl Default for ClientInfo {
     fn default() -> Self {
         Self {
-            name: "Graf".to_string(),
+            name: "graf".to_string(),
             version: "0.1.0".to_string(),
         }
     }
@@ -79,7 +70,6 @@ pub struct ClientCapabilities {
     pub terminal: bool,
 }
 
-/// `initialize` response returned by agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InitializeResult {
     pub protocol_version: u32,
@@ -99,34 +89,29 @@ pub struct AgentCapabilities {
     pub tool_calls: bool,
 }
 
-/// `session/new` request params.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SessionNewParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
 }
 
-/// `session/new` response result.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionNewResult {
     pub session_id: String,
 }
 
-/// Content block in `session/prompt`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text { text: String },
 }
 
-/// `session/prompt` request params.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionPromptParams {
     pub session_id: String,
     pub content: Vec<ContentBlock>,
 }
 
-/// `session/prompt` response result.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionPromptResult {
     pub response_text: String,
@@ -134,11 +119,9 @@ pub struct SessionPromptResult {
     pub stop_reason: Option<String>,
 }
 
-/// A connected ACP Client handler.
 pub struct AcpClient;
 
 impl AcpClient {
-    /// Encodes an initialize JSON-RPC message.
     pub fn build_initialize_message() -> String {
         let req = JsonRpcRequest::new(
             "initialize",
@@ -151,13 +134,11 @@ impl AcpClient {
         serde_json::to_string(&req).unwrap_or_default()
     }
 
-    /// Encodes a session/new JSON-RPC message.
     pub fn build_session_new_message(system_prompt: Option<String>) -> String {
         let req = JsonRpcRequest::new("session/new", SessionNewParams { system_prompt });
         serde_json::to_string(&req).unwrap_or_default()
     }
 
-    /// Encodes a session/prompt JSON-RPC message.
     pub fn build_prompt_message(
         session_id: impl Into<String>,
         prompt: impl Into<String>,
@@ -174,7 +155,6 @@ impl AcpClient {
         serde_json::to_string(&req).unwrap_or_default()
     }
 
-    /// Parses a JSON-RPC response message for prompt completion.
     pub fn parse_prompt_response(raw_json: &str) -> Result<String, String> {
         let resp: JsonRpcResponse<SessionPromptResult> = serde_json::from_str(raw_json)
             .map_err(|e| format!("Failed to parse ACP JSON-RPC response: {e}"))?;
@@ -233,7 +213,6 @@ mod tests {
         assert_eq!(parsed_req.method, "initialize");
         assert_eq!(parsed_req.params.protocol_version, ACP_PROTOCOL_VERSION);
 
-        // Error response handling
         let err_response = r#"{
             "jsonrpc": "2.0",
             "id": 2,

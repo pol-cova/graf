@@ -1,9 +1,6 @@
-//! Plugin manifest metadata and capability definitions.
-
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Capabilities declared and exported by a Graf plugin.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PluginCapability {
     Formatter { language: String },
@@ -12,7 +9,6 @@ pub enum PluginCapability {
     Exporter { target_format: String },
 }
 
-/// Metadata and manifest definition for a Graf extension / plugin.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginManifest {
     pub id: String,
@@ -25,12 +21,10 @@ pub struct PluginManifest {
 }
 
 impl PluginManifest {
-    /// Deserializes a manifest from JSON text.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
 
-    /// Serializes the manifest to formatted JSON text.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
@@ -47,7 +41,7 @@ mod tests {
             name: "Typst Auto-Formatter".to_string(),
             version: "1.0.0".to_string(),
             description: Some("Formats Typst markup using typstyle".to_string()),
-            author: Some("Graf Community".to_string()),
+            author: Some("graf community".to_string()),
             entrypoint: PathBuf::from("plugin.wasm"),
             capabilities: vec![
                 PluginCapability::Formatter {

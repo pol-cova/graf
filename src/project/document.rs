@@ -1,5 +1,3 @@
-//! Open document model, dirty state tracking, and disk persistence (spec §50–52).
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,30 +8,28 @@ use super::persistence::atomic_write;
 
 static NEXT_DOCUMENT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Unique identifier for an open document in the workspace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DocumentId(pub u64);
 
 impl DocumentId {
-    /// Generates a new unique document ID.
     pub fn next() -> Self {
         Self(NEXT_DOCUMENT_ID.fetch_add(1, Ordering::Relaxed))
     }
 }
 
-/// An open document managed by the workspace.
 pub struct Document {
     id: DocumentId,
     path: Option<PathBuf>,
     title: String,
     buffer: TextBuffer,
     saved_revision: u64,
+    saved_content: String,
 }
 
 impl Document {
-    /// Creates a new in-memory document with initial text.
     pub fn new_untitled(title: impl Into<String>, initial_text: impl Into<String>) -> Self {
-        let buffer = TextBuffer::from_text(initial_text);
+        let initial_text = initial_text.into();
+        let buffer = TextBuffer::from_text(initial_text.clone());
         let saved_rev = buffer.revision();
         Self {
             id: DocumentId::next(),
@@ -41,10 +37,10 @@ impl Document {
             title: title.into(),
             buffer,
             saved_revision: saved_rev,
+            saved_content: initial_text,
         }
     }
 
-    /// Opens a document from the filesystem.
     pub fn open(path: impl Into<PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
         let content = fs::read_to_string(&path)?;
@@ -54,7 +50,7 @@ impl Document {
             .unwrap_or("document")
             .to_string();
 
-        let buffer = TextBuffer::from_text(content);
+        let buffer = TextBuffer::from_text(content.clone());
         let saved_revision = buffer.revision();
 
         Ok(Self {
@@ -63,40 +59,48 @@ impl Document {
             title,
             buffer,
             saved_revision,
+            saved_content: content,
         })
     }
 
-    /// Returns the unique ID of the document.
     pub fn id(&self) -> DocumentId {
         self.id
     }
 
-    /// Returns the path of the document, if it exists on disk.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
-    /// Returns the title of the document.
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    /// Returns a reference to the text buffer.
     pub fn buffer(&self) -> &TextBuffer {
         &self.buffer
     }
 
-    /// Returns a mutable reference to the text buffer.
     pub fn buffer_mut(&mut self) -> &mut TextBuffer {
         &mut self.buffer
     }
 
-    /// Checks if the document has unsaved modifications.
     pub fn is_dirty(&self) -> bool {
         self.buffer.revision() != self.saved_revision
     }
 
-    /// Saves the document content back to its disk path atomically.
+    pub fn save_as(&mut self, path: impl Into<PathBuf>) -> std::io::Result<()> {
+        let path = path.into();
+        atomic_write(&path, self.buffer.content().as_bytes())?;
+        self.title = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("document")
+            .to_string();
+        self.path = Some(path);
+        self.saved_revision = self.buffer.revision();
+        self.saved_content = self.buffer.content().to_string();
+        Ok(())
+    }
+
     pub fn save(&mut self) -> std::io::Result<()> {
         let Some(path) = &self.path else {
             return Err(std::io::Error::new(
@@ -104,8 +108,15 @@ impl Document {
                 "Cannot save document without a path",
             ));
         };
+        let disk_content = fs::read_to_string(path)?;
+        if disk_content != self.saved_content {
+            return Err(std::io::Error::other(
+                "file changed on disk; reopen it before saving",
+            ));
+        }
         atomic_write(path, self.buffer.content().as_bytes())?;
         self.saved_revision = self.buffer.revision();
+        self.saved_content = self.buffer.content().to_string();
         Ok(())
     }
 }
@@ -125,18 +136,44 @@ mod tests {
         assert_eq!(doc.title(), "test.tex");
         assert!(!doc.is_dirty());
 
-        // Make an edit
         let len = doc.buffer().len();
         doc.buffer_mut().insert(len, "\\begin{document}\n");
         assert!(doc.is_dirty());
 
-        // Save
         doc.save().unwrap();
         assert!(!doc.is_dirty());
 
-        // Verify disk content
         let reloaded = fs::read_to_string(&file_path).unwrap();
         assert_eq!(reloaded, "\\documentclass{article}\n\\begin{document}\n");
+    }
+
+    #[test]
+    fn refuses_to_overwrite_external_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("notes.tex");
+        fs::write(&path, "first").unwrap();
+        let mut document = Document::open(&path).unwrap();
+        document.buffer_mut().insert(5, " local");
+        fs::write(&path, "external").unwrap();
+
+        let error = document.save().unwrap_err();
+
+        assert!(error.to_string().contains("changed on disk"));
+        assert_eq!(fs::read_to_string(path).unwrap(), "external");
+    }
+
+    #[test]
+    fn saves_untitled_document_to_a_new_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("notes.tex");
+        let mut document = Document::new_untitled("untitled.tex", "hello");
+
+        document.save_as(&path).unwrap();
+
+        assert_eq!(document.path(), Some(path.as_path()));
+        assert_eq!(document.title(), "notes.tex");
+        assert_eq!(fs::read_to_string(path).unwrap(), "hello");
+        assert!(!document.is_dirty());
     }
 
     #[test]

@@ -1,10 +1,7 @@
-//! Local Zotero library scanner and citation metadata provider.
-
 use std::path::PathBuf;
 
 use crate::project::bibtex::BibEntry;
 
-/// A bibliography item extracted from the local Zotero library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZoteroItem {
     pub key: String,
@@ -20,7 +17,6 @@ pub struct ZoteroItem {
 }
 
 impl ZoteroItem {
-    /// Formats the item as a standard BibTeX entry.
     pub fn to_bibtex(&self) -> String {
         let entry_type = if self.publication.is_some() {
             "article"
@@ -49,7 +45,6 @@ impl ZoteroItem {
         out
     }
 
-    /// Converts this item into a Graf [`BibEntry`].
     pub fn to_bib_entry(&self) -> BibEntry {
         BibEntry {
             key: self.citekey.clone(),
@@ -69,23 +64,19 @@ impl ZoteroItem {
     }
 }
 
-/// In-memory collection of indexed Zotero items.
 #[derive(Debug, Clone, Default)]
 pub struct ZoteroLibrary {
     pub items: Vec<ZoteroItem>,
 }
 
 impl ZoteroLibrary {
-    /// Creates a new empty library.
     pub fn new() -> Self {
         Self { items: Vec::new() }
     }
 
-    /// Scans standard local directories for Zotero databases and Better BibTeX auto-exports.
     pub fn scan_local_storage() -> Self {
         let mut lib = Self::new();
 
-        // Check common Better BibTeX export locations
         if let Some(home) = dirs::home_dir() {
             let candidates = [
                 home.join("Zotero/better-bibtex.bib"),
@@ -107,7 +98,6 @@ impl ZoteroLibrary {
         lib
     }
 
-    /// Parses exported Better BibTeX content into Zotero items.
     pub fn load_from_bibtex(&mut self, content: &str) {
         let entries = crate::project::bibtex::parse_bibtex_entries(content);
         for e in entries {
@@ -137,7 +127,6 @@ impl ZoteroLibrary {
         }
     }
 
-    /// Finds items whose citekey, title, or authors match a search query.
     pub fn search(&self, query: &str) -> Vec<&ZoteroItem> {
         let q = query.to_lowercase();
         self.items
@@ -151,7 +140,6 @@ impl ZoteroLibrary {
     }
 }
 
-// Minimal dirs helper fallback if dirs crate is not pulled directly
 mod dirs {
     use std::path::PathBuf;
 

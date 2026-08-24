@@ -1,10 +1,7 @@
-//! Zero-dependency native TikZ LaTeX export engine.
-
 use crate::canvas::scene::{CanvasDocument, ElementKind, StrokeStyle};
 
-/// Exports a [`CanvasDocument`] to clean, standalone LaTeX TikZ markup.
 pub fn export_to_tikz(doc: &CanvasDocument) -> String {
-    let scale = 0.04; // 1 pixel = 0.04 cm in TikZ coordinate space
+    let scale = 0.04;
 
     let mut tikz = String::new();
     tikz.push_str("% Requires: \\usepackage{tikz}\n");

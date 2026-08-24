@@ -1,10 +1,7 @@
-//! Sandboxed plugin runtime host and capability dispatcher.
-
 use std::path::PathBuf;
 
 use crate::plugins::manifest::{PluginCapability, PluginManifest};
 
-/// A loaded and registered plugin instance in the runtime.
 #[derive(Debug, Clone)]
 pub struct LoadedPlugin {
     pub manifest: PluginManifest,
@@ -12,21 +9,18 @@ pub struct LoadedPlugin {
     pub is_enabled: bool,
 }
 
-/// The plugin runtime manager responsible for discovery, loading, and event routing.
 #[derive(Debug, Clone, Default)]
 pub struct PluginHost {
     pub plugins: Vec<LoadedPlugin>,
 }
 
 impl PluginHost {
-    /// Creates a new empty plugin host.
     pub fn new() -> Self {
         Self {
             plugins: Vec::new(),
         }
     }
 
-    /// Registers a loaded plugin into the host registry.
     pub fn register_plugin(&mut self, manifest: PluginManifest, base_path: PathBuf) {
         if !self.plugins.iter().any(|p| p.manifest.id == manifest.id) {
             self.plugins.push(LoadedPlugin {
@@ -37,7 +31,6 @@ impl PluginHost {
         }
     }
 
-    /// Scans the local user directory `~/.graf/plugins/` for valid plugin manifests.
     pub fn scan_plugin_directory(&mut self) -> usize {
         let mut count = 0;
         if let Some(home) = dirs::home_dir() {
@@ -61,7 +54,6 @@ impl PluginHost {
         count
     }
 
-    /// Dispatches a formatting hook to any registered formatter plugin.
     pub fn dispatch_format(&self, lang: &str, text: &str) -> Option<String> {
         for plugin in &self.plugins {
             if !plugin.is_enabled {
@@ -77,7 +69,6 @@ impl PluginHost {
         None
     }
 
-    /// Lists all custom commands exposed by loaded plugins.
     pub fn list_commands(&self) -> Vec<(String, String)> {
         let mut cmds = Vec::new();
         for plugin in &self.plugins {

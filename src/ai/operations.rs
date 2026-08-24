@@ -1,24 +1,18 @@
-//! Structured technical-writing AI operations (spec §M5.3, §M5.4, §M5.6).
-
 use crate::ai::provider::{AiProvider, AiRequest};
 use crate::canvas::scene::CanvasDocument;
 
-/// Technical writing operation kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiOperationKind {
-    /// Polish prose to improve academic clarity, flow, and rigorous tone.
     RewriteAcademic,
-    /// Shorten and condense technical paragraphs.
     Shorten,
-    /// Explain mathematical notation or LaTeX environment.
     Explain,
-    /// Fix a compiler diagnostic error given surrounding LaTeX lines.
     FixDiagnostic {
         message: String,
         line: Option<usize>,
     },
-    /// Generate a vector diagram scene graph from natural language.
-    GenerateDiagram { prompt: String },
+    GenerateDiagram {
+        prompt: String,
+    },
 }
 
 impl AiOperationKind {
@@ -33,7 +27,6 @@ impl AiOperationKind {
     }
 }
 
-/// Executes a technical writing AI operation against the selected context.
 pub fn execute_operation(
     provider: &dyn AiProvider,
     kind: &AiOperationKind,
@@ -73,7 +66,6 @@ pub fn execute_operation(
     Ok(response.text.trim().to_string())
 }
 
-/// Parses an AI response into a valid [`CanvasDocument`] if possible.
 pub fn parse_canvas_response(response: &str) -> Result<CanvasDocument, String> {
     let cleaned = response
         .trim()

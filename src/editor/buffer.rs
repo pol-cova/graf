@@ -1,11 +1,7 @@
-//! Text buffer with operation-based undo/redo.
-
 use std::ops::Range;
 
-/// A unique revision counter. Increments on every content change.
 pub type Revision = u64;
 
-/// An atomic edit operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
     Insert {
@@ -18,7 +14,6 @@ pub enum Edit {
     },
 }
 
-/// A group of edits that form one undo step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
     edits: Vec<Edit>,
@@ -26,7 +21,6 @@ pub struct Transaction {
     cursor_after: usize,
 }
 
-/// A text buffer backed by a contiguous `String` with undo/redo history.
 pub struct TextBuffer {
     content: String,
     revision: Revision,
@@ -42,7 +36,6 @@ impl Default for TextBuffer {
 }
 
 impl TextBuffer {
-    /// Creates a new, empty buffer.
     pub fn new() -> Self {
         Self {
             content: String::new(),
@@ -53,7 +46,6 @@ impl TextBuffer {
         }
     }
 
-    /// Creates a buffer with initial content.
     pub fn from_text(text: impl Into<String>) -> Self {
         Self {
             content: text.into(),
@@ -64,7 +56,6 @@ impl TextBuffer {
         }
     }
 
-    /// Replaces the entire buffer contents and updates the revision.
     pub fn replace_all(&mut self, text: impl Into<String>) {
         self.content = text.into();
         self.revision += 1;
@@ -73,33 +64,27 @@ impl TextBuffer {
         self.pending = None;
     }
 
-    /// Returns the full content of the buffer.
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    /// Returns the current revision of the buffer.
     pub fn revision(&self) -> Revision {
         self.revision
     }
 
-    /// Returns the byte length of the content.
     pub fn len(&self) -> usize {
         self.content.len()
     }
 
-    /// Returns true if the buffer is empty.
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 
-    /// Returns the number of lines in the buffer (always at least 1).
     pub fn line_count(&self) -> usize {
         self.content.bytes().filter(|&b| b == b'\n').count() + 1
     }
 
-    /// Returns the byte range of the given line, including the newline if present.
     pub fn line_range(&self, line: usize) -> Option<Range<usize>> {
         if line >= self.line_count() {
             return None;
@@ -113,7 +98,6 @@ impl TextBuffer {
         Some(start..end)
     }
 
-    /// Returns the content of the given line, excluding the newline character(s).
     pub fn line_content(&self, line: usize) -> Option<&str> {
         let range = self.line_range(line)?;
         let mut text = &self.content[range];
@@ -126,7 +110,6 @@ impl TextBuffer {
         Some(text)
     }
 
-    /// Returns the line index that contains the given byte offset.
     pub fn line_of_offset(&self, offset: usize) -> usize {
         let offset = offset.min(self.content.len());
         self.content.as_bytes()[..offset]
@@ -135,7 +118,6 @@ impl TextBuffer {
             .count()
     }
 
-    /// Returns the byte offset at the start of the given line.
     pub fn line_start_offset(&self, line: usize) -> usize {
         if line == 0 {
             return 0;
@@ -147,7 +129,6 @@ impl TextBuffer {
             .unwrap_or(self.content.len())
     }
 
-    /// Inserts text at the given offset, records the edit, and bumps revision.
     pub fn insert(&mut self, offset: usize, text: &str) {
         if text.is_empty() {
             return;
@@ -174,7 +155,6 @@ impl TextBuffer {
         }
     }
 
-    /// Deletes the given byte range, records the edit, and bumps revision.
     pub fn delete(&mut self, range: Range<usize>) {
         if range.is_empty() {
             return;
@@ -200,7 +180,6 @@ impl TextBuffer {
         }
     }
 
-    /// Starts grouping edits into a transaction.
     pub fn begin_transaction(&mut self, cursor: usize) {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
@@ -215,7 +194,6 @@ impl TextBuffer {
         });
     }
 
-    /// Finishes grouping edits, pushes to undo stack, and clears redo stack.
     pub fn end_transaction(&mut self, cursor: usize) {
         if let Some(mut tx) = self.pending.take()
             && !tx.edits.is_empty()
@@ -226,7 +204,6 @@ impl TextBuffer {
         }
     }
 
-    /// Undoes the top transaction, returning the cursor position before the transaction.
     pub fn undo(&mut self) -> Option<usize> {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
@@ -254,7 +231,6 @@ impl TextBuffer {
         Some(cursor)
     }
 
-    /// Redoes the top transaction on the redo stack, returning the new cursor position.
     pub fn redo(&mut self) -> Option<usize> {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
@@ -462,8 +438,7 @@ mod tests {
     fn test_multibyte_utf8_fuzz_operations() {
         let mut buf = TextBuffer::new();
 
-        // Exercise CJK, accented text, and mathematical symbols.
-        let sample = "café Graf\nこんにちは世界\nFormula: ∑_{i=1}^n x_i\n";
+        let sample = "café graf\nこんにちは世界\nFormula: ∑_{i=1}^n x_i\n";
         buf.insert(0, sample);
         assert_eq!(buf.line_count(), 4);
 

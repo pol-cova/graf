@@ -1,18 +1,3 @@
-//! Workspace shell — the top-level layout for Graf.
-//!
-//! Features:
-//! - Multi-Engine compilation pipeline (LaTeX via Tectonic & Typst)
-//! - Project files tree & Document Outline navigation
-//! - Multi-document tabs with dirty tracking and Save
-//! - Native Vector Canvas View for `.graf` diagramming and auto SVG export
-//! - AI Technical Writing Assistant (⌘I) over Agent Client Protocol (ACP)
-//! - Interactive Settings Preferences Window (⌘,)
-//! - In-Editor Find & Replace bar (⌘F)
-//! - Quick Open modal (⌘P)
-//! - Command Palette (⌘K)
-//! - Syntax-highlighted editor with click-to-jump error problems drawer
-//! - Native PDF preview with zoom toolbar & 2x Retina rendering
-
 mod commands;
 mod diagnostics;
 mod editor_panel;
@@ -31,7 +16,7 @@ use log::{info, warn};
 
 use gpui::{
     Context, DebugFrameOverlayMode, Entity, FocusHandle, Focusable, KeyBinding, MouseMoveEvent,
-    MouseUpEvent, Render, Task, Window, actions, div, prelude::*,
+    MouseUpEvent, PathPromptOptions, Render, Task, Window, actions, div, prelude::*,
 };
 
 use crate::ai::diff::DiffReview;
@@ -45,7 +30,7 @@ use crate::compiler::engine::{CompileId, CompileRequest, DocumentEngine};
 use crate::compiler::tectonic::TectonicEngine;
 use crate::compiler::typst::TypstEngine;
 use crate::editor::find::FindState;
-use crate::editor::view::EditorView;
+use crate::editor::view::{EditorEvent, EditorView};
 use crate::preview::renderer::{NativePdfRenderer, PdfRenderer};
 use crate::preview::view::PreviewView;
 use crate::project::document::Document;
@@ -59,6 +44,7 @@ actions!(
     workspace,
     [
         Compile,
+        OpenFile,
         Save,
         CloseTab,
         ToggleSidebar,
@@ -71,12 +57,12 @@ actions!(
         Autocomplete,
         AiAssist,
         OpenSettings,
-        OpenLicenses,
+        OpenAbout,
         TogglePerformanceOverlay,
+        FocusEditor,
     ]
 );
 
-/// Registers workspace-level keybindings.
 pub fn register_bindings(cx: &mut gpui::App) {
     macro_rules! bind {
         ($cx:expr, [ $( ($key:expr, $action:expr), )* ]) => {
@@ -94,6 +80,7 @@ pub fn register_bindings(cx: &mut gpui::App) {
         [
             ("cmd-shift-b", Compile),
             ("cmd-r", Compile),
+            ("cmd-o", OpenFile),
             ("cmd-s", Save),
             ("cmd-w", CloseTab),
             ("cmd-f", ToggleFind),
@@ -110,22 +97,18 @@ pub fn register_bindings(cx: &mut gpui::App) {
     );
 }
 
-/// Sidebar view mode: Files vs Document Outline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTab {
     Files,
     Outline,
 }
 
-/// Settings window tab selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
-    General,
     Editor,
-    Licenses,
+    Build,
 }
 
-/// Diagnostics drawer filter selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticsFilter {
     All,
@@ -133,7 +116,6 @@ pub enum DiagnosticsFilter {
     Warnings,
 }
 
-/// Active center panel view mode: Text Editor vs Vector Canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveViewKind {
     Editor,
@@ -147,7 +129,6 @@ pub enum ResizingPanel {
     Diagnostics,
 }
 
-/// Active modal dialog in the workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
@@ -155,10 +136,11 @@ pub enum ActiveModal {
     CommandPalette(String),
     AiAssist(String),
     DiffReview(DiffReview),
+    ConfirmClose(usize),
     Settings(SettingsTab),
+    About,
 }
 
-/// The root workspace view composing the top bar, three-panel body, modals, and status bar.
 pub struct Workspace {
     pub(crate) project_tree: ProjectTree,
     pub(crate) documents: Vec<Document>,
@@ -186,17 +168,18 @@ pub struct Workspace {
     pub(crate) resizing_panel: Option<ResizingPanel>,
     pub(crate) workspace_menu_open: bool,
     pub(crate) latest_diagnostics: Vec<Diagnostic>,
+    pub(crate) workspace_error: Option<String>,
     pub(crate) bib_index: crate::project::bibtex::BibtexIndex,
     pub(crate) label_index: crate::project::bibtex::LabelIndex,
     pub(crate) completions: Vec<crate::editor::completion::CompletionItem>,
     pub(crate) completion_open: bool,
+    pub(crate) completion_selected: usize,
     pub(crate) find_state: FindState,
     pub(crate) find_bar_open: bool,
     pub(crate) active_modal: ActiveModal,
 }
 
 impl Workspace {
-    /// Creates a new workspace instance initialized with current working directory.
     pub fn new(cx: &mut Context<Self>) -> Self {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let project_tree = ProjectTree::scan(&current_dir);
@@ -210,15 +193,15 @@ impl Workspace {
             Document::new_untitled("main.tex", initial_text)
         };
 
-        let settings = GrafSettings::default_path()
-            .map(|path| GrafSettings::load_from_path(&path))
-            .unwrap_or_default();
+        let settings = GrafSettings::load_default();
         let editor_settings = settings.editor.clone();
         let is_typst = initial_doc.title().ends_with(".typ");
+        let is_plain_text = !is_typst && !initial_doc.title().ends_with(".tex");
         let initial_content = initial_doc.buffer().content().to_string();
         let editor = cx.new(|cx| {
             let mut editor = EditorView::with_text(cx, initial_content);
             editor.is_typst = is_typst;
+            editor.set_plain_text(is_plain_text, cx);
             editor.set_preferences(
                 editor_settings.font_size,
                 editor_settings.tab_size,
@@ -229,6 +212,8 @@ impl Workspace {
         });
         let prompt_editor = cx.new(|cx| {
             let mut editor = EditorView::with_text(cx, "");
+            editor.set_plain_text(true, cx);
+            editor.set_single_line(true);
             editor.set_preferences(13.0, 2, false, cx);
             editor
         });
@@ -251,6 +236,10 @@ impl Workspace {
         .detach();
         cx.observe(&prompt_editor, |this, prompt, cx| {
             this.on_prompt_changed(prompt, cx);
+        })
+        .detach();
+        cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
+            this.on_editor_event(*event, cx);
         })
         .detach();
 
@@ -281,10 +270,12 @@ impl Workspace {
             resizing_panel: None,
             workspace_menu_open: false,
             latest_diagnostics: Vec::new(),
+            workspace_error: None,
             bib_index: crate::project::bibtex::BibtexIndex::new(),
             label_index: crate::project::bibtex::LabelIndex::default(),
             completions: Vec::new(),
             completion_open: false,
+            completion_selected: 0,
             find_state: FindState::new(),
             find_bar_open: false,
             active_modal: ActiveModal::None,
@@ -295,7 +286,6 @@ impl Workspace {
         workspace
     }
 
-    /// Determines the active typesetting engine based on the active document format.
     pub fn active_engine(&self) -> EngineKind {
         if let Some(doc) = self.documents.get(self.active_doc_idx)
             && doc.title().ends_with(".typ")
@@ -305,8 +295,27 @@ impl Workspace {
         EngineKind::Latex
     }
 
-    /// Triggers context-aware autocompletion for citations, labels, and environments.
+    pub fn active_document_is_compilable(&self) -> bool {
+        self.documents
+            .get(self.active_doc_idx)
+            .is_some_and(|document| {
+                document.title().ends_with(".tex") || document.title().ends_with(".typ")
+            })
+    }
+
     pub fn trigger_autocomplete(&mut self, cx: &mut Context<Self>) {
+        if !self.documents[self.active_doc_idx]
+            .title()
+            .ends_with(".tex")
+        {
+            self.completions.clear();
+            self.completion_open = false;
+            self.editor
+                .update(cx, |editor, _| editor.set_completion_active(false));
+            cx.notify();
+            return;
+        }
+
         let (text, cursor) = {
             let ed = self.editor.read(cx);
             (ed.text().to_string(), ed.cursor_offset())
@@ -317,11 +326,15 @@ impl Workspace {
             &self.bib_index,
             &self.label_index,
         );
+        self.completions.truncate(8);
         self.completion_open = !self.completions.is_empty();
+        self.completion_selected = 0;
+        self.editor.update(cx, |editor, _| {
+            editor.set_completion_active(self.completion_open);
+        });
         cx.notify();
     }
 
-    /// Applies a selected autocompletion item.
     pub fn apply_completion(
         &mut self,
         item: &crate::editor::completion::CompletionItem,
@@ -332,10 +345,57 @@ impl Workspace {
             ed.insert_snippet(&insert, cx);
         });
         self.completion_open = false;
+        self.editor
+            .update(cx, |editor, _| editor.set_completion_active(false));
         cx.notify();
     }
 
-    /// Returns the focus handle for the workspace's editor.
+    fn on_editor_event(&mut self, event: EditorEvent, cx: &mut Context<Self>) {
+        match event {
+            EditorEvent::NextCompletion => {
+                if !self.completions.is_empty() {
+                    self.completion_selected =
+                        (self.completion_selected + 1) % self.completions.len();
+                }
+            }
+            EditorEvent::PreviousCompletion => {
+                if !self.completions.is_empty() {
+                    self.completion_selected = self
+                        .completion_selected
+                        .checked_sub(1)
+                        .unwrap_or(self.completions.len() - 1);
+                }
+            }
+            EditorEvent::AcceptCompletion => {
+                if let Some(item) = self.completions.get(self.completion_selected).cloned() {
+                    self.apply_completion(&item, cx);
+                    return;
+                }
+            }
+            EditorEvent::FindReferences => {
+                self.find_all_references(cx);
+                return;
+            }
+        }
+        cx.notify();
+    }
+
+    fn find_all_references(&mut self, cx: &mut Context<Self>) {
+        let Some(reference) = self.editor.read(cx).reference_at_cursor() else {
+            return;
+        };
+        let content = self.editor.read(cx).text().to_string();
+        self.find_state.set_query(reference.clone(), &content);
+        self.find_bar_open = true;
+        self.prompt_editor
+            .update(cx, |input, cx| input.set_input_text(reference, cx));
+        if let Some(matched) = self.find_state.next_match().cloned() {
+            self.editor
+                .update(cx, |editor, cx| editor.select_range(matched, cx));
+        }
+        cx.notify();
+    }
+
     pub fn editor_focus_handle(&self, cx: &Context<Self>) -> FocusHandle {
         self.editor.read(cx).focus_handle(cx)
     }
@@ -380,7 +440,7 @@ impl Workspace {
     }
 
     pub fn toggle_auto_compile_setting(&mut self, cx: &mut Context<Self>) {
-        self.settings.editor.auto_compile_on_save = !self.settings.editor.auto_compile_on_save;
+        self.settings.editor.auto_compile = !self.settings.editor.auto_compile;
         self.apply_editor_settings(cx);
     }
 
@@ -401,21 +461,20 @@ impl Workspace {
 
     pub fn toggle_performance_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = match window.debug_frame_overlay_mode() {
-            DebugFrameOverlayMode::Hidden => DebugFrameOverlayMode::Minimal,
-            DebugFrameOverlayMode::Minimal => DebugFrameOverlayMode::Full,
-            DebugFrameOverlayMode::Full => DebugFrameOverlayMode::Hidden,
+            DebugFrameOverlayMode::Hidden => DebugFrameOverlayMode::Full,
+            DebugFrameOverlayMode::Minimal | DebugFrameOverlayMode::Full => {
+                DebugFrameOverlayMode::Hidden
+            }
         };
         window.set_debug_frame_overlay_mode(mode);
         cx.notify();
     }
 
-    /// Toggles the left sidebar visibility.
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
         cx.notify();
     }
 
-    /// Toggles the right preview pane visibility.
     pub fn toggle_preview(&mut self, cx: &mut Context<Self>) {
         self.preview_visible = !self.preview_visible;
         cx.notify();
@@ -465,38 +524,44 @@ impl Workspace {
         }
     }
 
-    /// Toggles the diagnostics problems drawer.
     pub fn toggle_diagnostics(&mut self, cx: &mut Context<Self>) {
         self.diagnostics_drawer_open = !self.diagnostics_drawer_open;
         cx.notify();
     }
 
-    /// Toggles the Find & Replace bar.
     pub fn toggle_find(&mut self, cx: &mut Context<Self>) {
         self.find_bar_open = !self.find_bar_open;
         if self.find_bar_open {
-            let query = self.find_state.query.clone();
+            let query = self
+                .editor
+                .read(cx)
+                .selected_text()
+                .unwrap_or_else(|| self.find_state.query.clone());
+            let content = self.editor.read(cx).text().to_string();
+            self.find_state.set_query(query.clone(), &content);
             self.prompt_editor
-                .update(cx, |input, cx| input.set_text(query, cx));
+                .update(cx, |input, cx| input.set_input_text(query, cx));
         }
         cx.notify();
     }
 
-    /// Opens AI Assist action modal (⌘I).
     pub fn open_ai_assist(&mut self, cx: &mut Context<Self>) {
         self.active_modal = ActiveModal::AiAssist(String::new());
         cx.notify();
     }
 
-    /// Opens Settings modal (⌘,).
     pub fn open_settings(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.active_modal = ActiveModal::Settings(tab);
         cx.notify();
     }
 
-    /// Creates a new Typst document tab.
+    pub fn open_about(&mut self, cx: &mut Context<Self>) {
+        self.active_modal = ActiveModal::About;
+        cx.notify();
+    }
+
     pub fn new_typst_document(&mut self, cx: &mut Context<Self>) {
-        let initial_typst = "= Hello Typst\n#set page(paper: \"a4\")\n\nWelcome to Graf with first-class native Typst support.\n\n== Mathematical Formulations\nTypst math is fast and clean:\n$ E = m c^2 $\n$ integral_0^infinity e^(-x^2) dif x = sqrt(pi) / 2 $\n";
+        let initial_typst = "= Untitled\n\nStart writing here.\n";
         let doc_name = format!("document-{}.typ", self.documents.len() + 1);
         let doc = Document::new_untitled(&doc_name, initial_typst);
         self.documents.push(doc);
@@ -505,12 +570,12 @@ impl Workspace {
         self.editor.update(cx, |ed, cx| {
             ed.set_text(initial_typst, cx);
             ed.set_is_typst(true, cx);
+            ed.set_plain_text(false, cx);
         });
         cx.notify();
         self.trigger_compile(cx);
     }
 
-    /// Executes an AI technical writing operation.
     pub fn run_ai_operation(&mut self, op: AiOperationKind, cx: &mut Context<Self>) {
         let text = self.editor.read(cx).text().to_string();
 
@@ -554,7 +619,6 @@ impl Workspace {
         }
     }
 
-    /// Accepts staged AI diff review and writes changes to buffer.
     pub fn accept_diff_review(&mut self, cx: &mut Context<Self>) {
         if let ActiveModal::DiffReview(review) = &self.active_modal {
             let repl = review.replacement.clone();
@@ -567,9 +631,15 @@ impl Workspace {
         }
     }
 
-    /// Creates a new vector diagram canvas tab.
     pub fn new_canvas_diagram(&mut self, cx: &mut Context<Self>) {
-        let default_canvas_json = self.canvas.read(cx).save_to_json().unwrap_or_default();
+        let default_canvas_json = match self.canvas.read(cx).save_to_json() {
+            Ok(json) => json,
+            Err(error) => {
+                self.workspace_error = Some(format!("Could not create diagram: {error}"));
+                cx.notify();
+                return;
+            }
+        };
         let doc_name = format!("diagram-{}.graf", self.documents.len() + 1);
         let doc = Document::new_untitled(&doc_name, default_canvas_json);
         self.documents.push(doc);
@@ -578,29 +648,16 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Inserts a formatted academic table into the editor at cursor position.
     pub fn insert_table_template(&mut self, cx: &mut Context<Self>) {
         let is_typst = self.documents[self.active_doc_idx]
             .title()
             .ends_with(".typ");
         let mut table = crate::editor::table::TableData::new(3, 3);
         table.rows[0] = vec![
-            "Method".to_string(),
-            "Latency (ms)".to_string(),
-            "Accuracy (%)".to_string(),
+            "Column 1".to_string(),
+            "Column 2".to_string(),
+            "Column 3".to_string(),
         ];
-        table.rows[1] = vec![
-            "Baseline".to_string(),
-            "12.4".to_string(),
-            "89.5".to_string(),
-        ];
-        table.rows[2] = vec![
-            "Ours (Graf)".to_string(),
-            "1.2".to_string(),
-            "97.8".to_string(),
-        ];
-        table.caption = Some("Experimental Results on Benchmark Dataset".to_string());
-        table.label = Some("tab:results".to_string());
 
         let table_code = if is_typst {
             table.to_typst()
@@ -615,21 +672,18 @@ impl Workspace {
         self.trigger_compile(cx);
     }
 
-    /// Exports active vector canvas diagram to TikZ LaTeX code in clipboard.
     pub fn export_canvas_to_tikz(&mut self, cx: &mut Context<Self>) {
         let doc = self.canvas.read(cx).document();
         let tikz_code = crate::canvas::tikz::export_to_tikz(doc);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(tikz_code));
     }
 
-    /// Exports active vector canvas diagram to SVG markup in clipboard.
     pub fn export_canvas_to_svg(&mut self, cx: &mut Context<Self>) {
         let doc = self.canvas.read(cx).document();
         let svg_code = crate::canvas::svg::export_to_svg(doc);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(svg_code));
     }
 
-    /// Runs academic style linter on the active document and feeds warnings to diagnostics.
     pub fn lint_academic_style(&mut self, cx: &mut Context<Self>) {
         let is_typst = self.documents[self.active_doc_idx]
             .title()
@@ -659,7 +713,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Syncs local Zotero library entries into the citation autocompletion index.
     pub fn sync_zotero_library(&mut self, cx: &mut Context<Self>) {
         let zotero_lib = crate::project::zotero::ZoteroLibrary::scan_local_storage();
         for item in zotero_lib.items {
@@ -668,42 +721,41 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Scans ~/.graf/plugins for Wasm extensions and updates the plugin registry.
     pub fn scan_plugins(&mut self, cx: &mut Context<Self>) {
         let mut host = crate::plugins::host::PluginHost::new();
         let _ = host.scan_plugin_directory();
         cx.notify();
     }
 
-    /// Opens Quick Open modal (⌘P).
     pub fn open_quick_open(&mut self, cx: &mut Context<Self>) {
         self.prompt_editor
-            .update(cx, |input, cx| input.set_text("", cx));
+            .update(cx, |input, cx| input.set_input_text("", cx));
         self.active_modal = ActiveModal::QuickOpen(String::new());
         cx.notify();
     }
 
-    /// Opens Command Palette modal (⌘K).
     pub fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.prompt_editor
-            .update(cx, |input, cx| input.set_text("", cx));
+            .update(cx, |input, cx| input.set_input_text("", cx));
         self.active_modal = ActiveModal::CommandPalette(String::new());
         cx.notify();
     }
 
-    /// Closes any open modal dialog, completion list, or Find bar.
     pub fn close_modal(&mut self, cx: &mut Context<Self>) {
+        self.editor
+            .update(cx, |editor, cx| editor.dismiss_context_menu(cx));
         if self.active_modal != ActiveModal::None {
             self.active_modal = ActiveModal::None;
         } else if self.completion_open {
             self.completion_open = false;
+            self.editor
+                .update(cx, |editor, _| editor.set_completion_active(false));
         } else if self.find_bar_open {
             self.find_bar_open = false;
         }
         cx.notify();
     }
 
-    /// Jumps to a specific line in the editor and focuses it.
     pub fn jump_to_line(&mut self, line: usize, cx: &mut Context<Self>) {
         self.active_view_kind = ActiveViewKind::Editor;
         self.editor.update(cx, |editor, cx| {
@@ -712,7 +764,31 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Opens a file from path into a workspace tab.
+    pub fn open_file_picker(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Open".into()),
+        });
+        cx.spawn(async move |this, cx| match receiver.await {
+            Ok(Ok(Some(paths))) => {
+                for path in paths {
+                    this.update(cx, |this, cx| this.open_file(path, cx)).ok();
+                }
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |this, cx| {
+                    this.workspace_error = Some(format!("Could not open file picker: {error}"));
+                    cx.notify();
+                })
+                .ok();
+            }
+            _ => {}
+        })
+        .detach();
+    }
+
     pub fn open_file(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.sync_active_doc_from_editor(cx);
 
@@ -725,31 +801,48 @@ impl Workspace {
             return;
         }
 
-        if let Ok(doc) = Document::open(&path) {
-            let is_canvas = doc.title().ends_with(".graf");
-            let is_typst = doc.title().ends_with(".typ");
-            let content = doc.buffer().content().to_string();
-            self.documents.push(doc);
-            self.active_doc_idx = self.documents.len() - 1;
-
-            if is_canvas {
-                self.active_view_kind = ActiveViewKind::Canvas;
-                self.canvas.update(cx, |c, cx| {
-                    let _ = c.load_from_json(&content, cx);
-                });
-            } else {
-                self.active_view_kind = ActiveViewKind::Editor;
-                self.editor.update(cx, |editor, cx| {
-                    editor.set_text(content, cx);
-                    editor.set_is_typst(is_typst, cx);
-                });
+        let doc = match Document::open(&path) {
+            Ok(doc) => doc,
+            Err(error) => {
+                self.workspace_error = Some(format!(
+                    "Could not open {}: {error}",
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("file")
+                ));
+                cx.notify();
+                return;
             }
-            cx.notify();
-            self.trigger_compile(cx);
+        };
+
+        let is_canvas = doc.title().ends_with(".graf");
+        let is_typst = doc.title().ends_with(".typ");
+        let is_plain_text = !is_typst && !doc.title().ends_with(".tex");
+        let content = doc.buffer().content().to_string();
+        self.documents.push(doc);
+        self.active_doc_idx = self.documents.len() - 1;
+        self.workspace_error = None;
+
+        if is_canvas {
+            self.active_view_kind = ActiveViewKind::Canvas;
+            if let Err(error) = self
+                .canvas
+                .update(cx, |canvas, cx| canvas.load_from_json(&content, cx))
+            {
+                self.workspace_error = Some(error);
+            }
+        } else {
+            self.active_view_kind = ActiveViewKind::Editor;
+            self.editor.update(cx, |editor, cx| {
+                editor.set_text(content, cx);
+                editor.set_is_typst(is_typst, cx);
+                editor.set_plain_text(is_plain_text, cx);
+            });
         }
+        cx.notify();
+        self.trigger_compile(cx);
     }
 
-    /// Switches the active tab index.
     pub fn switch_tab(&mut self, idx: usize, cx: &mut Context<Self>) {
         if idx >= self.documents.len() || idx == self.active_doc_idx {
             return;
@@ -759,33 +852,46 @@ impl Workspace {
 
         let is_canvas = self.documents[idx].title().ends_with(".graf");
         let is_typst = self.documents[idx].title().ends_with(".typ");
+        let is_plain_text = !is_typst && !self.documents[idx].title().ends_with(".tex");
         if is_canvas {
             self.active_view_kind = ActiveViewKind::Canvas;
-            let content = self.documents[idx].buffer().content();
-            self.canvas.update(cx, |c, cx| {
-                let _ = c.load_from_json(content, cx);
-            });
+            let content = self.documents[idx].buffer().content().to_string();
+            if let Err(error) = self
+                .canvas
+                .update(cx, |canvas, cx| canvas.load_from_json(&content, cx))
+            {
+                self.workspace_error = Some(error);
+            }
         } else {
             self.active_view_kind = ActiveViewKind::Editor;
             let content = self.documents[idx].buffer().content().to_string();
             self.editor.update(cx, |editor, cx| {
                 editor.set_text(content, cx);
                 editor.set_is_typst(is_typst, cx);
+                editor.set_plain_text(is_plain_text, cx);
             });
         }
         cx.notify();
         self.trigger_compile(cx);
     }
 
-    /// Closes the tab at index `idx`.
     pub fn close_tab(&mut self, idx: usize, cx: &mut Context<Self>) {
-        if self.documents.len() <= 1 {
+        if idx >= self.documents.len() || self.documents.len() <= 1 {
             return;
         }
-        if idx >= self.documents.len() {
+        self.sync_active_doc_from_editor(cx);
+        if self.documents[idx].is_dirty() {
+            self.active_modal = ActiveModal::ConfirmClose(idx);
+            cx.notify();
             return;
         }
+        self.force_close_tab(idx, cx);
+    }
 
+    pub fn force_close_tab(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx >= self.documents.len() || self.documents.len() <= 1 {
+            return;
+        }
         self.documents.remove(idx);
         if self.active_doc_idx >= self.documents.len() {
             self.active_doc_idx = self.documents.len() - 1;
@@ -797,13 +903,23 @@ impl Workspace {
         let is_typst = self.documents[self.active_doc_idx]
             .title()
             .ends_with(".typ");
+        let is_plain_text = !is_typst
+            && !self.documents[self.active_doc_idx]
+                .title()
+                .ends_with(".tex");
 
         if is_canvas {
             self.active_view_kind = ActiveViewKind::Canvas;
-            let content = self.documents[self.active_doc_idx].buffer().content();
-            self.canvas.update(cx, |c, cx| {
-                let _ = c.load_from_json(content, cx);
-            });
+            let content = self.documents[self.active_doc_idx]
+                .buffer()
+                .content()
+                .to_string();
+            if let Err(error) = self
+                .canvas
+                .update(cx, |canvas, cx| canvas.load_from_json(&content, cx))
+            {
+                self.workspace_error = Some(error);
+            }
         } else {
             self.active_view_kind = ActiveViewKind::Editor;
             let content = self.documents[self.active_doc_idx]
@@ -813,49 +929,96 @@ impl Workspace {
             self.editor.update(cx, |editor, cx| {
                 editor.set_text(content, cx);
                 editor.set_is_typst(is_typst, cx);
+                editor.set_plain_text(is_plain_text, cx);
             });
         }
         cx.notify();
         self.trigger_compile(cx);
     }
 
-    /// Saves the currently active document to disk. Auto-exports companion .svg for .graf files.
     pub fn save_active_document(&mut self, cx: &mut Context<Self>) {
-        if self.active_view_kind == ActiveViewKind::Canvas {
-            let json = self.canvas.read(cx).save_to_json().unwrap_or_default();
-            let svg = self.canvas.read(cx).export_svg();
-
-            if let Some(doc) = self.documents.get_mut(self.active_doc_idx) {
-                doc.buffer_mut().replace_all(json);
-                let saved = doc.save().is_ok();
-                if saved {
-                    if let Some(path) = doc.path() {
-                        let svg_path = path.with_extension("svg");
-                        let _ = std::fs::write(svg_path, svg);
-                    }
-                    cx.notify();
-                    if self.settings.editor.auto_compile_on_save {
-                        self.trigger_compile(cx);
-                    }
-                }
-            }
+        self.sync_active_doc_from_editor(cx);
+        let Some(doc) = self.documents.get(self.active_doc_idx) else {
+            return;
+        };
+        if doc.path().is_none() {
+            self.prompt_save_as(cx);
             return;
         }
 
-        self.sync_active_doc_from_editor(cx);
-        if let Some(doc) = self.documents.get_mut(self.active_doc_idx) {
-            let saved = doc.save().is_ok();
-            if saved {
+        let svg = (self.active_view_kind == ActiveViewKind::Canvas)
+            .then(|| self.canvas.read(cx).export_svg());
+        let result = self.documents[self.active_doc_idx]
+            .save()
+            .map_err(|error| error.to_string())
+            .and_then(|_| {
+                if let Some(svg) = svg {
+                    let path = self.documents[self.active_doc_idx]
+                        .path()
+                        .ok_or_else(|| "saved document has no path".to_string())?
+                        .with_extension("svg");
+                    std::fs::write(path, svg).map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            });
+
+        match result {
+            Ok(()) => {
+                self.workspace_error = None;
                 self.save_recovery_snapshot();
-                cx.notify();
-                if self.settings.editor.auto_compile_on_save {
+                if self.settings.editor.auto_compile {
                     self.trigger_compile(cx);
                 }
             }
+            Err(error) => self.workspace_error = Some(format!("Could not save file: {error}")),
         }
+        cx.notify();
     }
 
-    /// Saves periodic recovery snapshot of all unsaved buffers to disk.
+    fn prompt_save_as(&mut self, cx: &mut Context<Self>) {
+        let Some(doc) = self.documents.get(self.active_doc_idx) else {
+            return;
+        };
+        let document_id = doc.id();
+        let suggested_name = doc.title().to_string();
+        let receiver =
+            cx.prompt_for_new_path(self.project_tree.root_path(), Some(suggested_name.as_str()));
+
+        cx.spawn(async move |this, cx| match receiver.await {
+            Ok(Ok(Some(path))) => {
+                this.update(cx, |this, cx| {
+                    let Some(document) = this
+                        .documents
+                        .iter_mut()
+                        .find(|document| document.id() == document_id)
+                    else {
+                        return;
+                    };
+                    match document.save_as(path) {
+                        Ok(()) => {
+                            this.workspace_error = None;
+                            this.save_recovery_snapshot();
+                        }
+                        Err(error) => {
+                            this.workspace_error = Some(format!("Could not save file: {error}"));
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |this, cx| {
+                    this.workspace_error = Some(format!("Could not open save dialog: {error}"));
+                    cx.notify();
+                })
+                .ok();
+            }
+            _ => {}
+        })
+        .detach();
+    }
+
     pub fn save_recovery_snapshot(&self) {
         let entries: Vec<crate::project::recovery::RecoveryEntry> = self
             .documents
@@ -871,17 +1034,27 @@ impl Workspace {
             .collect();
 
         let recovery_dir = self.project_tree.root_path().join(".graf").join("recovery");
-        if entries.is_empty() {
-            let _ = crate::project::recovery::RecoveryJournal::clear_dir(&recovery_dir);
+        let result = if entries.is_empty() {
+            crate::project::recovery::RecoveryJournal::clear_dir(&recovery_dir)
         } else {
-            let journal = crate::project::recovery::RecoveryJournal::new(entries);
-            let _ = journal.save_to_dir(&recovery_dir);
+            crate::project::recovery::RecoveryJournal::new(entries)
+                .save_to_dir(&recovery_dir)
+                .map(|_| ())
+        };
+        if let Err(error) = result {
+            warn!("failed to update recovery journal: {error}");
         }
     }
 
     fn sync_active_doc_from_editor(&mut self, cx: &Context<Self>) {
         if self.active_view_kind == ActiveViewKind::Canvas {
-            let json = self.canvas.read(cx).save_to_json().unwrap_or_default();
+            let json = match self.canvas.read(cx).save_to_json() {
+                Ok(json) => json,
+                Err(error) => {
+                    self.workspace_error = Some(format!("Could not serialize diagram: {error}"));
+                    return;
+                }
+            };
             if let Some(doc) = self
                 .documents
                 .get_mut(self.active_doc_idx)
@@ -902,7 +1075,6 @@ impl Workspace {
         }
     }
 
-    /// Scans project .bib files from disk.
     pub fn reload_bib_files(&mut self) {
         let root = self.project_tree.root_path();
         if let Ok(entries) = std::fs::read_dir(root) {
@@ -918,13 +1090,11 @@ impl Workspace {
         }
     }
 
-    /// Parses in-memory editor labels for cross-reference autocompletion.
     pub fn reload_editor_labels(&mut self, cx: &Context<Self>) {
         let editor_text = self.editor.read(cx).text();
         self.label_index.parse_and_load(editor_text);
     }
 
-    /// Scans project .bib files and editor labels to update autocompletion indices.
     pub fn reload_bibtex_and_labels(&mut self, cx: &Context<Self>) {
         self.reload_bib_files();
         self.reload_editor_labels(cx);
@@ -941,6 +1111,13 @@ impl Workspace {
         }
 
         if submitted {
+            if self.find_bar_open
+                && let Some(matched) = self.find_state.next_match().cloned()
+            {
+                self.editor
+                    .update(cx, |editor, cx| editor.select_range(matched, cx));
+            }
+
             match self.active_modal.clone() {
                 ActiveModal::QuickOpen(_) => {
                     let query = query.to_lowercase();
@@ -969,19 +1146,22 @@ impl Workspace {
                 _ => {}
             }
             self.prompt_editor
-                .update(cx, |input, cx| input.set_text(query, cx));
+                .update(cx, |input, cx| input.set_input_text(query, cx));
         }
 
         cx.notify();
     }
 
-    /// Called whenever the editor buffer changes.
     fn on_editor_changed(&mut self, editor: Entity<EditorView>, cx: &mut Context<Self>) {
         let rev = editor.read(cx).revision();
         self.sync_active_doc_from_editor(cx);
         self.reload_editor_labels(cx);
+        self.trigger_autocomplete(cx);
 
-        if rev > self.controller.current_revision() && self.settings.editor.auto_compile_on_save {
+        if self.active_document_is_compilable()
+            && rev > self.controller.current_revision()
+            && self.settings.editor.auto_compile
+        {
             self.controller.on_source_edited(rev, Instant::now());
             cx.notify();
 
@@ -996,8 +1176,17 @@ impl Workspace {
         }
     }
 
-    /// Triggers an immediate compilation of current editor source using active engine.
     pub fn trigger_compile(&mut self, cx: &mut Context<Self>) {
+        if !self.active_document_is_compilable() {
+            self.controller.reset();
+            self.latest_diagnostics.clear();
+            self.preview.update(cx, |preview, cx| preview.clear(cx));
+            cx.notify();
+            return;
+        }
+
+        self.preview
+            .update(cx, |preview, cx| preview.set_rendering(cx));
         let (rev, text) = {
             let ed = self.editor.read(cx);
             (ed.revision(), ed.text().to_string())
@@ -1102,7 +1291,6 @@ impl Workspace {
         .detach();
     }
 
-    /// Dispatches a command palette action by unique identifier.
     pub fn dispatch_command_action(&mut self, id: u32, cx: &mut Context<Self>) {
         match id {
             1 => self.trigger_compile(cx),
@@ -1119,10 +1307,10 @@ impl Workspace {
             9 => self.open_ai_assist(cx),
             10 => self.open_settings(SettingsTab::Editor, cx),
             11 => self.new_typst_document(cx),
-            12 => self.open_settings(SettingsTab::Licenses, cx),
+            12 => self.open_about(cx),
             13 => {
                 self.save_recovery_snapshot();
-                self.open_settings(SettingsTab::General, cx);
+                self.open_settings(SettingsTab::Build, cx);
             }
             14 => self.insert_table_template(cx),
             15 => self.export_canvas_to_tikz(cx),
@@ -1134,8 +1322,16 @@ impl Workspace {
         }
     }
 
+    fn on_focus_editor(&mut self, _: &FocusEditor, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.editor.read(cx).focus_handle(cx), cx);
+    }
+
     fn on_compile(&mut self, _: &Compile, _window: &mut Window, cx: &mut Context<Self>) {
         self.trigger_compile(cx);
+    }
+
+    fn on_open_file(&mut self, _: &OpenFile, _window: &mut Window, cx: &mut Context<Self>) {
+        self.open_file_picker(cx);
     }
 
     fn on_save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1206,8 +1402,8 @@ impl Workspace {
         self.open_settings(SettingsTab::Editor, cx);
     }
 
-    fn on_open_licenses(&mut self, _: &OpenLicenses, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open_settings(SettingsTab::Licenses, cx);
+    fn on_open_about(&mut self, _: &OpenAbout, _window: &mut Window, cx: &mut Context<Self>) {
+        self.open_about(cx);
     }
 
     fn on_close_modal(&mut self, _: &CloseModal, window: &mut Window, cx: &mut Context<Self>) {
@@ -1243,7 +1439,9 @@ impl Render for Workspace {
                 gpui::MouseButton::Left,
                 cx.listener(Self::finish_panel_resize),
             )
+            .on_action(cx.listener(Self::on_focus_editor))
             .on_action(cx.listener(Self::on_compile))
+            .on_action(cx.listener(Self::on_open_file))
             .on_action(cx.listener(Self::on_save))
             .on_action(cx.listener(Self::on_close_tab))
             .on_action(cx.listener(Self::on_toggle_sidebar))
@@ -1254,7 +1452,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_ai_assist))
             .on_action(cx.listener(Self::on_open_settings))
-            .on_action(cx.listener(Self::on_open_licenses))
+            .on_action(cx.listener(Self::on_open_about))
             .on_action(cx.listener(Self::on_close_modal))
             .on_action(cx.listener(Self::on_autocomplete))
             .on_action(cx.listener(Self::on_toggle_performance_overlay))
@@ -1266,7 +1464,6 @@ impl Render for Workspace {
             root = root.child(self.render_workspace_menu(cx));
         }
 
-        // Render modal overlay if active
         if let Some(modal) = self.render_modal(cx) {
             root = root.child(modal);
         }

@@ -1,13 +1,11 @@
-//! Diagnostics problems drawer component for compiler errors and linter warnings.
-
 use gpui::{Context, CursorStyle, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
 use super::{DiagnosticsFilter, ResizingPanel, Workspace};
 use crate::compiler::diagnostics::{Diagnostic, Severity};
+use crate::ui::icons::{Icon, icon, icon_colored};
 use crate::ui::theme;
 
 impl Workspace {
-    /// Diagnostics drawer listing compilation errors with clickable jump-to-line links.
     pub fn render_diagnostics_drawer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut drawer = div()
             .id("diagnostics-drawer")
@@ -35,9 +33,9 @@ impl Workspace {
             div()
                 .id("diagnostics-resize-handle")
                 .flex_none()
-                .h(px(5.0))
+                .h(px(3.0))
                 .w_full()
-                .bg(theme::color(theme::BORDER))
+                .bg(theme::color(theme::BG_BAR))
                 .cursor(CursorStyle::ResizeUpDown)
                 .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
                 .on_mouse_down(
@@ -79,7 +77,7 @@ impl Workspace {
                                         cx.notify();
                                     }),
                                 )
-                                .child(format!("ALL ({})", self.latest_diagnostics.len())),
+                                .child(format!("All {}", self.latest_diagnostics.len())),
                         )
                         .child(
                             div()
@@ -100,7 +98,7 @@ impl Workspace {
                                         cx.notify();
                                     }),
                                 )
-                                .child(format!("ERRORS ({error_count})")),
+                                .child(format!("Errors {error_count}")),
                         )
                         .child(
                             div()
@@ -121,22 +119,26 @@ impl Workspace {
                                         cx.notify();
                                     }),
                                 )
-                                .child(format!("WARNINGS ({warn_count})")),
+                                .child(format!("Warnings {warn_count}")),
                         ),
                 )
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .w(px(24.0))
+                        .h(px(24.0))
                         .cursor_pointer()
                         .hover(|s| s.text_color(theme::color(theme::TEXT)))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(|this, _, _, cx| this.toggle_diagnostics(cx)),
                         )
-                        .child("×"),
+                        .child(div().w(px(14.0)).h(px(14.0)).child(icon(Icon::Close))),
                 ),
         );
 
-        // Filtered diagnostic list
         let filtered_diags: Vec<&Diagnostic> = self
             .latest_diagnostics
             .iter()
@@ -146,6 +148,19 @@ impl Workspace {
                 DiagnosticsFilter::Warnings => d.severity == Severity::Warning,
             })
             .collect();
+
+        if filtered_diags.is_empty() {
+            drawer = drawer.child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .text_color(theme::color(theme::TEXT_MUTED))
+                    .child("No problems"),
+            );
+        }
 
         for diag in filtered_diags {
             let is_error = diag.severity == Severity::Error;
@@ -170,17 +185,28 @@ impl Workspace {
                 )
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
                         .text_color(if is_error {
                             theme::color(theme::ACCENT_RED)
                         } else {
                             theme::color(theme::ACCENT_ORANGE)
                         })
-                        .child(if is_error { "● Error" } else { "▲ Warning" }),
+                        .child(div().w(px(12.0)).h(px(12.0)).child(icon_colored(
+                            Icon::Alert,
+                            theme::color(if is_error {
+                                theme::ACCENT_RED
+                            } else {
+                                theme::ACCENT_ORANGE
+                            }),
+                        )))
+                        .child(if is_error { "Error" } else { "Warning" }),
                 )
                 .child(
                     div()
                         .text_color(theme::color(theme::ACCENT_BLUE))
-                        .child(format!("Ln {line_num}:")),
+                        .child(format!("{line_num}:")),
                 )
                 .child(
                     div()

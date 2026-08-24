@@ -1,7 +1,3 @@
-//! Crash recovery and autosave journaling system (spec §7.4, M7).
-//!
-//! Preserves unsaved document buffers periodically to prevent data loss.
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::persistence::atomic_write;
 
-/// A snapshot entry of an unsaved document buffer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryEntry {
     pub title: String,
@@ -38,7 +33,6 @@ impl RecoveryEntry {
     }
 }
 
-/// The recovery journal state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RecoveryJournal {
     pub entries: Vec<RecoveryEntry>,
@@ -49,17 +43,14 @@ impl RecoveryJournal {
         Self { entries }
     }
 
-    /// Serializes journal to JSON.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Deserializes journal from JSON.
     pub fn from_json(json: &str) -> Option<Self> {
         serde_json::from_str(json).ok()
     }
 
-    /// Saves the current journal to the recovery file path atomically.
     pub fn save_to_dir(&self, dir: &Path) -> std::io::Result<PathBuf> {
         fs::create_dir_all(dir)?;
         let file_path = dir.join("session_recovery.json");
@@ -67,7 +58,6 @@ impl RecoveryJournal {
         Ok(file_path)
     }
 
-    /// Loads the latest recovery journal from directory, if present.
     pub fn load_from_dir(dir: &Path) -> Option<Self> {
         let file_path = dir.join("session_recovery.json");
         if file_path.exists() {
@@ -78,7 +68,6 @@ impl RecoveryJournal {
         }
     }
 
-    /// Removes the recovery journal once all buffers are cleanly saved.
     pub fn clear_dir(dir: &Path) -> std::io::Result<()> {
         let file_path = dir.join("session_recovery.json");
         if file_path.exists() {

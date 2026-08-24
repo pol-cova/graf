@@ -1,6 +1,3 @@
-//! LaTeX document outline parser and section tree (spec §M2.8).
-
-/// A section entry in the document outline hierarchy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineItem {
     pub level: usize,
@@ -9,7 +6,6 @@ pub struct OutlineItem {
 }
 
 impl OutlineItem {
-    /// Returns the indentation prefix or label for outline display.
     pub fn display_prefix(&self) -> &'static str {
         match self.level {
             0 => "§",
@@ -20,7 +16,6 @@ impl OutlineItem {
     }
 }
 
-/// Parses LaTeX source text into a flat list of structured outline items.
 pub fn parse_latex_outline(source: &str) -> Vec<OutlineItem> {
     let mut items = Vec::new();
 

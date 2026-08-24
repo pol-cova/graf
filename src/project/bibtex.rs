@@ -1,6 +1,3 @@
-//! BibTeX bibliography indexer and LaTeX label registry (spec §M3.4–M3.7).
-
-/// A parsed entry from a `.bib` bibliography file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BibEntry {
     pub key: String,
@@ -11,7 +8,6 @@ pub struct BibEntry {
 }
 
 impl BibEntry {
-    /// Returns a short label for completion pop-ups (e.g. "Attention Is All You Need (Vaswani et al., 2017)").
     pub fn display_summary(&self) -> String {
         let title = self.title.as_deref().unwrap_or("Untitled");
         let author = self.author.as_deref().unwrap_or("Unknown author");
@@ -25,33 +21,28 @@ impl BibEntry {
     }
 }
 
-/// In-memory index of parsed bibliography entries.
 #[derive(Debug, Clone, Default)]
 pub struct BibtexIndex {
     pub entries: Vec<BibEntry>,
 }
 
 impl BibtexIndex {
-    /// Creates a new empty index.
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
         }
     }
 
-    /// Parses `.bib` source text and populates the index.
     pub fn parse_and_load(&mut self, content: &str) {
         self.entries = parse_bibtex_entries(content);
     }
 
-    /// Adds a single entry to the index if key is unique.
     pub fn add_entry(&mut self, entry: BibEntry) {
         if !self.entries.iter().any(|e| e.key == entry.key) {
             self.entries.push(entry);
         }
     }
 
-    /// Searches entries matching `query` by cite key, title, or author.
     pub fn search(&self, query: &str) -> Vec<&BibEntry> {
         if query.is_empty() {
             return self.entries.iter().collect();
@@ -73,7 +64,6 @@ impl BibtexIndex {
     }
 }
 
-/// Parses a BibTeX formatted string into a vector of [`BibEntry`].
 pub fn parse_bibtex_entries(content: &str) -> Vec<BibEntry> {
     let mut entries = Vec::new();
 
@@ -144,19 +134,16 @@ fn parse_field_line(line: &str) -> Option<(String, String)> {
     Some((key, val.trim().to_string()))
 }
 
-/// Registry of LaTeX cross-reference labels (`\label{...}`).
 #[derive(Debug, Clone, Default)]
 pub struct LabelIndex {
     pub labels: Vec<String>,
 }
 
 impl LabelIndex {
-    /// Extracts all `\label{...}` targets from LaTeX content.
     pub fn parse_and_load(&mut self, content: &str) {
         self.labels = parse_latex_labels(content);
     }
 
-    /// Searches labels matching `query`.
     pub fn search(&self, query: &str) -> Vec<&str> {
         if query.is_empty() {
             return self.labels.iter().map(String::as_str).collect();
@@ -170,7 +157,6 @@ impl LabelIndex {
     }
 }
 
-/// Extracts all `\label{name}` occurrences from source text.
 pub fn parse_latex_labels(source: &str) -> Vec<String> {
     let mut labels = Vec::new();
     for line in source.lines() {
@@ -231,7 +217,6 @@ mod tests {
         assert_eq!(index.entries[1].key, "knuth1984texbook");
         assert_eq!(index.entries[1].title.as_deref(), Some("The TeXbook"));
 
-        // Search test
         let results = index.search("attention");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].key, "vaswani2017attention");

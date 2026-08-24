@@ -1,6 +1,3 @@
-//! Document statistics and conference page budget calculator.
-
-/// Pre-configured conference submission limits.
 #[allow(dead_code, clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConferenceProfile {
@@ -16,7 +13,6 @@ pub enum ConferenceProfile {
 }
 
 impl ConferenceProfile {
-    /// Returns the conference name.
     pub fn name(&self) -> &str {
         match self {
             Self::NeurIPS => "NeurIPS",
@@ -27,7 +23,6 @@ impl ConferenceProfile {
         }
     }
 
-    /// Maximum allowed main-body pages (excluding references/appendix).
     pub fn max_pages(&self) -> f32 {
         match self {
             Self::NeurIPS => 9.0,
@@ -38,7 +33,6 @@ impl ConferenceProfile {
         }
     }
 
-    /// Approximate words per publication page.
     pub fn words_per_page(&self) -> usize {
         match self {
             Self::NeurIPS | Self::ICML | Self::ICLR => 550,
@@ -48,7 +42,6 @@ impl ConferenceProfile {
     }
 }
 
-/// Comprehensive document statistics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocumentStats {
     pub word_count: usize,
@@ -60,7 +53,6 @@ pub struct DocumentStats {
 }
 
 impl DocumentStats {
-    /// Analyzes document text and computes academic metrics.
     pub fn compute(text: &str, is_typst: bool) -> Self {
         let mut words = 0;
         let mut char_count = 0;
@@ -73,25 +65,21 @@ impl DocumentStats {
                 continue;
             }
 
-            // Ignore full comment lines
             if (!is_typst && trimmed.starts_with('%')) || (is_typst && trimmed.starts_with("//")) {
                 continue;
             }
 
-            // Count math formulas
             equation_count += line.matches('$').count() / 2;
             if line.contains("\\begin{equation") || line.contains("\\begin{align") {
                 equation_count += 1;
             }
 
-            // Count citations
             if is_typst {
                 citation_count += line.matches('@').count();
             } else {
                 citation_count += line.matches("\\cite").count();
             }
 
-            // Word extraction (ignoring commands)
             for raw_word in line.split_whitespace() {
                 let clean = raw_word.trim_matches(|c: char| !c.is_alphanumeric());
                 if !clean.is_empty() && !clean.starts_with('\\') {
@@ -114,7 +102,6 @@ impl DocumentStats {
         }
     }
 
-    /// Returns a compact status bar summary (e.g. "1,240 words • ~2.3 pages / NeurIPS max 9.0").
     pub fn status_summary(&self, profile: &ConferenceProfile) -> String {
         let est_pages = self.word_count as f32 / profile.words_per_page() as f32;
         let max_p = profile.max_pages();

@@ -1,16 +1,11 @@
-//! Editor view — the GPUI component for multiline text editing.
-//!
-//! Implements high-performance text editing with syntax highlighting,
-//! word navigation, auto-closing pairs, comment toggling, and undo/redo.
-
 use std::ops::Range;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
-    ShapedLine, Style, TextRun, UTF16Selection, Window, actions, div, fill, point, prelude::*, px,
-    relative, rgba, size,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    Role, ScrollWheelEvent, ShapedLine, Style, TextRun, UTF16Selection, Window, actions, div, fill,
+    point, prelude::*, px, relative, rgba, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -59,7 +54,14 @@ actions!(
     ]
 );
 
-/// Register the editor key bindings matching Zed / macOS defaults.
+#[derive(Debug, Clone, Copy)]
+pub enum EditorEvent {
+    NextCompletion,
+    PreviousCompletion,
+    AcceptCompletion,
+    FindReferences,
+}
+
 pub fn register_bindings(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, Some("Editor")),
@@ -103,48 +105,39 @@ pub fn register_bindings(cx: &mut App) {
     ]);
 }
 
-/// The multiline text editor view.
 pub struct EditorView {
     focus_handle: FocusHandle,
     buffer: TextBuffer,
 
-    /// Byte offset of the cursor within the buffer.
     cursor: usize,
-    /// Selection as a byte range. When empty, start == end == cursor.
     selected_range: Range<usize>,
-    /// Whether selection was extended backwards.
     selection_reversed: bool,
 
-    /// IME marked (composing) text range.
     marked_range: Option<Range<usize>>,
 
-    /// Vertical scroll offset in pixels.
     scroll_offset: f32,
 
-    /// Is the mouse currently selecting?
     is_selecting: bool,
 
-    /// Cached shaped lines for the visible range.
     last_line_layouts: Vec<ShapedLine>,
-    /// The first visible line index in last render.
     last_first_line: usize,
-    /// Bounds of the text area from last render.
     last_bounds: Option<Bounds<Pixels>>,
-    /// Line height from last render.
     last_line_height: f32,
-    /// Target column (in pixels) for vertical movement to preserve horizontal position.
     goal_x: Option<f32>,
-    /// Compiler diagnostics for inline highlighting.
     diagnostics: Vec<crate::compiler::diagnostics::Diagnostic>,
-    /// Whether the active document uses Typst syntax.
     pub is_typst: bool,
+    plain_text: bool,
     font_size: f32,
     tab_size: usize,
     line_numbers: bool,
+    completion_active: bool,
+    context_menu_position: Option<(f32, f32)>,
+    single_line: bool,
 }
 
+impl EventEmitter<EditorEvent> for EditorView {}
+
 impl EditorView {
-    /// Sets whether Typst syntax highlighting is enabled.
     pub fn set_is_typst(&mut self, is_typst: bool, cx: &mut Context<Self>) {
         if self.is_typst != is_typst {
             self.is_typst = is_typst;
@@ -152,7 +145,13 @@ impl EditorView {
         }
     }
 
-    /// Create a new editor with initial text content.
+    pub fn set_plain_text(&mut self, plain_text: bool, cx: &mut Context<Self>) {
+        if self.plain_text != plain_text {
+            self.plain_text = plain_text;
+            cx.notify();
+        }
+    }
+
     pub fn with_text(cx: &mut Context<Self>, text: impl Into<String>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -170,10 +169,18 @@ impl EditorView {
             goal_x: None,
             diagnostics: Vec::new(),
             is_typst: false,
+            plain_text: false,
             font_size: 14.0,
             tab_size: 2,
             line_numbers: true,
+            completion_active: false,
+            context_menu_position: None,
+            single_line: false,
         }
+    }
+
+    pub fn set_single_line(&mut self, single_line: bool) {
+        self.single_line = single_line;
     }
 
     pub fn set_preferences(
@@ -189,7 +196,6 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Updates active diagnostics for inline gutter error markers.
     pub fn set_diagnostics(
         &mut self,
         diags: Vec<crate::compiler::diagnostics::Diagnostic>,
@@ -199,7 +205,6 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Computes dynamic gutter width in pixels to fit all line digits cleanly.
     pub fn gutter_width(&self) -> f32 {
         if !self.line_numbers {
             return 0.0;
@@ -209,7 +214,6 @@ impl EditorView {
         (digits as f32 * 9.0 + 26.0).max(48.0)
     }
 
-    /// Jumps the cursor to the specified 1-based line number and scrolls it into view.
     pub fn jump_to_line(&mut self, line: usize, cx: &mut Context<Self>) {
         let line_0 = line.saturating_sub(1);
         let offset = self.buffer.line_start_offset(line_0);
@@ -229,7 +233,6 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Returns the active cursor byte offset.
     pub fn cursor_offset(&self) -> usize {
         if self.selection_reversed {
             self.selected_range.start
@@ -239,6 +242,7 @@ impl EditorView {
     }
 
     fn insert_text(&mut self, text: &str) {
+        self.context_menu_position = None;
         self.buffer.begin_transaction(self.cursor);
 
         if !self.selected_range.is_empty() {
@@ -247,7 +251,6 @@ impl EditorView {
             self.selected_range = self.cursor..self.cursor;
         }
 
-        // Auto-close pairs for common LaTeX delimiters when typed
         let (insert_payload, move_delta) = match text {
             "{" => ("{}", 1),
             "(" => ("()", 1),
@@ -527,11 +530,19 @@ impl EditorView {
     }
 
     fn on_up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(-1, false, cx);
+        if self.completion_active {
+            cx.emit(EditorEvent::PreviousCompletion);
+        } else {
+            self.move_vertically(-1, false, cx);
+        }
     }
 
     fn on_down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(1, false, cx);
+        if self.completion_active {
+            cx.emit(EditorEvent::NextCompletion);
+        } else {
+            self.move_vertically(1, false, cx);
+        }
     }
 
     fn on_select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
@@ -736,16 +747,27 @@ impl EditorView {
         self.ensure_cursor_visible();
     }
 
-    fn on_enter(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
-        self.insert_text("\n");
-        self.ensure_cursor_visible();
-        cx.notify();
+    fn on_enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.completion_active {
+            cx.emit(EditorEvent::AcceptCompletion);
+        } else {
+            self.insert_text("\n");
+            self.ensure_cursor_visible();
+            cx.notify();
+            if self.single_line {
+                window.dispatch_action(Box::new(crate::workspace::FocusEditor), cx);
+            }
+        }
     }
 
     fn on_tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
-        self.insert_text(&" ".repeat(self.tab_size));
-        self.ensure_cursor_visible();
-        cx.notify();
+        if self.completion_active {
+            cx.emit(EditorEvent::AcceptCompletion);
+        } else {
+            self.insert_text(&" ".repeat(self.tab_size));
+            self.ensure_cursor_visible();
+            cx.notify();
+        }
     }
 
     fn on_paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
@@ -810,7 +832,19 @@ impl EditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.context_menu_position = None;
         window.focus(&self.focus_handle, cx);
+        if self.single_line {
+            if event.click_count >= 2 {
+                self.selected_range = 0..self.buffer.len();
+                self.cursor = self.buffer.len();
+                self.selection_reversed = false;
+                cx.notify();
+            } else {
+                self.move_to(self.buffer.len(), cx);
+            }
+            return;
+        }
         let offset = self.offset_for_position(event.position);
 
         match event.click_count {
@@ -836,6 +870,29 @@ impl EditorView {
                 }
             }
         }
+    }
+
+    fn on_context_menu(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus_handle, cx);
+        let offset = self.offset_for_position(event.position);
+        if !self.selected_range.contains(&offset) {
+            self.move_to(offset, cx);
+        }
+
+        let Some(bounds) = self.last_bounds else {
+            return;
+        };
+        let x = (event.position.x.as_f32() - bounds.left().as_f32())
+            .clamp(4.0, (bounds.size.width.as_f32() - 184.0).max(4.0));
+        let y = (event.position.y.as_f32() - bounds.top().as_f32())
+            .clamp(4.0, (bounds.size.height.as_f32() - 246.0).max(4.0));
+        self.context_menu_position = Some((x, y));
+        cx.notify();
     }
 
     fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -870,18 +927,15 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Returns the current 1-based (line, column) cursor position.
     pub fn cursor_line_col(&self) -> (usize, usize) {
         let (line, col) = self.line_col_for_offset(self.cursor_offset());
         (line + 1, col + 1)
     }
 
-    /// Returns the text content of the buffer.
     pub fn text(&self) -> &str {
         self.buffer.content()
     }
 
-    /// Replaces the entire buffer text with new content, resetting cursor and scroll.
     pub fn set_text(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
         self.buffer = TextBuffer::from_text(text);
         self.cursor = 0;
@@ -893,18 +947,92 @@ impl EditorView {
         cx.notify();
     }
 
-    /// Inserts completion snippet at the current cursor position.
+    pub fn set_input_text(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
+        self.set_text(text, cx);
+        self.cursor = self.buffer.len();
+        self.selected_range = self.cursor..self.cursor;
+        cx.notify();
+    }
+
     pub fn insert_snippet(&mut self, snippet: &str, cx: &mut Context<Self>) {
-        self.buffer.begin_transaction(self.cursor);
-        self.buffer.insert(self.cursor, snippet);
-        self.cursor += snippet.len();
+        let start = self.cursor;
+        self.buffer.begin_transaction(start);
+        if snippet.contains('}') && self.buffer.content()[start..].starts_with('}') {
+            self.buffer.delete(start..start + 1);
+        }
+        self.buffer.insert(start, snippet);
+        let cursor_in_snippet = snippet
+            .find("\n    \n")
+            .map(|index| index + 5)
+            .or_else(|| snippet.find("{}").map(|index| index + 1))
+            .unwrap_or(snippet.len());
+        self.cursor = start + cursor_in_snippet;
         self.selected_range = self.cursor..self.cursor;
         self.buffer.end_transaction(self.cursor);
         self.ensure_cursor_visible();
         cx.notify();
     }
 
-    /// Returns the current revision of the buffer.
+    pub fn dismiss_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.context_menu_position.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn set_completion_active(&mut self, active: bool) {
+        self.completion_active = active;
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        (!self.selected_range.is_empty())
+            .then(|| self.buffer.content()[self.selected_range.clone()].to_string())
+    }
+
+    pub fn reference_at_cursor(&self) -> Option<String> {
+        if !self.selected_range.is_empty() {
+            let selected = self.buffer.content()[self.selected_range.clone()].trim();
+            return (!selected.is_empty()).then(|| selected.to_string());
+        }
+
+        let content = self.buffer.content();
+        let allowed = |character: char| {
+            character.is_alphanumeric() || matches!(character, '_' | ':' | '-' | '.')
+        };
+        let mut start = self.cursor.min(content.len());
+        while start > 0 {
+            let Some((previous, character)) = content[..start].char_indices().next_back() else {
+                break;
+            };
+            if !allowed(character) {
+                break;
+            }
+            start = previous;
+        }
+        let mut end = self.cursor.min(content.len());
+        for character in content[end..].chars() {
+            if !allowed(character) {
+                break;
+            }
+            end += character.len_utf8();
+        }
+        (start < end).then(|| content[start..end].to_string())
+    }
+
+    pub fn completion_anchor(&self) -> (f32, f32) {
+        let (line, column) = self.line_col_for_offset(self.cursor);
+        let visible_line = line.saturating_sub(self.last_first_line);
+        let x = self
+            .last_line_layouts
+            .get(visible_line)
+            .map_or(0.0, |layout| layout.x_for_index(column).as_f32());
+        let y = line as f32 * self.last_line_height - self.scroll_offset + self.last_line_height;
+        let desired_x = self.gutter_width() + TEXT_PADDING + x;
+        let max_x = self.last_bounds.map_or(desired_x, |bounds| {
+            (bounds.size.width.as_f32() - 320.0).max(0.0)
+        });
+        (desired_x.min(max_x), y.max(0.0))
+    }
+
     pub fn revision(&self) -> u64 {
         self.buffer.revision()
     }
@@ -952,14 +1080,21 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
     start..end
 }
 
-/// Left padding inside the text area.
 const TEXT_PADDING: f32 = 14.0;
 
 impl Render for EditorView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let single_line_content = self.buffer.content().to_string();
+        let single_line_focused = self.focus_handle.is_focused(window);
+        let mut root = div()
             .id("editor-view")
             .key_context("Editor")
+            .role(Role::TextInput)
+            .aria_label(if self.single_line {
+                "Search"
+            } else {
+                "Document editor"
+            })
             .track_focus(&self.focus_handle)
             .font_family("Menlo")
             .text_size(px(self.font_size))
@@ -1001,20 +1136,194 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::on_redo))
             .on_action(cx.listener(Self::on_show_character_palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_context_menu))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .cursor(CursorStyle::IBeam)
+            .relative()
             .flex()
             .flex_1()
             .flex_col()
             .min_w_0()
+            .overflow_hidden()
             .bg(theme::color(theme::BG))
-            .text_color(theme::color(theme::TEXT))
-            .child(EditorElement {
+            .text_color(theme::color(theme::TEXT));
+
+        if self.single_line {
+            root = root.child(SingleLineInputElement {
                 editor: cx.entity(),
-            })
+            });
+            root = root.child(
+                div()
+                    .absolute()
+                    .left(px(10.0))
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_xs()
+                    .text_color(theme::color(theme::TEXT))
+                    .child(single_line_content)
+                    .when(single_line_focused, |line| {
+                        line.child(
+                            div()
+                                .w(px(1.0))
+                                .h(px(15.0))
+                                .ml(px(1.0))
+                                .bg(theme::color(theme::TEXT)),
+                        )
+                    }),
+            );
+        } else {
+            root = root.child(EditorElement {
+                editor: cx.entity(),
+            });
+        }
+
+        if let Some((x, y)) = self.context_menu_position {
+            let menu_row = || {
+                div()
+                    .w_full()
+                    .px_3()
+                    .py_1p5()
+                    .text_xs()
+                    .text_color(theme::color(theme::TEXT))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+            };
+            let separator = || div().h(px(1.0)).my_1().bg(theme::color(theme::BORDER));
+
+            root = root.child(
+                div()
+                    .id("editor-context-menu")
+                    .role(Role::Menu)
+                    .aria_label("Editor actions")
+                    .absolute()
+                    .left(px(x))
+                    .top(px(y))
+                    .w(px(180.0))
+                    .py_1()
+                    .rounded_xs()
+                    .border_1()
+                    .border_color(theme::color(theme::BORDER))
+                    .bg(theme::color(theme::BG_SURFACE))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _, _, cx| cx.stop_propagation()),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-undo")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_undo(&Undo, window, cx);
+                                }),
+                            )
+                            .child("Undo"),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-redo")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_redo(&Redo, window, cx);
+                                }),
+                            )
+                            .child("Redo"),
+                    )
+                    .child(separator())
+                    .child(
+                        menu_row()
+                            .id("context-cut")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_cut(&Cut, window, cx);
+                                }),
+                            )
+                            .child("Cut"),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-copy")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_copy(&Copy, window, cx);
+                                    cx.notify();
+                                }),
+                            )
+                            .child("Copy"),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-paste")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_paste(&Paste, window, cx);
+                                }),
+                            )
+                            .child("Paste"),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-select-all")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    this.on_select_all(&SelectAll, window, cx);
+                                }),
+                            )
+                            .child("Select All"),
+                    )
+                    .child(separator())
+                    .child(
+                        menu_row()
+                            .id("context-find")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.context_menu_position = None;
+                                    window.dispatch_action(
+                                        Box::new(crate::workspace::ToggleFind),
+                                        cx,
+                                    );
+                                }),
+                            )
+                            .child("Find"),
+                    )
+                    .child(
+                        menu_row()
+                            .id("context-find-references")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.context_menu_position = None;
+                                    cx.emit(EditorEvent::FindReferences);
+                                    cx.notify();
+                                }),
+                            )
+                            .child("Find All References"),
+                    ),
+            );
+        }
+
+        root
     }
 }
 
@@ -1207,8 +1516,74 @@ impl EntityInputHandler for EditorView {
     }
 }
 
-/// The custom GPUI element that handles layout, shaping, and painting of
-/// the editor text content. Each frame it shapes only the visible lines.
+struct SingleLineInputElement {
+    editor: Entity<EditorView>,
+}
+
+impl IntoElement for SingleLineInputElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for SingleLineInputElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(ElementId::Name("single-line-input".into()))
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.0).into();
+        style.size.height = relative(1.0).into();
+        style.flex_grow = 1.0;
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Self::PrepaintState {
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.editor.read(cx).focus_handle.clone();
+        window.handle_input(
+            &focus_handle,
+            ElementInputHandler::new(bounds, self.editor.clone()),
+            cx,
+        );
+    }
+}
+
 struct EditorElement {
     editor: Entity<EditorView>,
 }
@@ -1300,8 +1675,11 @@ impl Element for EditorElement {
                     .text_system()
                     .shape_line(" ".into(), font_size, &[run], None)
             } else {
-                let runs =
-                    crate::editor::syntax::highlight_line(content, style.font(), editor.is_typst);
+                let runs = if editor.plain_text {
+                    crate::editor::syntax::plain_text_line(content, style.font())
+                } else {
+                    crate::editor::syntax::highlight_line(content, style.font(), editor.is_typst)
+                };
                 window
                     .text_system()
                     .shape_line(content.into(), font_size, &runs, None)
@@ -1425,7 +1803,6 @@ impl Element for EditorElement {
             cx,
         );
 
-        // Paint current line highlight
         if let Some(active_line) = prepaint.active_line_quad.take() {
             window.paint_quad(active_line);
         }

@@ -1,27 +1,22 @@
-//! Compact workspace toolbar inspired by native code editors.
-
-use gpui::{Context, Focusable, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{Context, Focusable, IntoElement, ParentElement, Role, Styled, div, prelude::*, px};
 
 use super::{SettingsTab, Workspace};
 use crate::compiler::controller::CompileState;
+use crate::ui::icons::{Icon, icon, icon_colored};
 use crate::ui::theme;
 
 impl Workspace {
     pub fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_compiling = matches!(self.controller.state(), CompileState::Compiling { .. });
-        let active_title = self
-            .documents
-            .get(self.active_doc_idx)
-            .map(|document| document.title())
-            .unwrap_or("document");
-
+        let can_compile = self.active_document_is_compilable();
         div()
             .flex()
             .flex_none()
             .items_center()
             .justify_between()
-            .h(px(36.0))
-            .px_2()
+            .h(px(38.0))
+            .pl(px(78.0))
+            .pr_2()
             .bg(theme::color(theme::BG_BAR))
             .border_b_1()
             .border_color(theme::color(theme::BORDER))
@@ -29,60 +24,122 @@ impl Workspace {
                 div()
                     .flex()
                     .items_center()
-                    .min_w(px(220.0))
-                    .child(div().w(px(68.0)))
+                    .gap_1()
+                    .w(px(150.0))
                     .child(
                         div()
-                            .max_w(px(180.0))
-                            .truncate()
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child(active_title.to_string()),
-                    ),
-            )
-            .child(
-                div()
-                    .id("quick-open-pill")
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .h(px(26.0))
-                    .w(px(260.0))
-                    .rounded_xs()
-                    .bg(theme::color(theme::BG_SURFACE))
-                    .border_1()
-                    .border_color(theme::color(theme::BORDER))
-                    .text_xs()
-                    .text_color(theme::color(theme::TEXT_MUTED))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            this.open_quick_open(cx);
-                            window.focus(&this.prompt_editor.read(cx).focus_handle(cx), cx);
-                        }),
+                            .id("toolbar-project")
+                            .aria_label("Toggle project")
+                            .role(Role::Button)
+                            .w(px(26.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_xs()
+                            .text_sm()
+                            .text_color(if self.sidebar_visible {
+                                theme::color(theme::TEXT)
+                            } else {
+                                theme::color(theme::TEXT_MUTED)
+                            })
+                            .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)),
+                            )
+                            .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
+                                Icon::PanelLeft,
+                                theme::color(if self.sidebar_visible {
+                                    theme::TEXT
+                                } else {
+                                    theme::TEXT_MUTED
+                                }),
+                            ))),
                     )
-                    .child("Search project")
                     .child(
                         div()
-                            .flex_1()
-                            .text_right()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("⌘P"),
+                            .id("toolbar-preview")
+                            .aria_label("Toggle preview")
+                            .role(Role::Button)
+                            .w(px(26.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_xs()
+                            .text_sm()
+                            .text_color(if self.preview_visible {
+                                theme::color(theme::TEXT)
+                            } else {
+                                theme::color(theme::TEXT_MUTED)
+                            })
+                            .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.toggle_preview(cx)),
+                            )
+                            .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
+                                Icon::PanelRight,
+                                theme::color(if self.preview_visible {
+                                    theme::TEXT
+                                } else {
+                                    theme::TEXT_MUTED
+                                }),
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .id("toolbar-problems")
+                            .aria_label("Toggle problems")
+                            .role(Role::Button)
+                            .w(px(26.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_xs()
+                            .text_xs()
+                            .text_color(if !self.latest_diagnostics.is_empty() {
+                                theme::color(theme::ACCENT_RED)
+                            } else if self.diagnostics_drawer_open {
+                                theme::color(theme::TEXT)
+                            } else {
+                                theme::color(theme::TEXT_MUTED)
+                            })
+                            .cursor_pointer()
+                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.toggle_diagnostics(cx)),
+                            )
+                            .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
+                                Icon::PanelBottom,
+                                theme::color(if !self.latest_diagnostics.is_empty() {
+                                    theme::ACCENT_RED
+                                } else if self.diagnostics_drawer_open {
+                                    theme::TEXT
+                                } else {
+                                    theme::TEXT_MUTED
+                                }),
+                            ))),
                     ),
             )
+            .child(div().flex_1())
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_end()
                     .gap_1()
-                    .min_w(px(220.0))
+                    .w(px(150.0))
                     .child(
                         div()
                             .id("compile-btn")
+                            .aria_label("Compile document")
+                            .role(Role::Button)
                             .px_2()
                             .py_1()
                             .rounded_xs()
@@ -94,8 +151,10 @@ impl Workspace {
                             .text_xs()
                             .text_color(if is_compiling {
                                 theme::color(theme::ACCENT_ORANGE)
-                            } else {
+                            } else if can_compile {
                                 theme::color(theme::TEXT)
+                            } else {
+                                theme::color(theme::TEXT_MUTED)
                             })
                             .cursor_pointer()
                             .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
@@ -103,13 +162,18 @@ impl Workspace {
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.trigger_compile(cx)),
                             )
-                            .child(if is_compiling { "Building" } else { "Build" }),
+                            .child(if is_compiling { "Compiling" } else { "Compile" }),
                     )
                     .child(
                         div()
                             .id("workspace-menu-btn")
-                            .px_2()
-                            .py_1()
+                            .aria_label("Workspace menu")
+                            .role(Role::Button)
+                            .w(px(26.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .rounded_xs()
                             .bg(if self.workspace_menu_open {
                                 theme::color(theme::HOVER_BG)
@@ -124,7 +188,12 @@ impl Workspace {
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.toggle_workspace_menu(cx)),
                             )
-                            .child("..."),
+                            .child(
+                                div()
+                                    .w(px(15.0))
+                                    .h(px(15.0))
+                                    .child(icon(Icon::MoreHorizontal)),
+                            ),
                     ),
             )
     }
@@ -196,7 +265,7 @@ impl Workspace {
                                     this.toggle_sidebar(cx);
                                 }),
                             )
-                            .child("Project Panel")
+                            .child("Project")
                             .child(if self.sidebar_visible { "On" } else { "Off" }),
                     )
                     .child(
@@ -209,7 +278,7 @@ impl Workspace {
                                     this.toggle_preview(cx);
                                 }),
                             )
-                            .child("PDF Preview")
+                            .child("Preview")
                             .child(if self.preview_visible { "On" } else { "Off" }),
                     )
                     .child(
@@ -240,7 +309,7 @@ impl Workspace {
                                     this.toggle_performance_overlay(window, cx);
                                 }),
                             )
-                            .child("Performance Overlay")
+                            .child("Frame Timings")
                             .child("⌘⇧D"),
                     )
                     .child(
@@ -263,10 +332,10 @@ impl Workspace {
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
                                     this.workspace_menu_open = false;
-                                    this.open_settings(SettingsTab::Licenses, cx);
+                                    this.open_about(cx);
                                 }),
                             )
-                            .child("About and Licenses"),
+                            .child("About"),
                     ),
             )
     }

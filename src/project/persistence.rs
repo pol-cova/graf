@@ -1,7 +1,6 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-/// Replaces a file atomically after writing its complete contents beside it.
 pub(super) fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;

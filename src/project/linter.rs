@@ -1,6 +1,3 @@
-//! Zero-cloud local academic writing style and grammar linter.
-
-/// Category of style violation in technical writing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleCategory {
     PassiveVoice,
@@ -10,7 +7,6 @@ pub enum StyleCategory {
 }
 
 impl StyleCategory {
-    /// Returns a human-readable title for the category.
     pub fn title(self) -> &'static str {
         match self {
             Self::PassiveVoice => "Passive Voice",
@@ -21,7 +17,6 @@ impl StyleCategory {
     }
 }
 
-/// A specific style warning emitted by the linter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleWarning {
     pub line: usize,
@@ -33,7 +28,6 @@ pub struct StyleWarning {
     pub message: String,
 }
 
-/// Known wordy phrases and their concise replacements.
 static WORDY_PHRASES: &[(&str, &str)] = &[
     ("in order to", "to"),
     ("due to the fact that", "because"),
@@ -59,7 +53,6 @@ static WORDY_PHRASES: &[(&str, &str)] = &[
     ("subsequent to", "after"),
 ];
 
-/// Known weak or weasel words that degrade academic rigor.
 static WEASEL_WORDS: &[(&str, &str)] = &[
     ("very", "Omit or use a precise quantitative descriptor"),
     ("extremely", "Omit or specify exact magnitude"),
@@ -72,10 +65,8 @@ static WEASEL_WORDS: &[(&str, &str)] = &[
     ("kind of", "Use precise terminology"),
 ];
 
-/// Common irregular passive past participles following forms of "to be".
 static PASSIVE_BE_FORMS: &[&str] = &["is", "are", "was", "were", "been", "being", "be"];
 
-/// Checks a complete document text for academic style improvements.
 pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     let mut warnings = Vec::new();
 
@@ -84,7 +75,6 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
         let masked = mask_math_and_macros(raw_line, is_typst);
         let lower_masked = masked.to_lowercase();
 
-        // 1. Check for wordy phrases
         for &(phrase, replacement) in WORDY_PHRASES {
             let mut search_from = 0;
             while let Some(found_idx) = lower_masked[search_from..].find(phrase) {
@@ -105,7 +95,6 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
             }
         }
 
-        // 2. Check for weasel words
         for &(weasel, reason) in WEASEL_WORDS {
             let mut search_from = 0;
             while let Some(found_idx) = lower_masked[search_from..].find(weasel) {
@@ -126,36 +115,31 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
             }
         }
 
-        // 3. Check for passive voice patterns (e.g. "was observed", "is evaluated", "were performed")
         check_passive_voice(raw_line, &lower_masked, line_num, &mut warnings);
     }
 
     warnings
 }
 
-/// Masks math blocks `$ ... $`, comments `%`, and macros `\cite{...}` with spaces to avoid false positives.
 fn mask_math_and_macros(line: &str, is_typst: bool) -> String {
     let mut out: Vec<char> = line.chars().collect();
     let len = out.len();
     let mut i = 0;
 
-    // Mask comments to end of line
     if is_typst {
         if let Some(pos) = line.find("//") {
             for c in out.iter_mut().skip(pos) {
                 *c = ' ';
             }
         }
-    } else if let Some(pos) = line.find('%') {
-        // Only if not escaped \%
-        if pos == 0 || line.as_bytes().get(pos - 1) != Some(&b'\\') {
-            for c in out.iter_mut().skip(pos) {
-                *c = ' ';
-            }
+    } else if let Some(pos) = line.find('%')
+        && (pos == 0 || line.as_bytes().get(pos - 1) != Some(&b'\\'))
+    {
+        for c in out.iter_mut().skip(pos) {
+            *c = ' ';
         }
     }
 
-    // Mask math $...$
     while i < len {
         if out[i] == '$' {
             out[i] = ' ';
@@ -171,7 +155,6 @@ fn mask_math_and_macros(line: &str, is_typst: bool) -> String {
             continue;
         }
 
-        // Mask LaTeX macro commands like \cite{...} or \ref{...}
         if !is_typst && out[i] == '\\' {
             let start = i;
             while i < len && out[i].is_alphabetic() {
@@ -200,7 +183,6 @@ fn mask_math_and_macros(line: &str, is_typst: bool) -> String {
     out.into_iter().collect()
 }
 
-/// Checks if a slice in `line` starts and ends on ASCII word boundaries.
 fn is_word_boundary(line: &str, start: usize, len: usize) -> bool {
     let bytes = line.as_bytes();
     let before_ok = if start == 0 {
@@ -219,7 +201,6 @@ fn is_word_boundary(line: &str, start: usize, len: usize) -> bool {
     before_ok && after_ok
 }
 
-/// Identifies passive voice occurrences (e.g. "was analyzed", "is calculated").
 fn check_passive_voice(
     raw_line: &str,
     lower_line: &str,
@@ -240,7 +221,6 @@ fn check_passive_voice(
         let (verb_offset, next_word) = words[i + 1];
 
         if PASSIVE_BE_FORMS.contains(&be_word) {
-            // Check if next word ends in 'ed' or is common irregular past participle
             let is_past_participle = next_word.ends_with("ed")
                 || matches!(
                     next_word,
@@ -310,7 +290,6 @@ mod tests {
     fn test_math_and_comment_masking() {
         let text = "Formula $x = \\text{very clear}$ is good. % in order to ignore this";
         let warnings = lint_academic_text(text, false);
-        // Math content and comment content must be ignored
         assert!(warnings.is_empty());
     }
 }

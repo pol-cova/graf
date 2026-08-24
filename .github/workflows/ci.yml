@@ -1,0 +1,34 @@
+name: Linux checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake g++ libasound2-dev libfontconfig-dev libglib2.0-dev \
+            libssl-dev libvulkan1 libwayland-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libzstd-dev lld llvm pkg-config poppler-utils
+      - name: Install Tectonic
+        run: |
+          curl -fsSL https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.17.0/tectonic-0.17.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          sudo install tectonic /usr/local/bin/tectonic
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test

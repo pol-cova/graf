@@ -1,12 +1,6 @@
-//! Project filesystem tree and directory scanner (spec §49).
-//!
-//! Scans project directories, filters ignored paths (.git, target),
-//! organizes hierarchical tree nodes, and detects LaTeX root documents.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A node in the project filesystem tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileNode {
     Directory {
@@ -22,7 +16,6 @@ pub enum FileNode {
     },
 }
 
-/// The recognized category of a project file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
     Latex,
@@ -36,7 +29,6 @@ pub enum FileKind {
 }
 
 impl FileKind {
-    /// Determines the file kind from its file extension.
     pub fn from_path(path: &Path) -> Self {
         match path.extension().and_then(|ext| ext.to_str()) {
             Some("tex") => Self::Latex,
@@ -50,7 +42,6 @@ impl FileKind {
         }
     }
 
-    /// Returns a compact label for this file kind.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Latex => "TEX",
@@ -65,7 +56,6 @@ impl FileKind {
     }
 }
 
-/// Project directory tree model.
 #[derive(Debug, Clone)]
 pub struct ProjectTree {
     root_path: PathBuf,
@@ -74,7 +64,6 @@ pub struct ProjectTree {
 }
 
 impl ProjectTree {
-    /// Scans a project directory and builds the tree hierarchy.
     pub fn scan(root_path: impl Into<PathBuf>) -> Self {
         let root_path = root_path.into();
         let name = root_path
@@ -100,12 +89,10 @@ impl ProjectTree {
         }
     }
 
-    /// Returns the root path of the project.
     pub fn root_path(&self) -> &Path {
         &self.root_path
     }
 
-    /// Returns a reference to the root node of the tree.
     pub fn root_node(&self) -> &FileNode {
         &self.root_node
     }
@@ -116,12 +103,10 @@ impl ProjectTree {
         paths
     }
 
-    /// Returns the detected main root document (e.g. `main.tex`), if any.
     pub fn root_document(&self) -> Option<&Path> {
         self.root_document.as_deref()
     }
 
-    /// Toggles a directory in the project tree.
     pub fn toggle_directory(&mut self, path: &Path) -> bool {
         toggle_directory_node(&mut self.root_node, path)
     }
@@ -169,7 +154,6 @@ fn scan_directory(dir: &Path) -> Vec<FileNode> {
         let path = entry.path();
         let file_name = entry.file_name().to_string_lossy().to_string();
 
-        // Skip hidden files and build output directories
         if should_ignore(&file_name) {
             continue;
         }
@@ -192,7 +176,6 @@ fn scan_directory(dir: &Path) -> Vec<FileNode> {
         }
     }
 
-    // Sort: directories first, then alphabetically
     entries.sort_by(|a, b| match (a, b) {
         (FileNode::Directory { name: a, .. }, FileNode::Directory { name: b, .. }) => {
             a.to_lowercase().cmp(&b.to_lowercase())
@@ -219,9 +202,7 @@ fn should_ignore(name: &str) -> bool {
         || name.ends_with(".synctex.gz")
 }
 
-/// Detects the root LaTeX document in the project.
 fn detect_root_document(root_dir: &Path, children: &[FileNode]) -> Option<PathBuf> {
-    // 1. Direct match: main.tex or document.tex in root
     let main_tex = root_dir.join("main.tex");
     if main_tex.exists() {
         return Some(main_tex);
@@ -235,7 +216,6 @@ fn detect_root_document(root_dir: &Path, children: &[FileNode]) -> Option<PathBu
         return Some(paper_tex);
     }
 
-    // 2. Search for file containing \documentclass
     for child in children {
         if let FileNode::File {
             path,
@@ -312,7 +292,6 @@ mod tests {
                 FileNode::File { name, .. } => name == "refs.bib",
                 _ => false,
             }));
-            // Hidden files should be filtered out
             assert!(!children.iter().any(|c| match c {
                 FileNode::File { name, .. } => name == ".hidden",
                 _ => false,

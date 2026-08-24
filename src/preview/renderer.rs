@@ -1,13 +1,7 @@
-//! PDF rasterization and rendering abstraction.
-//!
-//! Provides the `PdfRenderer` trait and a native rasterizer for turning
-//! PDF bytes into renderable image pages.
-
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Rendered page metadata and image artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
     pub page_index: usize,
@@ -16,14 +10,11 @@ pub struct RenderedPage {
     pub image_path: PathBuf,
 }
 
-/// Abstraction for rendering PDF documents into image pages.
 pub trait PdfRenderer: Send + Sync {
-    /// Renders a PDF document given by its raw bytes to one or more image pages.
     fn render_document(&self, revision: u64, pdf_bytes: &[u8])
     -> Result<Vec<RenderedPage>, String>;
 }
 
-/// Native macOS PDF rasterizer utilizing system image tools.
 pub struct NativePdfRenderer {
     cache_dir: PathBuf,
 }
@@ -35,7 +26,6 @@ impl Default for NativePdfRenderer {
 }
 
 impl NativePdfRenderer {
-    /// Creates a new `NativePdfRenderer` with an isolated cache directory.
     pub fn new() -> Self {
         let temp_dir = std::env::temp_dir().join("graf_pdf_cache");
         fs::create_dir_all(&temp_dir).ok();
@@ -64,21 +54,45 @@ impl PdfRenderer for NativePdfRenderer {
         fs::write(&pdf_file, pdf_bytes).map_err(|e| format!("Failed to write PDF: {e}"))?;
         let _ = fs::remove_file(&png_file);
 
-        let output = Command::new("/usr/bin/sips")
-            .arg("-s")
-            .arg("format")
-            .arg("png")
-            .arg("--resampleWidth")
-            .arg("1224")
-            .arg(&pdf_file)
-            .arg("--out")
-            .arg(&png_file)
-            .output()
-            .map_err(|e| format!("Failed to execute sips: {e}"))?;
+        #[cfg(target_os = "macos")]
+        let (tool, output) = (
+            "sips",
+            Command::new("/usr/bin/sips")
+                .arg("-s")
+                .arg("format")
+                .arg("png")
+                .arg("--resampleWidth")
+                .arg("1224")
+                .arg(&pdf_file)
+                .arg("--out")
+                .arg(&png_file)
+                .output(),
+        );
 
+        #[cfg(not(target_os = "macos"))]
+        let (tool, output) = {
+            let output_root = run_dir.join("page_1");
+            (
+                "pdftoppm",
+                Command::new("pdftoppm")
+                    .arg("-png")
+                    .arg("-f")
+                    .arg("1")
+                    .arg("-singlefile")
+                    .arg("-scale-to-x")
+                    .arg("1224")
+                    .arg("-scale-to-y")
+                    .arg("-1")
+                    .arg(&pdf_file)
+                    .arg(output_root)
+                    .output(),
+            )
+        };
+
+        let output = output.map_err(|error| format!("Failed to execute {tool}: {error}"))?;
         if !output.status.success() || !png_file.exists() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("sips rasterization failed: {stderr}"));
+            return Err(format!("{tool} rasterization failed: {stderr}"));
         }
 
         Ok(vec![RenderedPage {

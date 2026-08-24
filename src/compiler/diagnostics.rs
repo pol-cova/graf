@@ -1,14 +1,8 @@
-//! Unified diagnostic types and parsing.
-//!
-//! Represents errors, warnings, and messages from document engines (spec §38–41).
-
 use std::path::PathBuf;
 
-/// Unique identifier for a diagnostic item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DiagnosticId(pub u64);
 
-/// The severity level of a diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,
@@ -16,7 +10,6 @@ pub enum Severity {
     Information,
 }
 
-/// The origin subsystem that generated the diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSource {
     Tectonic,
@@ -25,7 +18,6 @@ pub enum DiagnosticSource {
     Ai,
 }
 
-/// A single compiler or parser diagnostic item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub id: DiagnosticId,
@@ -37,7 +29,6 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    /// Create a new diagnostic item.
     pub fn new(
         id: u64,
         severity: Severity,

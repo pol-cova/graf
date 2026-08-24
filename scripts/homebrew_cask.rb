@@ -1,20 +1,20 @@
 cask "graf" do
-  version "0.1.0"
-  sha256 :no_check # Replace with release SHA256 in automated CI release workflow
+  version "1.0.0-alpha"
+  sha256 :no_check
 
-  url "https://github.com/graf-editor/graf/releases/download/v#{version}/Graf-v#{version}-aarch64.dmg"
-  name "Graf"
-  desc "Fast, native workspace for technical writing with LaTeX, Typst, vector canvas, and AI"
-  homepage "https://github.com/graf-editor/graf"
+  url "https://github.com/pol-cova/graf/releases/download/v#{version}/graf-v#{version}-arm64.dmg"
+  name "graf"
+  desc "Native editor for LaTeX and Typst"
+  homepage "https://github.com/pol-cova/graf"
 
   depends_on arch: :arm64
   depends_on macos: ">= :monterey"
 
-  app "Graf.app"
+  app "graf.app"
 
   zap trash: [
     "~/.config/graf",
-    "~/Library/Application Support/Graf",
+    "~/Library/Application Support/graf",
     "~/Library/Saved Application State/com.graf.editor.savedState",
   ]
 end

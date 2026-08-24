@@ -12,6 +12,6 @@ cargo build --profile profiling
 xcrun xctrace record \
     --template "Time Profiler" \
     --output "$output" \
-    --launch -- "$(pwd)/target/profiling/Graf"
+    --launch -- "$(pwd)/target/profiling/graf"
 
 echo "Profile saved to $output"

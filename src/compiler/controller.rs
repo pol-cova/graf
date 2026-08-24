@@ -1,11 +1,8 @@
-//! Compile controller, state machine, debounce, and stale result rejection (spec §32–35).
-
 use std::time::{Duration, Instant};
 
 use super::diagnostics::Diagnostic;
 use super::engine::{CompileError, CompileId, CompileOutput};
 
-/// The lifecycle state of document compilation (spec §35).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileState {
     Idle,
@@ -30,7 +27,6 @@ pub enum CompileState {
 use std::borrow::Cow;
 
 impl CompileState {
-    /// Returns a user-friendly status string for the status bar with zero allocation for static states.
     pub fn status_text(&self) -> Cow<'static, str> {
         match self {
             Self::Idle => Cow::Borrowed("ready"),
@@ -53,14 +49,12 @@ impl CompileState {
     }
 }
 
-/// Represents an output that was discarded because a newer revision was already requested or completed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaleResult {
     pub completed_revision: u64,
     pub current_revision: u64,
 }
 
-/// Manages the compilation lifecycle, revision tracking, debouncing, and stale rejection (spec §34).
 pub struct CompilerController {
     current_revision: u64,
     latest_completed_revision: u64,
@@ -77,12 +71,10 @@ impl Default for CompilerController {
 }
 
 impl CompilerController {
-    /// Create a new compile controller with default 150ms debounce for responsive hot reload.
     pub fn new() -> Self {
         Self::with_debounce(Duration::from_millis(150))
     }
 
-    /// Create a new compile controller with custom debounce duration.
     pub fn with_debounce(debounce_duration: Duration) -> Self {
         Self {
             current_revision: 0,
@@ -94,41 +86,40 @@ impl CompilerController {
         }
     }
 
-    /// Returns the current compilation state.
     pub fn state(&self) -> &CompileState {
         &self.state
     }
 
-    /// Returns the user-friendly status text for the current state.
     pub fn status_text(&self) -> Cow<'static, str> {
         self.state.status_text()
     }
 
-    /// Returns the latest document revision registered with the controller.
     pub fn current_revision(&self) -> u64 {
         self.current_revision
     }
 
-    /// Returns the latest successfully compiled revision.
     pub fn latest_completed_revision(&self) -> u64 {
         self.latest_completed_revision
     }
 
-    /// Returns the latest compiled PDF artifact bytes, if available.
     pub fn latest_artifact(&self) -> Option<&[u8]> {
         self.latest_artifact.as_deref()
     }
 
-    /// Configured debounce duration.
     pub fn debounce_duration(&self) -> Duration {
         self.debounce_duration
+    }
+
+    pub fn reset(&mut self) {
+        self.state = CompileState::Idle;
+        self.last_edit_time = None;
+        self.latest_artifact = None;
     }
 
     pub fn set_debounce_duration(&mut self, duration: Duration) {
         self.debounce_duration = duration;
     }
 
-    /// Called when the editor content is modified with a new revision number.
     pub fn on_source_edited(&mut self, new_revision: u64, now: Instant) {
         if new_revision > self.current_revision {
             self.current_revision = new_revision;
@@ -137,14 +128,12 @@ impl CompilerController {
         }
     }
 
-    /// Checks if the debounce interval has elapsed and compilation should begin.
     pub fn is_debounce_elapsed(&self, now: Instant) -> bool {
         self.last_edit_time.is_some_and(|edit_time| {
             now.saturating_duration_since(edit_time) >= self.debounce_duration
         })
     }
 
-    /// Transition to `Compiling` state for a given job and revision.
     pub fn begin_compile(&mut self, id: CompileId, revision: u64) {
         self.state = CompileState::Compiling { id, revision };
     }
@@ -165,7 +154,6 @@ impl CompilerController {
         }
     }
 
-    /// Handles a successful compile output.
     pub fn handle_output(&mut self, output: CompileOutput) -> Result<&[u8], StaleResult> {
         self.reject_if_stale(output.revision)?;
 
@@ -178,7 +166,6 @@ impl CompilerController {
         Ok(self.latest_artifact.insert(output.artifact).as_slice())
     }
 
-    /// Handles a failed compilation error.
     pub fn handle_error(&mut self, error: CompileError) -> Result<(), StaleResult> {
         self.reject_if_stale(error.revision)?;
 

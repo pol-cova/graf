@@ -1,9 +1,6 @@
-//! Graf visual theme system with Light, Dark, and High Contrast palettes (spec §7.2, M7).
-
 use gpui::{Rgba, rgb};
 use serde::{Deserialize, Serialize};
 
-/// Supported visual theme modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemeMode {
     #[default]
@@ -30,7 +27,6 @@ impl ThemeMode {
     }
 }
 
-/// A complete color palette for the Graf workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemePalette {
     pub bg: u32,
@@ -54,7 +50,6 @@ pub struct ThemePalette {
 }
 
 impl ThemePalette {
-    /// The default dark palette (Zed Dark).
     pub fn dark() -> Self {
         Self {
             bg: 0x181818,
@@ -78,7 +73,6 @@ impl ThemePalette {
         }
     }
 
-    /// The light palette (Zed Light).
     pub fn light() -> Self {
         Self {
             bg: 0xfafafa,
@@ -102,7 +96,6 @@ impl ThemePalette {
         }
     }
 
-    /// The high contrast accessibility palette.
     pub fn high_contrast() -> Self {
         Self {
             bg: 0x000000,
@@ -127,7 +120,6 @@ impl ThemePalette {
     }
 }
 
-// Canonical dark palette color constants for backward compatibility
 pub const BG: u32 = 0x181818;
 pub const BG_SURFACE: u32 = 0x1e1e1e;
 pub const BG_CANVAS: u32 = 0x1a1d24;
@@ -148,7 +140,6 @@ pub const SYNTAX_MATH: u32 = 0xdcdcaa;
 pub const SYNTAX_COMMENT: u32 = 0x6a9955;
 pub const SYNTAX_PUNCTUATION: u32 = 0x8a8a8a;
 
-/// Converts a `u32` hex colour constant to a GPUI [`Rgba`].
 #[inline(always)]
 pub fn color(hex: u32) -> Rgba {
     rgb(hex)

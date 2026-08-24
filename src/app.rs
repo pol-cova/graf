@@ -1,6 +1,6 @@
 use gpui::{
-    App, Bounds, KeyBinding, Menu, MenuItem, OsAction, SharedString, SystemMenuType,
-    TitlebarOptions, WindowBounds, WindowOptions, actions, prelude::*, px, size,
+    App, Bounds, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, TitlebarOptions,
+    WindowBounds, WindowOptions, actions, prelude::*, px, size,
 };
 use gpui_platform::application;
 use log::{error, info};
@@ -12,10 +12,6 @@ const WINDOW_HEIGHT: f32 = 800.0;
 
 actions!(graf, [Quit]);
 
-/// Launch the Graf application.
-///
-/// Creates a native GPUI window at approximately 1200×800, sets up global
-/// keybindings, and renders the [`Workspace`] shell.
 pub fn run() {
     application().run(|cx: &mut App| {
         crate::editor::view::register_bindings(cx);
@@ -28,8 +24,9 @@ pub fn run() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("Graf")),
-                    ..Default::default()
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(gpui::point(px(9.0), px(9.0))),
                 }),
                 ..Default::default()
             },
@@ -37,7 +34,7 @@ pub fn run() {
         ) {
             Ok(window) => window,
             Err(error) => {
-                error!("failed to open Graf window: {error}");
+                error!("failed to open graf window: {error}");
                 cx.quit();
                 return;
             }
@@ -61,21 +58,23 @@ pub fn run() {
 fn set_app_menus(cx: &mut App) {
     use crate::editor::view::{Copy, Cut, Paste, Redo, SelectAll, Undo};
     use crate::workspace::{
-        CloseTab, CommandPalette, OpenLicenses, OpenSettings, Save, ToggleDiagnostics, ToggleFind,
-        TogglePerformanceOverlay, TogglePreview, ToggleSidebar,
+        CloseTab, CommandPalette, OpenAbout, OpenFile, OpenSettings, Save, ToggleDiagnostics,
+        ToggleFind, TogglePerformanceOverlay, TogglePreview, ToggleSidebar,
     };
 
     cx.set_menus([
-        Menu::new("Graf").items([
-            MenuItem::action("About Graf", OpenLicenses),
+        Menu::new("graf").items([
+            MenuItem::action("About graf", OpenAbout),
             MenuItem::separator(),
             MenuItem::action("Settings...", OpenSettings),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action("Quit Graf", Quit),
+            MenuItem::action("Quit graf", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("Open...", OpenFile),
+            MenuItem::separator(),
             MenuItem::action("Save", Save),
             MenuItem::action("Close Tab", CloseTab),
         ]),
@@ -93,11 +92,11 @@ fn set_app_menus(cx: &mut App) {
         Menu::new("View").items([
             MenuItem::action("Command Palette", CommandPalette),
             MenuItem::separator(),
-            MenuItem::action("Project Panel", ToggleSidebar),
-            MenuItem::action("PDF Preview", TogglePreview),
+            MenuItem::action("Project", ToggleSidebar),
+            MenuItem::action("Preview", TogglePreview),
             MenuItem::action("Problems", ToggleDiagnostics),
             MenuItem::separator(),
-            MenuItem::action("Performance Overlay", TogglePerformanceOverlay),
+            MenuItem::action("Frame Timings", TogglePerformanceOverlay),
         ]),
         Menu::new("Window").items([MenuItem::action("Close Tab", CloseTab)]),
         Menu::new("Help").items([MenuItem::action("Command Palette", CommandPalette)]),

@@ -1,6 +1,3 @@
-//! Interactive Visual Table & Matrix Builder engine.
-
-/// Text alignment within a table column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableAlignment {
     Left,
@@ -9,7 +6,6 @@ pub enum TableAlignment {
 }
 
 impl TableAlignment {
-    /// Returns the LaTeX column specifier character (`l`, `c`, `r`).
     pub fn latex_spec(self) -> &'static str {
         match self {
             Self::Left => "l",
@@ -18,7 +14,6 @@ impl TableAlignment {
         }
     }
 
-    /// Returns the Typst alignment identifier (`left`, `center`, `right`).
     pub fn typst_spec(self) -> &'static str {
         match self {
             Self::Left => "left",
@@ -28,17 +23,15 @@ impl TableAlignment {
     }
 }
 
-/// Matrix bracket enclosure style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatrixStyle {
-    Parentheses, // \begin{pmatrix}
-    Brackets,    // \begin{bmatrix}
-    Determinant, // \begin{vmatrix}
-    None,        // \begin{matrix}
+    Parentheses,
+    Brackets,
+    Determinant,
+    None,
 }
 
 impl MatrixStyle {
-    /// Returns the LaTeX environment name for this matrix style.
     pub fn latex_env(self) -> &'static str {
         match self {
             Self::Parentheses => "pmatrix",
@@ -49,7 +42,6 @@ impl MatrixStyle {
     }
 }
 
-/// Structured data model representing an academic table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableData {
     pub rows: Vec<Vec<String>>,
@@ -61,7 +53,6 @@ pub struct TableData {
 }
 
 impl TableData {
-    /// Creates a new empty table with the given dimensions.
     pub fn new(num_rows: usize, num_cols: usize) -> Self {
         let rows = vec![vec![String::new(); num_cols]; num_rows];
         let alignments = vec![TableAlignment::Left; num_cols];
@@ -75,7 +66,6 @@ impl TableData {
         }
     }
 
-    /// Parses clipboard text formatted as tab-separated values (TSV) from Excel / Sheets.
     pub fn from_tsv(tsv: &str) -> Self {
         let mut rows = Vec::new();
         let mut max_cols = 0;
@@ -109,7 +99,6 @@ impl TableData {
         }
     }
 
-    /// Parses clipboard text formatted as comma-separated values (CSV).
     pub fn from_csv(csv: &str) -> Self {
         let mut rows = Vec::new();
         let mut max_cols = 0;
@@ -143,7 +132,6 @@ impl TableData {
         }
     }
 
-    /// Generates high-quality publication LaTeX `booktabs` code.
     pub fn to_latex(&self) -> String {
         if self.rows.is_empty() {
             return String::new();
@@ -193,7 +181,6 @@ impl TableData {
         out
     }
 
-    /// Generates native Typst `#figure(table(...))` code.
     pub fn to_typst(&self) -> String {
         if self.rows.is_empty() {
             return String::new();
@@ -239,7 +226,6 @@ impl TableData {
         out
     }
 
-    /// Generates LaTeX matrix markup for mathematical equations.
     pub fn to_matrix_latex(&self, style: MatrixStyle) -> String {
         let env = style.latex_env();
         let mut out = format!("\\begin{{{env}}}\n");

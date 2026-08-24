@@ -1,36 +1,50 @@
-//! Modal dialogs and overlay views (Quick Open, Command Palette, AI Assist, Diff Review, Settings).
-
-use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{
+    ClipboardItem, Context, Focusable, IntoElement, ParentElement, Role, Styled, div, prelude::*,
+    px,
+};
 use std::path::Path;
 
 use super::commands::all_commands;
 use super::{ActiveModal, SettingsTab, Workspace};
 use crate::ai::operations::AiOperationKind;
+use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
 impl Workspace {
-    /// Renders modal overlay for Quick Open (⌘P), Command Palette (⌘K), AI Assist (⌘I), Settings (⌘,), or Diff Review.
     pub fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let is_quick_open = matches!(self.active_modal, ActiveModal::QuickOpen(_));
         let is_cmd_palette = matches!(self.active_modal, ActiveModal::CommandPalette(_));
         let is_ai_assist = matches!(self.active_modal, ActiveModal::AiAssist(_));
         let is_diff_review = matches!(self.active_modal, ActiveModal::DiffReview(_));
+        let is_confirm_close = matches!(self.active_modal, ActiveModal::ConfirmClose(_));
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
+        let is_about = matches!(self.active_modal, ActiveModal::About);
 
-        if !is_quick_open && !is_cmd_palette && !is_ai_assist && !is_diff_review && !is_settings {
+        if !is_quick_open
+            && !is_cmd_palette
+            && !is_ai_assist
+            && !is_diff_review
+            && !is_confirm_close
+            && !is_settings
+            && !is_about
+        {
             return None;
         }
 
         let title = if is_quick_open {
-            "Quick Open File (⌘P)"
+            "Open file"
         } else if is_cmd_palette {
-            "Command Palette (⌘K)"
+            "Commands"
         } else if is_ai_assist {
-            "Writing Assistant  ⌘I"
+            "Writing assistant"
         } else if is_settings {
-            "Graf Settings  ⌘,"
+            "Settings"
+        } else if is_about {
+            "About graf"
+        } else if is_confirm_close {
+            "Unsaved changes"
         } else {
-            "Review edit  Accept with ⌘Enter or reject with Esc"
+            "Review changes"
         };
 
         let mut modal_content = div()
@@ -65,33 +79,62 @@ impl Workspace {
                     )
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("Esc to close"),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .child("Esc"),
+                            )
+                            .child(
+                                div()
+                                    .id("close-modal")
+                                    .px_1()
+                                    .rounded_xs()
+                                    .text_sm()
+                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.close_modal(cx)),
+                                    )
+                                    .child(div().w(px(14.0)).h(px(14.0)).child(icon(Icon::Close))),
+                            ),
                     ),
             );
 
         if is_quick_open || is_cmd_palette {
-            modal_content = modal_content.child(
-                div()
-                    .h(px(34.0))
-                    .mx_3()
-                    .my_2()
-                    .rounded_xs()
-                    .bg(theme::color(theme::BG))
-                    .border_1()
-                    .border_color(theme::color(theme::BORDER))
-                    .overflow_hidden()
-                    .child(self.prompt_editor.clone()),
-            );
+            let input = div()
+                .flex()
+                .items_center()
+                .h(px(34.0))
+                .mx_3()
+                .my_2()
+                .px_2()
+                .rounded_xs()
+                .bg(theme::color(theme::BG))
+                .border_1()
+                .border_color(theme::color(theme::BORDER))
+                .overflow_hidden()
+                .child(
+                    div()
+                        .flex()
+                        .h_full()
+                        .flex_1()
+                        .min_w_0()
+                        .child(self.prompt_editor.clone()),
+                );
+            modal_content = modal_content.child(input);
         }
 
         if is_settings {
             if let ActiveModal::Settings(tab) = self.active_modal {
                 let tabs = [
-                    (SettingsTab::General, "General"),
                     (SettingsTab::Editor, "Editor"),
-                    (SettingsTab::Licenses, "About and Licenses"),
+                    (SettingsTab::Build, "Build"),
                 ];
 
                 let tab_header = div()
@@ -145,24 +188,52 @@ impl Workspace {
                     .overflow_scroll();
 
                 match tab {
-                    SettingsTab::General => {
+                    SettingsTab::Build => {
+                        let setting_button = || {
+                            div()
+                                .px_2()
+                                .py_1()
+                                .rounded_xs()
+                                .bg(theme::color(theme::BG_BAR))
+                                .border_1()
+                                .border_color(theme::color(theme::BORDER))
+                                .text_xs()
+                                .cursor_pointer()
+                                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                        };
+
                         settings_body = settings_body
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Theme Palette:"))
                                     .child(
                                         div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child(self.settings.theme.theme_name.clone()),
+                                            .flex()
+                                            .flex_col()
+                                            .child(div().text_xs().child("Compile while editing"))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                                    .child("Rebuild the active document after changes."),
+                                            ),
+                                    )
+                                    .child(
+                                        setting_button()
+                                            .id("auto-compile-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_auto_compile_setting(cx);
+                                                }),
+                                            )
+                                            .child(if self.settings.editor.auto_compile {
+                                                "On"
+                                            } else {
+                                                "Off"
+                                            }),
                                     ),
                             )
                             .child(
@@ -170,30 +241,31 @@ impl Workspace {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .child(div().text_xs().child("Supported Engines:"))
                                     .child(
                                         div()
-                                            .px_2()
-                                            .py_1()
-                                            .rounded_xs()
-                                            .bg(theme::color(theme::BG_BAR))
-                                            .border_1()
-                                            .border_color(theme::color(theme::BORDER))
-                                            .text_xs()
-                                            .child("LaTeX (Tectonic) + Typst"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Autosave Crash Recovery:"))
+                                            .flex()
+                                            .flex_col()
+                                            .child(div().text_xs().child("Compile delay"))
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                                    .child("Wait before rebuilding after a keystroke."),
+                                            ),
+                                    )
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme::color(theme::ACCENT_GREEN))
-                                            .child("Active (.graf/recovery)"),
+                                        setting_button()
+                                            .id("compile-delay-setting")
+                                            .on_mouse_down(
+                                                gpui::MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.cycle_compile_debounce(cx);
+                                                }),
+                                            )
+                                            .child(format!(
+                                                "{} ms",
+                                                self.settings.editor.compile_debounce_ms
+                                            )),
                                     ),
                             );
                     }
@@ -232,7 +304,12 @@ impl Workspace {
                                                             this.adjust_editor_font_size(-1.0, cx);
                                                         }),
                                                     )
-                                                    .child("−"),
+                                                    .child(
+                                                        div()
+                                                            .w(px(14.0))
+                                                            .h(px(14.0))
+                                                            .child(icon(Icon::Minus)),
+                                                    ),
                                             )
                                             .child(div().w(px(64.0)).text_center().text_xs().child(
                                                 format!("{:.0} px", self.settings.editor.font_size),
@@ -246,7 +323,12 @@ impl Workspace {
                                                             this.adjust_editor_font_size(1.0, cx);
                                                         }),
                                                     )
-                                                    .child("+"),
+                                                    .child(
+                                                        div()
+                                                            .w(px(14.0))
+                                                            .h(px(14.0))
+                                                            .child(icon(Icon::Plus)),
+                                                    ),
                                             ),
                                     ),
                             )
@@ -292,111 +374,203 @@ impl Workspace {
                                                 "Off"
                                             }),
                                     ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Auto compile while editing"))
-                                    .child(
-                                        setting_button()
-                                            .id("auto-compile-setting")
-                                            .on_mouse_down(
-                                                gpui::MouseButton::Left,
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.toggle_auto_compile_setting(cx);
-                                                }),
-                                            )
-                                            .child(if self.settings.editor.auto_compile_on_save {
-                                                "On"
-                                            } else {
-                                                "Off"
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(div().text_xs().child("Compile delay"))
-                                    .child(
-                                        setting_button()
-                                            .id("compile-delay-setting")
-                                            .on_mouse_down(
-                                                gpui::MouseButton::Left,
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.cycle_compile_debounce(cx);
-                                                }),
-                                            )
-                                            .child(format!(
-                                                "{} ms",
-                                                self.settings.editor.compile_debounce_ms
-                                            )),
-                                    ),
                             );
-                    }
-                    SettingsTab::Licenses => {
-                        let licenses = crate::project::licenses::direct_dependency_licenses();
-                        let mut lic_div = div().flex().flex_col().gap_2();
-
-                        lic_div = lic_div.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    div()
-                                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .child("Graf v0.1.0 (macOS Apple Silicon)"),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(theme::color(theme::ACCENT_ORANGE))
-                                        .child("Apache-2.0"),
-                                ),
-                        );
-
-                        for lic in licenses {
-                            let item = div()
-                                .p_2()
-                                .rounded_xs()
-                                .bg(theme::color(theme::BG_BAR))
-                                .border_1()
-                                .border_color(theme::color(theme::BORDER))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            div()
-                                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                                .text_color(theme::color(theme::TEXT))
-                                                .child(format!("{} (v{})", lic.name, lic.version)),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(theme::color(theme::ACCENT_GREEN))
-                                                .child(lic.license),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .mt_0p5()
-                                        .text_xs()
-                                        .text_color(theme::color(theme::TEXT_MUTED))
-                                        .child(lic.description),
-                                );
-                            lic_div = lic_div.child(item);
-                        }
-
-                        settings_body = settings_body.child(lic_div);
                     }
                 }
 
                 modal_content = modal_content.child(tab_header).child(settings_body);
+            }
+        } else if is_about {
+            let version = env!("CARGO_PKG_VERSION");
+            modal_content = modal_content.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_4()
+                    .px_6()
+                    .py_5()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .w(px(56.0))
+                            .h(px(56.0))
+                            .rounded_md()
+                            .bg(theme::color(theme::ACCENT_BLUE))
+                            .text_size(px(28.0))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(gpui::white())
+                            .child("g"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(theme::color(theme::TEXT))
+                                    .child("graf"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .child(format!("Version {version}")),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .child("A native workspace for technical writing"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .w_full()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("about-copy-details")
+                                    .role(Role::Button)
+                                    .aria_label("Copy version details")
+                                    .flex_1()
+                                    .py_1p5()
+                                    .rounded_xs()
+                                    .border_1()
+                                    .border_color(theme::color(theme::BORDER))
+                                    .text_center()
+                                    .text_xs()
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(move |_, _, _, cx| {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                                format!(
+                                                    "graf {version}\n{} {}",
+                                                    std::env::consts::OS,
+                                                    std::env::consts::ARCH
+                                                ),
+                                            ));
+                                        }),
+                                    )
+                                    .child("Copy details"),
+                            )
+                            .child(
+                                div()
+                                    .id("about-close")
+                                    .role(Role::Button)
+                                    .aria_label("Close About")
+                                    .flex_1()
+                                    .py_1p5()
+                                    .rounded_xs()
+                                    .bg(theme::color(theme::ACCENT_BLUE))
+                                    .text_center()
+                                    .text_xs()
+                                    .text_color(gpui::white())
+                                    .cursor_pointer()
+                                    .hover(|style| style.opacity(0.9))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.close_modal(cx)),
+                                    )
+                                    .child("OK"),
+                            ),
+                    ),
+            );
+        } else if is_confirm_close {
+            if let ActiveModal::ConfirmClose(index) = self.active_modal {
+                let title = self
+                    .documents
+                    .get(index)
+                    .map(|document| document.title().to_string())
+                    .unwrap_or_else(|| "document".to_string());
+                modal_content = modal_content.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_4()
+                        .p_4()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme::color(theme::TEXT))
+                                .child(format!("Save changes to {title}?")),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .id("cancel-close")
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_xs()
+                                        .text_xs()
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                        .on_mouse_down(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(|this, _, _, cx| {
+                                                this.active_modal = ActiveModal::None;
+                                                cx.notify();
+                                            }),
+                                        )
+                                        .child("Cancel"),
+                                )
+                                .child(
+                                    div()
+                                        .id("discard-close")
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_xs()
+                                        .text_xs()
+                                        .text_color(theme::color(theme::ACCENT_RED))
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                        .on_mouse_down(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.active_modal = ActiveModal::None;
+                                                this.force_close_tab(index, cx);
+                                            }),
+                                        )
+                                        .child("Discard"),
+                                )
+                                .child(
+                                    div()
+                                        .id("save-before-close")
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_xs()
+                                        .bg(theme::color(theme::ACCENT_BLUE))
+                                        .text_xs()
+                                        .text_color(theme::color(theme::BG))
+                                        .cursor_pointer()
+                                        .on_mouse_down(
+                                            gpui::MouseButton::Left,
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.active_modal = ActiveModal::None;
+                                                if index != this.active_doc_idx {
+                                                    this.switch_tab(index, cx);
+                                                }
+                                                this.save_active_document(cx);
+                                            }),
+                                        )
+                                        .child("Save"),
+                                ),
+                        ),
+                );
             }
         } else if is_diff_review {
             if let ActiveModal::DiffReview(review) = &self.active_modal {
@@ -429,7 +603,6 @@ impl Workspace {
                                     .child(metrics),
                             ),
                     )
-                    // Original block
                     .child(
                         div()
                             .p_2()
@@ -439,10 +612,9 @@ impl Workspace {
                             .border_color(theme::color(theme::ACCENT_RED))
                             .text_xs()
                             .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("− Original:")
+                            .child("Original")
                             .child(div().mt_1().child(original)),
                     )
-                    // Replacement block
                     .child(
                         div()
                             .p_2()
@@ -452,10 +624,9 @@ impl Workspace {
                             .border_color(theme::color(theme::ACCENT_GREEN))
                             .text_xs()
                             .text_color(theme::color(theme::TEXT))
-                            .child("+ AI Proposal:")
+                            .child("Proposed")
                             .child(div().mt_1().child(replacement)),
                     )
-                    // Action footer
                     .child(
                         div()
                             .flex()
@@ -502,7 +673,7 @@ impl Workspace {
                                             this.accept_diff_review(cx);
                                         }),
                                     )
-                                    .child("Accept Changes (⌘Enter)"),
+                                    .child("Apply changes"),
                             ),
                     );
 
@@ -620,16 +791,17 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .px_3()
-                    .py_2()
+                    .py_1p5()
                     .text_xs()
                     .text_color(theme::color(theme::TEXT))
                     .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
+                        cx.listener(move |this, _, window, cx| {
                             this.active_modal = ActiveModal::None;
                             this.dispatch_command_action(id, cx);
+                            window.focus(&this.editor.read(cx).focus_handle(cx), cx);
                             cx.notify();
                         }),
                     )
@@ -661,7 +833,6 @@ impl Workspace {
             }
             modal_content = modal_content.child(list);
         } else {
-            // Quick Open list of project files
             let filter = self.prompt_editor.read(cx).text().to_lowercase();
 
             let mut list = div()
@@ -688,16 +859,17 @@ impl Workspace {
                     .items_center()
                     .gap_2()
                     .px_3()
-                    .py_2()
+                    .py_1p5()
                     .text_xs()
                     .text_color(theme::color(theme::TEXT))
                     .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
+                        cx.listener(move |this, _, window, cx| {
                             this.active_modal = ActiveModal::None;
                             this.open_file(path.clone(), cx);
+                            window.focus(&this.editor.read(cx).focus_handle(cx), cx);
                             cx.notify();
                         }),
                     )

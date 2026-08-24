@@ -1,6 +1,3 @@
-//! arXiv paper search and automatic BibTeX generation engine.
-
-/// Metadata of a scientific paper retrieved from arXiv.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArxivPaper {
     pub id: String,
@@ -13,7 +10,6 @@ pub struct ArxivPaper {
 }
 
 impl ArxivPaper {
-    /// Generates a standardized, memorable citation key (e.g. `vaswani2017attention`).
     pub fn citekey(&self) -> String {
         let first_author = self
             .authors
@@ -49,7 +45,6 @@ impl ArxivPaper {
             })
     }
 
-    /// Formats the paper as a publication-ready BibTeX entry.
     pub fn to_bibtex(&self) -> String {
         let key = self.citekey();
         let authors_str = self.authors.join(" and ");
@@ -75,7 +70,6 @@ impl ArxivPaper {
     }
 }
 
-/// Parses standard arXiv Atom XML API feed into [`ArxivPaper`] records.
 pub fn parse_arxiv_atom_feed(xml: &str) -> Vec<ArxivPaper> {
     let mut papers = Vec::new();
 

@@ -1,8 +1,5 @@
-//! Native Vector Canvas scene graph and `.graf` format model (spec §M4.1).
-
 use serde::{Deserialize, Serialize};
 
-/// The root vector scene document serialized to `.graf` JSON format.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanvasDocument {
     pub version: u32,
@@ -19,7 +16,6 @@ impl Default for CanvasDocument {
 }
 
 impl CanvasDocument {
-    /// Creates a new empty canvas document with version 1.
     pub fn new() -> Self {
         Self {
             version: 1,
@@ -30,22 +26,18 @@ impl CanvasDocument {
         }
     }
 
-    /// Serializes the canvas document to formatted JSON.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
 
-    /// Deserializes a canvas document from a JSON string.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
 
-    /// Adds a new element to the scene.
     pub fn add_element(&mut self, element: CanvasElement) {
         self.elements.push(element);
     }
 
-    /// Removes an element by ID.
     pub fn remove_element(&mut self, id: &str) -> Option<CanvasElement> {
         if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
             Some(self.elements.remove(pos))
@@ -54,7 +46,6 @@ impl CanvasDocument {
         }
     }
 
-    /// Computes the bounding box enclosing all scene elements `(min_x, min_y, max_x, max_y)`.
     pub fn bounding_box(&self) -> Option<(f32, f32, f32, f32)> {
         if self.elements.is_empty() {
             return None;
@@ -96,13 +87,11 @@ impl CanvasDocument {
         Some((min_x, min_y, max_x, max_y))
     }
 
-    /// Finds the top-most element containing point `(x, y)`.
     pub fn find_element_at(&self, x: f32, y: f32) -> Option<&CanvasElement> {
         self.elements.iter().rev().find(|e| e.contains_point(x, y))
     }
 }
 
-/// Viewport transform state (pan offset and zoom scale).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanvasViewport {
     pub pan_x: f32,
@@ -120,7 +109,6 @@ impl Default for CanvasViewport {
     }
 }
 
-/// A graphical vector element in the scene graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanvasElement {
     pub id: String,
@@ -134,7 +122,6 @@ pub struct CanvasElement {
 }
 
 impl CanvasElement {
-    /// Creates a new rectangle element.
     pub fn new_rectangle(
         id: impl Into<String>,
         x: f32,
@@ -155,7 +142,6 @@ impl CanvasElement {
         }
     }
 
-    /// Creates a new ellipse element.
     pub fn new_ellipse(id: impl Into<String>, x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             id: id.into(),
@@ -169,7 +155,6 @@ impl CanvasElement {
         }
     }
 
-    /// Creates a new directional arrow element.
     pub fn new_arrow(
         id: impl Into<String>,
         start_x: f32,
@@ -194,7 +179,6 @@ impl CanvasElement {
         }
     }
 
-    /// Creates a new line connector element.
     pub fn new_line(
         id: impl Into<String>,
         start_x: f32,
@@ -219,7 +203,6 @@ impl CanvasElement {
         }
     }
 
-    /// Creates a new text label element.
     pub fn new_text(
         id: impl Into<String>,
         x: f32,
@@ -253,7 +236,6 @@ impl CanvasElement {
         }
     }
 
-    /// Tests if point `(px, py)` intersects with element geometry.
     pub fn contains_point(&self, px: f32, py: f32) -> bool {
         match &self.kind {
             ElementKind::Ellipse => {
@@ -305,7 +287,6 @@ impl CanvasElement {
     }
 }
 
-/// The specific geometric shape or content of an element.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ElementKind {
     Rectangle {
@@ -331,7 +312,6 @@ pub enum ElementKind {
     },
 }
 
-/// Visual styling properties for rendering and exporting elements.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ElementStyle {
     pub stroke_color: String,
@@ -353,7 +333,6 @@ impl Default for ElementStyle {
     }
 }
 
-/// Line stroke pattern.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StrokeStyle {
     Solid,

@@ -1,6 +1,3 @@
-//! Command Palette action definitions and registry for the Graf workspace.
-
-/// A registered action in the Command Palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandPaletteItem {
     pub id: u32,
@@ -9,18 +6,17 @@ pub struct CommandPaletteItem {
     pub category: &'static str,
 }
 
-/// Returns the static registry of all available workspace commands.
 pub fn all_commands() -> &'static [CommandPaletteItem] {
     &[
         CommandPaletteItem {
             id: 1,
-            title: "Compile Document",
+            title: "Compile",
             shortcut: "⌘⇧B",
-            category: "Build",
+            category: "Document",
         },
         CommandPaletteItem {
             id: 2,
-            title: "Save Active Document",
+            title: "Save",
             shortcut: "⌘S",
             category: "File",
         },
@@ -74,21 +70,15 @@ pub fn all_commands() -> &'static [CommandPaletteItem] {
         },
         CommandPaletteItem {
             id: 10,
-            title: "Open Settings",
+            title: "Settings",
             shortcut: "⌘,",
             category: "Preferences",
         },
         CommandPaletteItem {
             id: 12,
-            title: "View Open Source Licenses",
+            title: "About graf",
             shortcut: "",
             category: "About",
-        },
-        CommandPaletteItem {
-            id: 13,
-            title: "Check Recovery Journal",
-            shortcut: "",
-            category: "Diagnostics",
         },
         CommandPaletteItem {
             id: 3,
@@ -98,25 +88,25 @@ pub fn all_commands() -> &'static [CommandPaletteItem] {
         },
         CommandPaletteItem {
             id: 4,
-            title: "◫ Toggle Left Sidebar",
+            title: "Toggle Project",
             shortcut: "⌘⇧E",
             category: "View",
         },
         CommandPaletteItem {
             id: 5,
-            title: "◨ Toggle Right Preview",
+            title: "Toggle Preview",
             shortcut: "⌘⇧P",
             category: "View",
         },
         CommandPaletteItem {
             id: 6,
-            title: "Toggle Problems Drawer",
+            title: "Toggle Problems",
             shortcut: "⌘⇧M",
             category: "View",
         },
         CommandPaletteItem {
             id: 7,
-            title: "× Close Active Tab",
+            title: "Close Tab",
             shortcut: "⌘W",
             category: "File",
         },

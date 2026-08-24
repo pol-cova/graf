@@ -1,8 +1,3 @@
-//! Tectonic LaTeX document engine implementation (spec §29).
-//!
-//! Executes the Tectonic engine programmatically, captures PDF output,
-//! extracts diagnostics, and measures compile duration.
-
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -16,7 +11,6 @@ use super::engine::{
 
 static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
 
-/// The Tectonic typesetting engine backend.
 pub struct TectonicEngine {
     executable: PathBuf,
     build_dir: PathBuf,
@@ -29,7 +23,6 @@ impl Default for TectonicEngine {
 }
 
 impl TectonicEngine {
-    /// Creates a new TectonicEngine instance with automatic executable discovery and persistent session cache.
     pub fn new() -> Self {
         let executable = which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic"));
         let build_dir = std::env::temp_dir().join("graf_tectonic_session");
@@ -40,7 +33,6 @@ impl TectonicEngine {
         }
     }
 
-    /// Creates a new TectonicEngine with a specific executable path.
     pub fn with_executable(path: impl Into<PathBuf>) -> Self {
         let build_dir = std::env::temp_dir().join("graf_tectonic_session");
         let _ = fs::create_dir_all(&build_dir);
@@ -50,7 +42,6 @@ impl TectonicEngine {
         }
     }
 
-    /// Creates a new TectonicEngine with custom executable and build directory paths.
     pub fn with_paths(executable: impl Into<PathBuf>, build_dir: impl Into<PathBuf>) -> Self {
         Self {
             executable: executable.into(),
@@ -191,7 +182,6 @@ fn which_tectonic() -> Option<PathBuf> {
     .find(|p| p.exists())
 }
 
-/// Parses compiler output log into structured diagnostics.
 pub fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut diag_id = 1u64;

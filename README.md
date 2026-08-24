@@ -1,40 +1,56 @@
-# Graf
+# graf
 
-Graf is a native macOS workspace for writing and previewing technical documents. It combines a source editor, project files, local compilation, PDF preview, references, diagrams, and writing tools in one GPUI application.
+[![CI](https://github.com/pol-cova/graf/actions/workflows/ci.yml/badge.svg)](https://github.com/pol-cova/graf/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/pol-cova/graf?include_prereleases)](https://github.com/pol-cova/graf/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Graf is early alpha software. The editor works, but file handling, compiler compatibility, packaging, and accessibility still need release testing.
+graf is a native editor for LaTeX and Typst. It keeps source, compilation, and PDF preview in one local workspace.
 
-## What works
+> graf is alpha software. Keep important documents under version control or backed up.
 
-- Multiline LaTeX and Typst editing with undo, redo, selection, search, and syntax highlighting
-- Project tree, document tabs, outline navigation, and dirty-state tracking
-- Background compilation with debounce and stale-result rejection
-- Tectonic and Typst command-line backends
-- Native macOS PDF preview
-- Bibliography, citation, label, and reference indexing
-- Editable `.graf` diagrams with SVG and TikZ export
-- Command palette, quick open, diagnostics, settings, and crash recovery
+## Features
 
-All project content stays in ordinary local files. Graf does not require an account or upload documents by default.
+- Native GPUI editor with syntax highlighting, search, completion, and undo history
+- Project tree, tabs, document outline, diagnostics, and quick open
+- Background compilation with Tectonic and Typst
+- PDF preview beside the source
+- Citation, bibliography, label, and reference indexing
+- Local files with crash recovery
+
+## Install
+
+Prebuilt macOS releases are available from [GitHub Releases](https://github.com/pol-cova/graf/releases) and Homebrew:
+
+```bash
+brew install --cask pol-cova/tap/graf
+```
+
+Linux users can build from source. Release automation also publishes a Linux archive.
 
 ## Requirements
 
-- macOS on Apple Silicon
-- Latest stable Rust toolchain
-- Tectonic available on `PATH` for LaTeX compilation
-- Typst available on `PATH` for Typst compilation
+- Stable Rust for source builds
+- [Tectonic](https://tectonic-typesetting.github.io/) for LaTeX
+- [Typst](https://typst.app/) for Typst documents
+- `sips` on macOS or `pdftoppm` on other platforms for PDF preview
 
-## Run locally
+## Build from source
+
+Install stable Rust, then run:
 
 ```bash
-git clone git@github.com:pol-cova/graf.git
+git clone https://github.com/pol-cova/graf.git
 cd graf
 cargo run
 ```
 
-Graf opens the current directory as the project workspace.
+graf opens the current directory as the workspace. Build the application bundle and DMG with:
 
-## Development checks
+```bash
+./scripts/build_app.sh
+```
+
+## Development
 
 ```bash
 cargo fmt --check
@@ -43,43 +59,10 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## Debugging and profiling
+Press `Command-Shift-D` to show GPUI frame timings. Run `./scripts/profile_app.sh` to record an Instruments Time Profiler trace.
 
-Press `Command-Shift-D` to cycle GPUI's performance overlay through hidden, frame-time, and detailed modes. Detailed mode shows the current draw time, slow-frame percentiles, maximum draw time, and frame count.
-
-Capture an Instruments Time Profiler trace with:
-
-```bash
-./scripts/profile_app.sh
-```
-
-The script builds the `profiling` Cargo profile with release optimizations and debug symbols, then writes a timestamped `.trace` bundle.
-
-## Build the macOS app
-
-```bash
-./scripts/build_app.sh
-```
-
-The script creates `target/release/bundle/Graf.app` and uses `hdiutil` to create a DMG when available. Signing and notarization are not automated yet.
-
-## Project structure
-
-```text
-src/
-├── ai/          AI provider and reviewed edit operations
-├── canvas/      Native diagram scene, tools, and exporters
-├── compiler/    Tectonic and Typst engines plus compile scheduling
-├── editor/      Text buffer, syntax, completion, search, and GPUI view
-├── plugins/     Plugin manifests and command dispatch
-├── preview/     PDF rasterization and preview view
-├── project/     Documents, files, settings, recovery, and references
-├── ui/          Theme definitions
-└── workspace/   Application layout, commands, panels, and modals
-```
-
-The product and milestone plan lives in [`.docs/Graf-spec.md`](.docs/Graf-spec.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [GitHub Discussions](https://github.com/pol-cova/graf/discussions) for support and follow [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
 ## License
 
-Graf is licensed under the Apache License 2.0. See [`LICENSE`](LICENSE).
+graf is available under the [Apache License 2.0](LICENSE).

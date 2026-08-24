@@ -1,10 +1,7 @@
-//! Fast zero-allocation lexical tokenizer and syntax highlighting for LaTeX and Typst source files.
-
 use gpui::{Font, TextRun};
 
 use crate::ui::theme;
 
-/// Category of syntax token for document formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Command,
@@ -15,7 +12,6 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-    /// Returns the theme color for this syntax token.
     pub fn color(self) -> gpui::Rgba {
         match self {
             Self::Command => theme::color(theme::SYNTAX_COMMAND),
@@ -27,7 +23,6 @@ impl TokenKind {
     }
 }
 
-/// Tokenizes a single line of LaTeX text into stylized [`TextRun`]s with safe zero-allocation `char_indices` scanning.
 pub fn highlight_latex_line(line: &str, font: Font) -> Vec<TextRun> {
     if line.is_empty() {
         return Vec::new();
@@ -156,7 +151,6 @@ pub fn highlight_latex_line(line: &str, font: Font) -> Vec<TextRun> {
     runs
 }
 
-/// Tokenizes a single line of Typst text into stylized [`TextRun`]s with safe zero-allocation `char_indices` scanning.
 pub fn highlight_typst_line(line: &str, font: Font) -> Vec<TextRun> {
     if line.is_empty() {
         return Vec::new();
@@ -319,12 +313,26 @@ pub fn highlight_typst_line(line: &str, font: Font) -> Vec<TextRun> {
     runs
 }
 
-/// Highlight a line of text based on language type (LaTeX vs Typst).
 pub fn highlight_line(line: &str, font: Font, is_typst: bool) -> Vec<TextRun> {
     if is_typst {
         highlight_typst_line(line, font)
     } else {
         highlight_latex_line(line, font)
+    }
+}
+
+pub fn plain_text_line(line: &str, font: Font) -> Vec<TextRun> {
+    if line.is_empty() {
+        Vec::new()
+    } else {
+        vec![TextRun {
+            len: line.len(),
+            font,
+            color: theme::color(theme::TEXT).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }]
     }
 }
 

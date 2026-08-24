@@ -1,8 +1,3 @@
-//! Typst document engine implementation (spec §31, M6).
-//!
-//! Compiles `.typ` Typst documents to PDF, parses Typst diagnostics,
-//! and seamlessly integrates into the unified Graf compiler controller.
-
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -17,7 +12,6 @@ use super::engine::{
 static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
-/// The Typst typesetting engine backend.
 pub struct TypstEngine {
     executable: Option<PathBuf>,
     build_dir: PathBuf,
@@ -30,7 +24,6 @@ impl Default for TypstEngine {
 }
 
 impl TypstEngine {
-    /// Creates a new TypstEngine instance with automatic executable discovery.
     pub fn new() -> Self {
         let executable = which_typst();
         let build_dir = std::env::temp_dir().join("graf_typst_session");
@@ -41,7 +34,6 @@ impl TypstEngine {
         }
     }
 
-    /// Creates a TypstEngine with a specific executable path.
     pub fn with_executable(path: impl Into<PathBuf>) -> Self {
         let build_dir = std::env::temp_dir().join("graf_typst_session");
         let _ = fs::create_dir_all(&build_dir);
@@ -51,7 +43,6 @@ impl TypstEngine {
         }
     }
 
-    /// Returns whether the native `typst` binary was discovered on the host system.
     pub fn is_native_available(&self) -> bool {
         self.executable.is_some()
     }
@@ -166,7 +157,6 @@ impl DocumentEngine for TypstEngine {
     }
 }
 
-/// Discovers `typst` binary in PATH or common locations.
 pub fn which_typst() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("GRAF_TYPST_PATH") {
         let p = PathBuf::from(path);
@@ -213,7 +203,6 @@ pub fn which_typst() -> Option<PathBuf> {
     None
 }
 
-/// Parses Typst compiler diagnostic output into structured [`Diagnostic`]s.
 pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -242,7 +231,6 @@ pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
                 line: None,
             });
         } else if trimmed.starts_with("-->") {
-            // Line location: "--> main.typ:12:5"
             let loc_part = trimmed.trim_start_matches("-->").trim();
             let parts: Vec<&str> = loc_part.split(':').collect();
             if parts.len() >= 2 {

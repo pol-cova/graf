@@ -1,48 +1,88 @@
-//! Workspace configuration and persistent user preferences.
-
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use super::persistence::atomic_write;
 
-/// Root configuration settings for the Graf workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GrafSettings {
     #[serde(default)]
     pub editor: EditorSettings,
-    #[serde(default)]
-    pub ai: AiSettings,
-    #[serde(default)]
-    pub canvas: CanvasSettings,
-    #[serde(default)]
-    pub theme: ThemeSettings,
     #[serde(default)]
     pub layout: LayoutSettings,
 }
 
 impl GrafSettings {
     pub fn default_path() -> Option<PathBuf> {
-        let home = std::env::var_os("HOME")?;
-        Some(
-            PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("Graf")
-                .join("settings.json"),
-        )
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join("graf")
+                    .join("settings.json"),
+            )
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let app_data = std::env::var_os("APPDATA")?;
+            Some(PathBuf::from(app_data).join("graf").join("settings.json"))
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+                return Some(
+                    PathBuf::from(config_home)
+                        .join("graf")
+                        .join("settings.json"),
+                );
+            }
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("graf")
+                    .join("settings.json"),
+            )
+        }
     }
 
-    /// Loads settings from JSON string or falls back to defaults.
+    pub fn load_default() -> Self {
+        let Some(path) = Self::default_path() else {
+            return Self::default();
+        };
+        if path.exists() {
+            return Self::load_from_path(&path);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let legacy_path = path
+                .parent()
+                .and_then(Path::parent)
+                .map(|application_support| application_support.join("Graf/settings.json"));
+            legacy_path
+                .filter(|legacy_path| legacy_path.exists())
+                .map_or_else(Self::default, |legacy_path| {
+                    Self::load_from_path(&legacy_path)
+                })
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Self::default()
+    }
+
     pub fn from_json(json: &str) -> Self {
         serde_json::from_str(json).unwrap_or_default()
     }
 
-    /// Serializes settings to pretty-printed JSON string.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
 
-    /// Loads settings from a file on disk.
     pub fn load_from_path(path: &Path) -> Self {
         if let Ok(content) = std::fs::read_to_string(path) {
             Self::from_json(&content)
@@ -51,7 +91,6 @@ impl GrafSettings {
         }
     }
 
-    /// Saves settings to a file on disk atomically.
     pub fn save_to_path(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -61,6 +100,7 @@ impl GrafSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct LayoutSettings {
     pub sidebar_width: f32,
     pub preview_width: f32,
@@ -77,13 +117,14 @@ impl Default for LayoutSettings {
     }
 }
 
-/// Editor display and behavior preferences.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct EditorSettings {
     pub font_size: f32,
     pub tab_size: usize,
     pub line_numbers: bool,
-    pub auto_compile_on_save: bool,
+    #[serde(alias = "auto_compile_on_save")]
+    pub auto_compile: bool,
     pub compile_debounce_ms: u64,
 }
 
@@ -93,58 +134,8 @@ impl Default for EditorSettings {
             font_size: 14.0,
             tab_size: 2,
             line_numbers: true,
-            auto_compile_on_save: true,
+            auto_compile: true,
             compile_debounce_ms: 300,
-        }
-    }
-}
-
-/// Agent Client Protocol (ACP) and AI configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AiSettings {
-    pub acp_command: String,
-    pub acp_server_url: String,
-    pub temperature: f32,
-}
-
-impl Default for AiSettings {
-    fn default() -> Self {
-        Self {
-            acp_command: String::new(),
-            acp_server_url: String::new(),
-            temperature: 0.2,
-        }
-    }
-}
-
-/// Vector Canvas drawing preferences.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CanvasSettings {
-    pub grid_enabled: bool,
-    pub snap_to_grid: bool,
-    pub default_stroke_color: String,
-}
-
-impl Default for CanvasSettings {
-    fn default() -> Self {
-        Self {
-            grid_enabled: true,
-            snap_to_grid: true,
-            default_stroke_color: "#528bff".to_string(),
-        }
-    }
-}
-
-/// Visual theme preferences.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ThemeSettings {
-    pub theme_name: String,
-}
-
-impl Default for ThemeSettings {
-    fn default() -> Self {
-        Self {
-            theme_name: "Zed Dark".to_string(),
         }
     }
 }
@@ -159,14 +150,30 @@ mod tests {
         assert_eq!(settings.editor.font_size, 14.0);
         assert_eq!(settings.editor.tab_size, 2);
         assert!(settings.editor.line_numbers);
-        assert!(settings.canvas.grid_enabled);
 
         let json = settings.to_json();
         assert!(json.contains("font_size"));
-        assert!(json.contains("Zed Dark"));
 
         let loaded = GrafSettings::from_json(&json);
         assert_eq!(loaded, settings);
+    }
+
+    #[test]
+    fn loads_legacy_auto_compile_key() {
+        let json = r#"{
+            "editor": {
+                "font_size": 15.0,
+                "tab_size": 4,
+                "line_numbers": false,
+                "auto_compile_on_save": false,
+                "compile_debounce_ms": 500
+            }
+        }"#;
+
+        let loaded = GrafSettings::from_json(json);
+        assert!(!loaded.editor.auto_compile);
+        assert_eq!(loaded.editor.font_size, 15.0);
+        assert_eq!(loaded.layout, LayoutSettings::default());
     }
 
     #[test]

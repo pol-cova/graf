@@ -1,11 +1,8 @@
-//! In-buffer Find and Replace engine (spec §M2.4).
-
 use std::ops::Range;
 
 #[cfg(test)]
 use crate::editor::buffer::TextBuffer;
 
-/// State for document search and replacement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindState {
     pub query: String,
@@ -22,7 +19,6 @@ impl Default for FindState {
 }
 
 impl FindState {
-    /// Creates a new empty find state.
     pub fn new() -> Self {
         Self {
             query: String::new(),
@@ -33,19 +29,16 @@ impl FindState {
         }
     }
 
-    /// Updates the search query and recomputes match positions in `content`.
     pub fn set_query(&mut self, query: impl Into<String>, content: &str) {
         self.query = query.into();
         self.recompute_matches(content);
     }
 
-    /// Toggles case-sensitive searching and updates matches.
     pub fn toggle_case_sensitive(&mut self, content: &str) {
         self.case_sensitive = !self.case_sensitive;
         self.recompute_matches(content);
     }
 
-    /// Recomputes all occurrences of `query` in `content`.
     pub fn recompute_matches(&mut self, content: &str) {
         self.matches.clear();
         if self.query.is_empty() {
@@ -76,7 +69,6 @@ impl FindState {
         }
     }
 
-    /// Advances to the next match, wrapping around to the start.
     pub fn next_match(&mut self) -> Option<&Range<usize>> {
         if self.matches.is_empty() {
             return None;
@@ -89,7 +81,6 @@ impl FindState {
         self.matches.get(next_idx)
     }
 
-    /// Steps backward to the previous match, wrapping around to the end.
     pub fn prev_match(&mut self) -> Option<&Range<usize>> {
         if self.matches.is_empty() {
             return None;
@@ -102,13 +93,11 @@ impl FindState {
         self.matches.get(prev_idx)
     }
 
-    /// Returns the currently active match range.
     #[cfg(test)]
     pub fn active_match(&self) -> Option<&Range<usize>> {
         self.active_match_idx.and_then(|idx| self.matches.get(idx))
     }
 
-    /// Returns the match count display string (e.g. `1 of 5` or `0 of 0`).
     pub fn count_label(&self) -> String {
         if self.matches.is_empty() {
             "0 results".to_string()
@@ -118,7 +107,6 @@ impl FindState {
         }
     }
 
-    /// Replaces the currently active match with `replace_with` in `buffer`.
     #[cfg(test)]
     pub fn replace_current(&mut self, buffer: &mut TextBuffer) -> Option<usize> {
         let range = self.active_match()?.clone();
@@ -132,7 +120,6 @@ impl FindState {
         Some(new_cursor)
     }
 
-    /// Replaces all matches in the buffer within an atomic transaction. Returns count of replacements.
     #[cfg(test)]
     pub fn replace_all(&mut self, buffer: &mut TextBuffer) -> usize {
         if self.matches.is_empty() {
@@ -143,7 +130,6 @@ impl FindState {
         let initial_cursor = self.matches[0].start;
         buffer.begin_transaction(initial_cursor);
 
-        // Apply replacements in reverse order so character offsets of earlier matches remain valid
         for m in self.matches.iter().rev() {
             buffer.delete(m.clone());
             buffer.insert(m.start, &self.replace_with);
@@ -169,17 +155,14 @@ mod tests {
         assert_eq!(find.active_match_idx, Some(0));
         assert_eq!(find.active_match(), Some(&(16..19)));
 
-        // Next match
         let next = find.next_match().unwrap();
         assert_eq!(*next, 49..52);
         assert_eq!(find.active_match_idx, Some(1));
 
-        // Wrap around
         let wrap = find.next_match().unwrap();
         assert_eq!(*wrap, 16..19);
         assert_eq!(find.active_match_idx, Some(0));
 
-        // Prev match
         let prev = find.prev_match().unwrap();
         assert_eq!(*prev, 49..52);
         assert_eq!(find.active_match_idx, Some(1));
@@ -224,7 +207,6 @@ mod tests {
         assert_eq!(buffer.content(), "qux bar qux baz qux");
         assert_eq!(find.matches.len(), 0);
 
-        // Verify that undo completely restores the original content
         buffer.undo();
         assert_eq!(buffer.content(), "foo bar foo baz foo");
     }
