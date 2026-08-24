@@ -2,79 +2,75 @@
 
 ## Project
 
-Graf is a fast, native workspace for technical writing built with Rust and GPUI.
+Graf is a local-first technical writing workspace for macOS. It is written in Rust and rendered with GPUI. The main interaction is `write -> compile -> preview -> revise`.
 
-## Current Milestone
+The repository is in M7, Distribution and Polish. Prefer reliability, accessibility, packaging, documentation, and performance fixes over new product areas.
 
-M7 — Distribution & Polish
+## Read before changing code
 
-## Engineering Rules
+1. Read `.docs/Graf-spec.md` before major work.
+2. Inspect the existing module and its callers before adding an abstraction.
+3. Check the current Git diff and keep unrelated user changes intact.
+4. Confirm that the work belongs to M7 or is required to fix an existing feature.
+5. Never stage or commit `.docs/` or `docs/`; they are local planning material.
 
-1. Read the spec (`.docs/Graf-spec.md`) before major work.
-2. Identify and work only on the current milestone.
-3. Inspect existing code before creating replacements.
-4. Avoid duplicate abstractions.
-5. Keep patches reasonably small.
-6. Keep `cargo check` passing at all times.
-7. Add tests for non-trivial core logic.
-8. Run relevant tests before completing work.
-9. Never block the UI thread with expensive operations.
-10. Avoid speculative optimization.
-11. Avoid adding future features early.
-12. No WebViews or Electron — use native GPUI rendering.
-13. Preserve local-first architecture.
-14. Document important architectural decisions.
-15. Update the spec when a deliberate architectural change is made.
+## Product constraints
 
-## Code Quality
+- Keep project content in ordinary local files.
+- Never upload document content without an explicit user action.
+- Use native GPUI rendering. Do not add Electron, a WebView, React, or browser UI.
+- Run compilation, PDF rendering, project scans, and other expensive work off the UI thread.
+- Keep compiler-specific behavior inside `src/compiler/`.
+- Keep persistent document state separate from temporary view state.
+- Preserve the last valid preview when a compile fails.
+- Reject stale background results by revision.
+- Do not generate fake compiler output when a backend is unavailable.
 
-Before completing any milestone:
+## Code rules
+
+- Keep patches focused and reuse existing types.
+- Prefer explicit errors over `unwrap`, ignored `Result` values, or silent fallback in runtime code.
+- Use atomic writes for documents, settings, and recovery data.
+- Add tests for parsing, persistence, revision handling, and other non-trivial core logic.
+- Avoid broad warning suppressions. A narrow `allow` needs a reason.
+- Do not add a dependency until the standard library and current dependencies have been considered.
+- Update the spec only when the architecture or planned behavior deliberately changes.
+- Add an ADR under `docs/adr/` only for a lasting architectural decision.
+
+## UI rules
+
+- Match a compact native editor, with Zed as the main visual reference.
+- Use the shared colors in `src/ui/theme.rs`; do not hardcode colors in views.
+- Prefer text labels or monochrome symbols over emoji.
+- Keep controls restrained, keyboard accessible, and visible at narrow window sizes.
+- Avoid gradients, glass effects, oversized controls, and decorative animation.
+
+## Required checks
+
+Run these before finishing:
 
 ```bash
 cargo fmt --check
 cargo check
-cargo clippy
+cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-No warnings introduced by Graf code.
+Do not introduce warnings from Graf code. The known `block` future-compatibility warning comes from an upstream GPUI dependency.
 
 ## Architecture
 
-- Language: Rust
-- UI: GPUI (native rendering)
-- LaTeX: Tectonic (later)
-- PDF: PDFium + pdfium-render (later)
-- Parsing: Tree-sitter (later)
-- Primary target: macOS / Apple Silicon
+- `src/app.rs`: GPUI application and native window setup
+- `src/workspace/`: shell, tabs, panels, commands, modals, and task coordination
+- `src/editor/`: text buffer, input, rendering, syntax, completion, and search
+- `src/project/`: documents, project tree, persistence, settings, recovery, and references
+- `src/compiler/`: engine interface, diagnostics, Tectonic, Typst, and compile controller
+- `src/preview/`: PDF rasterization and preview state
+- `src/canvas/`: `.graf` scene model, editor, history, and exporters
+- `src/ai/`: provider boundary, operations, and reviewed diffs
+- `src/plugins/`: plugin manifests and command dispatch
+- `src/ui/`: shared theme values
 
-## Repository Layout
+## Platform notes
 
-```
-src/
-├── main.rs        # Entry point, logging init
-├── app.rs         # GPUI application setup, window creation
-├── workspace.rs   # Workspace shell layout (top bar, panels, status bar)
-├── compiler/
-│   ├── mod.rs         # Compiler module root
-│   ├── engine.rs      # DocumentEngine trait, CompileRequest/Output/Error
-│   ├── tectonic.rs    # Tectonic LaTeX backend implementation
-│   ├── diagnostics.rs # Diagnostic data types and log parsing
-│   └── controller.rs  # Compile state machine, debounce, and stale rejection
-├── editor/
-│   ├── mod.rs     # Editor module root
-│   ├── buffer.rs  # TextBuffer with transaction-based undo/redo
-│   ├── syntax.rs  # Fast lexical LaTeX syntax tokenizer
-│   └── view.rs    # Multiline GPUI editor view (IME, selection, scroll, line numbers)
-├── preview/
-│   ├── mod.rs      # Preview module root
-│   ├── renderer.rs # PdfRenderer trait and native rasterizer
-│   └── view.rs     # GPUI PreviewView with page scrolling and retained output
-├── project/
-│   ├── mod.rs      # Project module root
-│   ├── document.rs # Open document state, dirty tracking, disk persistence
-│   └── tree.rs     # Project filesystem tree and directory scanner
-└── ui/
-    ├── mod.rs     # UI module root
-    └── theme.rs   # Centralised colour constants
-```
+The primary target is Apple Silicon macOS. Avoid macOS assumptions in core data models, but platform-specific UI and PDF code may live behind internal interfaces. Tectonic and Typst currently run as external commands. PDF rasterization currently uses the macOS `sips` tool.
