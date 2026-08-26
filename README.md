@@ -63,6 +63,12 @@ Press `Command-Shift-D` to show GPUI frame timings. Run `./scripts/profile_app.s
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [GitHub Discussions](https://github.com/pol-cova/graf/discussions) for support and follow [SECURITY.md](SECURITY.md) for private vulnerability reports.
 
+## Acknowledgements
+
+graf is written in [Rust](https://www.rust-lang.org/) and uses [GPUI](https://www.gpui.rs/) from the [Zed](https://github.com/zed-industries/zed) project for its native interface. Its Rust dependencies include [Serde](https://serde.rs/), [unicode-segmentation](https://crates.io/crates/unicode-segmentation), [log](https://crates.io/crates/log), [env_logger](https://crates.io/crates/env_logger), and [tempfile](https://crates.io/crates/tempfile). See [Cargo.toml](Cargo.toml) and [Cargo.lock](Cargo.lock) for the complete dependency list and pinned versions.
+
+graf also works with separately installed tools: [Tectonic](https://tectonic-typesetting.github.io/) and [Typst](https://typst.app/) compile documents, while macOS `sips` and Poppler's [`pdftoppm`](https://poppler.freedesktop.org/) rasterize PDF previews.
+
 ## License
 
 graf is available under the [Apache License 2.0](LICENSE).
