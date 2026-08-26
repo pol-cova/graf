@@ -6,6 +6,8 @@ use crate::project::settings::{AcpSettings, AiProviderKind, AiSettings};
 
 use serde::{Deserialize, Serialize};
 
+const DEFAULT_AI_TIMEOUT_SECONDS: u64 = 120;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiRequest {
     pub system_prompt: String,
@@ -145,7 +147,7 @@ impl AiProvider for OpenAiCompatibleProvider {
         );
         let response = ureq::post(&url)
             .set("Authorization", &format!("Bearer {api_key}"))
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(DEFAULT_AI_TIMEOUT_SECONDS))
             .send_json(self.chat_request(request))
             .map_err(|error| AiError {
                 message: format!("AI request failed: {error}"),
@@ -188,7 +190,7 @@ impl AcpConfig {
             .and_then(|args| serde_json::from_str(&args).ok())
             .unwrap_or_else(|| settings.args.clone());
         let timeout_seconds = if settings.timeout_seconds == 0 {
-            120
+            DEFAULT_AI_TIMEOUT_SECONDS
         } else {
             settings.timeout_seconds
         };
