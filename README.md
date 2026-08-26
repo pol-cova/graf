@@ -38,7 +38,20 @@ Linux users can build from source. Release automation also publishes a Linux arc
 - [Typst](https://typst.app/) for Typst documents
 - [`pdftoppm`](https://poppler.freedesktop.org/) from Poppler for multi-page PDF preview (`sips` provides a single-page fallback on macOS)
 
-Optional AI operations use any OpenAI-compatible endpoint. Configure with `GRAF_AI_API_KEY`, and optionally `GRAF_AI_BASE_URL` (for example `http://localhost:11434/v1` for Ollama) and `GRAF_AI_MODEL`; `settings.json` also accepts `ai.base_url` and `ai.model`.
+AI uses a local Agent Client Protocol process by default. Configure `ai.acp.command` and `ai.acp.args` in `settings.json`, or set `GRAF_ACP_COMMAND` and `GRAF_ACP_ARGS` (a JSON argument array). Graf sends only the active document text and does not grant filesystem or terminal capabilities to ACP agents. OpenAI-compatible HTTP remains available with `ai.provider` set to `openai_compatible`, `GRAF_AI_API_KEY`, and optionally `GRAF_AI_BASE_URL` or `GRAF_AI_MODEL`.
+
+```json
+{
+  "ai": {
+    "provider": "acp",
+    "acp": {
+      "command": "/path/to/agent",
+      "args": ["--acp"],
+      "timeout_seconds": 120
+    }
+  }
+}
+```
 
 ## Build from source
 

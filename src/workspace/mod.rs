@@ -230,10 +230,7 @@ impl Workspace {
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
-        let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_default_provider(
-            settings.ai.base_url.clone(),
-            settings.ai.model.clone(),
-        );
+        let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_provider(&settings.ai);
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
             settings.editor.compile_debounce_ms,
         ));
