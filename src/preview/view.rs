@@ -90,10 +90,10 @@ impl Render for PreviewView {
 
 impl PreviewView {
     fn render_toolbar(&self, page_count: usize, cx: &mut Context<Self>) -> impl IntoElement {
-        let page_label = if page_count == 0 {
-            "No preview".to_string()
-        } else {
-            format!("Page 1 of {page_count}")
+        let page_label = match page_count {
+            0 => "No preview".to_string(),
+            1 => "1 page".to_string(),
+            n => format!("{n} pages"),
         };
 
         div()

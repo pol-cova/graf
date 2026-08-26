@@ -141,6 +141,7 @@ pub enum ActiveModal {
     AiAssist(String),
     DiffReview(DiffReview),
     ConfirmClose(usize),
+    RestoreRecovery,
     Settings(SettingsTab),
     About,
 }
@@ -182,6 +183,7 @@ pub struct Workspace {
     pub(crate) find_state: FindState,
     pub(crate) find_bar_open: bool,
     pub(crate) active_modal: ActiveModal,
+    pub(crate) pending_recovery: Option<crate::project::recovery::RecoveryJournal>,
 }
 
 impl Workspace {
@@ -228,7 +230,10 @@ impl Workspace {
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
-        let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_default_provider();
+        let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_default_provider(
+            settings.ai.base_url.clone(),
+            settings.ai.model.clone(),
+        );
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
             settings.editor.compile_debounce_ms,
         ));
@@ -295,7 +300,21 @@ impl Workspace {
             find_state: FindState::new(),
             find_bar_open: false,
             active_modal: ActiveModal::None,
+            pending_recovery: None,
         };
+
+        let recovery_dir = workspace
+            .project_tree
+            .root_path()
+            .join(".graf")
+            .join("recovery");
+        if let Some(journal) =
+            crate::project::recovery::RecoveryJournal::load_from_dir(&recovery_dir)
+            && !journal.entries.is_empty()
+        {
+            workspace.pending_recovery = Some(journal);
+            workspace.active_modal = ActiveModal::RestoreRecovery;
+        }
 
         workspace.reload_bibtex_and_labels(cx);
         if !workspace.show_welcome {

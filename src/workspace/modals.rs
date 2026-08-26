@@ -17,6 +17,7 @@ impl Workspace {
         let is_ai_assist = matches!(self.active_modal, ActiveModal::AiAssist(_));
         let is_diff_review = matches!(self.active_modal, ActiveModal::DiffReview(_));
         let is_confirm_close = matches!(self.active_modal, ActiveModal::ConfirmClose(_));
+        let is_restore_recovery = matches!(self.active_modal, ActiveModal::RestoreRecovery);
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
         let is_about = matches!(self.active_modal, ActiveModal::About);
 
@@ -25,6 +26,7 @@ impl Workspace {
             && !is_ai_assist
             && !is_diff_review
             && !is_confirm_close
+            && !is_restore_recovery
             && !is_settings
             && !is_about
         {
@@ -43,6 +45,8 @@ impl Workspace {
             "About graf"
         } else if is_confirm_close {
             "Unsaved changes"
+        } else if is_restore_recovery {
+            "Restore unsaved work"
         } else {
             "Review changes"
         };
@@ -482,6 +486,94 @@ impl Workspace {
                                         cx.listener(|this, _, _, cx| this.close_modal(cx)),
                                     )
                                     .child("OK"),
+                            ),
+                    ),
+            );
+        } else if is_restore_recovery {
+            let entries = self
+                .pending_recovery
+                .as_ref()
+                .map(|journal| journal.entries.clone())
+                .unwrap_or_default();
+
+            let mut list = div().flex().flex_col().gap_1();
+            for entry in &entries {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .px_2()
+                        .py_1()
+                        .rounded_xs()
+                        .bg(theme::color(theme::BG_BAR))
+                        .text_xs()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme::color(theme::TEXT))
+                                .child(entry.title.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .child(format!("{} chars", entry.content.len())),
+                        ),
+                );
+            }
+
+            modal_content = modal_content.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .p_4()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme::color(theme::TEXT))
+                            .child("graf found unsaved changes from a previous session."),
+                    )
+                    .child(list)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("discard-recovery")
+                                    .px_3()
+                                    .py_1()
+                                    .rounded_xs()
+                                    .text_xs()
+                                    .text_color(theme::color(theme::ACCENT_RED))
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.discard_recovery(cx)),
+                                    )
+                                    .child("Discard"),
+                            )
+                            .child(
+                                div()
+                                    .id("restore-recovery")
+                                    .px_3()
+                                    .py_1()
+                                    .rounded_xs()
+                                    .bg(theme::color(theme::ACCENT_BLUE))
+                                    .text_xs()
+                                    .text_color(theme::color(theme::BG))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| this.restore_recovery(cx)),
+                                    )
+                                    .child("Restore"),
                             ),
                     ),
             );

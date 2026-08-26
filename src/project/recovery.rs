@@ -7,6 +7,12 @@ use super::persistence::atomic_write;
 
 const RECOVERY_FILE_NAME: &str = "session_recovery.json";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreTarget {
+    Existing(PathBuf),
+    Untitled(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryEntry {
     pub title: String,
@@ -43,6 +49,13 @@ pub struct RecoveryJournal {
 impl RecoveryJournal {
     pub fn new(entries: Vec<RecoveryEntry>) -> Self {
         Self { entries }
+    }
+
+    pub fn restore_target(entry: &RecoveryEntry) -> RestoreTarget {
+        match &entry.path {
+            Some(path) if path.is_file() => RestoreTarget::Existing(path.clone()),
+            _ => RestoreTarget::Untitled(entry.title.clone()),
+        }
     }
 
     pub fn to_json(&self) -> String {
@@ -82,6 +95,30 @@ impl RecoveryJournal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_target_prefers_existing_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("paper.tex");
+        std::fs::write(&path, "on disk").unwrap();
+
+        let existing = RecoveryEntry::new("paper.tex", Some(path.clone()), "unsaved");
+        let missing = RecoveryEntry::new("draft.tex", Some(temp.path().join("gone.tex")), "text");
+        let untitled = RecoveryEntry::new("notes.typ", None, "= Notes");
+
+        assert_eq!(
+            RecoveryJournal::restore_target(&existing),
+            RestoreTarget::Existing(path)
+        );
+        assert_eq!(
+            RecoveryJournal::restore_target(&missing),
+            RestoreTarget::Untitled("draft.tex".to_string())
+        );
+        assert_eq!(
+            RecoveryJournal::restore_target(&untitled),
+            RestoreTarget::Untitled("notes.typ".to_string())
+        );
+    }
 
     #[test]
     fn test_recovery_journal_serialization() {
