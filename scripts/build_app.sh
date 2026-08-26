@@ -23,6 +23,7 @@ cp "target/release/graf" "${MACOS_DIR}/graf"
 chmod +x "${MACOS_DIR}/graf"
 
 cp "bundle/Info.plist" "${CONTENTS_DIR}/Info.plist"
+cp "bundle/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${VERSION}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VERSION}" "${CONTENTS_DIR}/Info.plist"
 

@@ -1,4 +1,4 @@
-use crate::canvas::scene::{CanvasDocument, ElementKind, StrokeStyle};
+use crate::canvas::scene::{CanvasDocument, DEFAULT_STROKE_COLOR, ElementKind, StrokeStyle};
 
 pub fn export_to_svg(doc: &CanvasDocument) -> String {
     let padding = 16.0;
@@ -23,7 +23,7 @@ pub fn export_to_svg(doc: &CanvasDocument) -> String {
     arrow_colors.sort();
     arrow_colors.dedup();
     if arrow_colors.is_empty() {
-        arrow_colors.push("#528bff".to_string());
+        arrow_colors.push(DEFAULT_STROKE_COLOR.to_string());
     }
 
     svg.push_str("<defs>\n");
