@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::diagnostics::Diagnostic;
 use super::engine::{CompileError, CompileId, CompileOutput};
@@ -57,11 +57,8 @@ pub struct StaleResult {
 
 pub struct CompilerController {
     current_revision: u64,
-    latest_completed_revision: u64,
     state: CompileState,
     debounce_duration: Duration,
-    last_edit_time: Option<Instant>,
-    latest_artifact: Option<Vec<u8>>,
 }
 
 impl Default for CompilerController {
@@ -78,11 +75,8 @@ impl CompilerController {
     pub fn with_debounce(debounce_duration: Duration) -> Self {
         Self {
             current_revision: 0,
-            latest_completed_revision: 0,
             state: CompileState::Idle,
             debounce_duration,
-            last_edit_time: None,
-            latest_artifact: None,
         }
     }
 
@@ -98,50 +92,42 @@ impl CompilerController {
         self.current_revision
     }
 
-    pub fn latest_completed_revision(&self) -> u64 {
-        self.latest_completed_revision
-    }
-
-    pub fn latest_artifact(&self) -> Option<&[u8]> {
-        self.latest_artifact.as_deref()
-    }
-
     pub fn debounce_duration(&self) -> Duration {
         self.debounce_duration
     }
 
     pub fn reset(&mut self) {
+        self.current_revision = 0;
         self.state = CompileState::Idle;
-        self.last_edit_time = None;
-        self.latest_artifact = None;
     }
 
     pub fn set_debounce_duration(&mut self, duration: Duration) {
         self.debounce_duration = duration;
     }
 
-    pub fn on_source_edited(&mut self, new_revision: u64, now: Instant) {
+    pub fn on_source_edited(&mut self, new_revision: u64) {
         if new_revision > self.current_revision {
             self.current_revision = new_revision;
-            self.last_edit_time = Some(now);
             self.state = CompileState::Waiting;
         }
     }
 
-    pub fn is_debounce_elapsed(&self, now: Instant) -> bool {
-        self.last_edit_time.is_some_and(|edit_time| {
-            now.saturating_duration_since(edit_time) >= self.debounce_duration
-        })
-    }
-
     pub fn begin_compile(&mut self, id: CompileId, revision: u64) {
+        self.current_revision = self.current_revision.max(revision);
         self.state = CompileState::Compiling { id, revision };
     }
 
-    fn reject_if_stale(&mut self, revision: u64) -> Result<(), StaleResult> {
-        if revision < self.current_revision {
-            if let CompileState::Compiling { revision: cur, .. } = self.state
-                && cur == revision
+    fn reject_if_stale(&mut self, id: CompileId, revision: u64) -> Result<(), StaleResult> {
+        let is_active_compile = matches!(
+            self.state,
+            CompileState::Compiling {
+                id: active_id,
+                revision: active_revision,
+            } if active_id == id && active_revision == revision
+        );
+        if revision < self.current_revision || !is_active_compile {
+            if let CompileState::Compiling { id: active_id, .. } = self.state
+                && active_id == id
             {
                 self.state = CompileState::Waiting;
             }
@@ -154,20 +140,19 @@ impl CompilerController {
         }
     }
 
-    pub fn handle_output(&mut self, output: CompileOutput) -> Result<&[u8], StaleResult> {
-        self.reject_if_stale(output.revision)?;
+    pub fn handle_output(&mut self, output: CompileOutput) -> Result<(), StaleResult> {
+        self.reject_if_stale(output.compile_id, output.revision)?;
 
-        self.latest_completed_revision = output.revision;
         self.state = CompileState::Success {
             id: output.compile_id,
             revision: output.revision,
             duration: output.duration,
         };
-        Ok(self.latest_artifact.insert(output.artifact).as_slice())
+        Ok(())
     }
 
     pub fn handle_error(&mut self, error: CompileError) -> Result<(), StaleResult> {
-        self.reject_if_stale(error.revision)?;
+        self.reject_if_stale(error.compile_id, error.revision)?;
 
         self.state = CompileState::Failed {
             id: error.compile_id,
@@ -190,28 +175,54 @@ mod tests {
         let controller = CompilerController::new();
         assert_eq!(controller.state(), &CompileState::Idle);
         assert_eq!(controller.current_revision(), 0);
-        assert_eq!(controller.latest_completed_revision(), 0);
         assert_eq!(controller.status_text(), "ready");
     }
 
     #[test]
-    fn test_debounce_and_waiting() {
-        let mut controller = CompilerController::with_debounce(Duration::from_millis(100));
-        let t0 = Instant::now();
+    fn reset_clears_revision_tracking() {
+        let mut controller = CompilerController::new();
+        controller.on_source_edited(7);
+        controller.begin_compile(CompileId(1), 7);
+        controller
+            .handle_output(CompileOutput {
+                compile_id: CompileId(1),
+                revision: 7,
+                artifact: b"pdf".to_vec(),
+                artifact_kind: ArtifactKind::Pdf,
+                diagnostics: vec![],
+                duration: Duration::from_millis(1),
+            })
+            .expect("current output should be accepted");
 
-        controller.on_source_edited(1, t0);
+        controller.reset();
+
+        assert_eq!(controller.current_revision(), 0);
+        assert_eq!(controller.state(), &CompileState::Idle);
+    }
+
+    #[test]
+    fn begin_compile_tracks_manual_compile_revision() {
+        let mut controller = CompilerController::new();
+
+        controller.begin_compile(CompileId(1), 4);
+
+        assert_eq!(controller.current_revision(), 4);
+    }
+
+    #[test]
+    fn source_edit_enters_waiting_state() {
+        let mut controller = CompilerController::with_debounce(Duration::from_millis(100));
+
+        controller.on_source_edited(1);
+
         assert_eq!(controller.state(), &CompileState::Waiting);
         assert_eq!(controller.current_revision(), 1);
-        assert!(!controller.is_debounce_elapsed(t0 + Duration::from_millis(50)));
-        assert!(controller.is_debounce_elapsed(t0 + Duration::from_millis(100)));
     }
 
     #[test]
     fn test_compiling_and_success_flow() {
         let mut controller = CompilerController::new();
-        let t0 = Instant::now();
-
-        controller.on_source_edited(1, t0);
+        controller.on_source_edited(1);
         controller.begin_compile(CompileId(10), 1);
         assert_eq!(
             controller.state(),
@@ -240,22 +251,47 @@ mod tests {
                 duration: Duration::from_millis(45)
             }
         );
-        assert_eq!(controller.latest_completed_revision(), 1);
+    }
+
+    #[test]
+    fn output_from_reset_compile_session_is_rejected() {
+        let mut controller = CompilerController::new();
+        controller.begin_compile(CompileId(1), 7);
+        controller.reset();
+        controller.begin_compile(CompileId(2), 0);
+
+        let result = controller.handle_output(CompileOutput {
+            compile_id: CompileId(1),
+            revision: 7,
+            artifact: b"old document".to_vec(),
+            artifact_kind: ArtifactKind::Pdf,
+            diagnostics: vec![],
+            duration: Duration::from_millis(1),
+        });
+
         assert_eq!(
-            controller.latest_artifact(),
-            Some(b"%PDF-1.5 test content".as_slice())
+            result,
+            Err(StaleResult {
+                completed_revision: 7,
+                current_revision: 0,
+            })
+        );
+        assert_eq!(
+            controller.state(),
+            &CompileState::Compiling {
+                id: CompileId(2),
+                revision: 0,
+            }
         );
     }
 
     #[test]
     fn test_stale_output_rejection() {
         let mut controller = CompilerController::new();
-        let t0 = Instant::now();
-
-        controller.on_source_edited(1, t0);
+        controller.on_source_edited(1);
         controller.begin_compile(CompileId(1), 1);
 
-        controller.on_source_edited(2, t0 + Duration::from_millis(50));
+        controller.on_source_edited(2);
         assert_eq!(controller.current_revision(), 2);
 
         let output_rev1 = CompileOutput {
@@ -275,19 +311,16 @@ mod tests {
                 current_revision: 2,
             })
         );
-        assert_eq!(controller.latest_artifact(), None);
         assert_eq!(controller.state(), &CompileState::Waiting);
     }
 
     #[test]
     fn test_stale_error_rejection() {
         let mut controller = CompilerController::new();
-        let t0 = Instant::now();
-
-        controller.on_source_edited(1, t0);
+        controller.on_source_edited(1);
         controller.begin_compile(CompileId(1), 1);
 
-        controller.on_source_edited(2, t0 + Duration::from_millis(50));
+        controller.on_source_edited(2);
 
         let err_rev1 = CompileError {
             compile_id: CompileId(1),
@@ -311,9 +344,7 @@ mod tests {
     #[test]
     fn test_error_state_handling() {
         let mut controller = CompilerController::new();
-        let t0 = Instant::now();
-
-        controller.on_source_edited(1, t0);
+        controller.on_source_edited(1);
         controller.begin_compile(CompileId(1), 1);
 
         let err = CompileError {
@@ -340,9 +371,7 @@ mod tests {
     #[test]
     fn test_multiple_errors_status_text() {
         let mut controller = CompilerController::new();
-        let t0 = Instant::now();
-
-        controller.on_source_edited(1, t0);
+        controller.on_source_edited(1);
         controller.begin_compile(CompileId(1), 1);
 
         let err = CompileError {

@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::persistence::atomic_write;
 
+const RECOVERY_FILE_NAME: &str = "session_recovery.json";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryEntry {
     pub title: String,
@@ -53,13 +55,13 @@ impl RecoveryJournal {
 
     pub fn save_to_dir(&self, dir: &Path) -> std::io::Result<PathBuf> {
         fs::create_dir_all(dir)?;
-        let file_path = dir.join("session_recovery.json");
+        let file_path = dir.join(RECOVERY_FILE_NAME);
         atomic_write(&file_path, self.to_json().as_bytes())?;
         Ok(file_path)
     }
 
     pub fn load_from_dir(dir: &Path) -> Option<Self> {
-        let file_path = dir.join("session_recovery.json");
+        let file_path = dir.join(RECOVERY_FILE_NAME);
         if file_path.exists() {
             let content = fs::read_to_string(&file_path).ok()?;
             Self::from_json(&content)
@@ -69,7 +71,7 @@ impl RecoveryJournal {
     }
 
     pub fn clear_dir(dir: &Path) -> std::io::Result<()> {
-        let file_path = dir.join("session_recovery.json");
+        let file_path = dir.join(RECOVERY_FILE_NAME);
         if file_path.exists() {
             fs::remove_file(file_path)?;
         }

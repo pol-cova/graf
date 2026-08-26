@@ -5,11 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
-use super::engine::{
-    ArtifactKind, CompileError, CompileId, CompileOutput, CompileRequest, DocumentEngine,
-};
+use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
 
-static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct TypstEngine {
@@ -27,31 +24,17 @@ impl TypstEngine {
     pub fn new() -> Self {
         let executable = which_typst();
         let build_dir = std::env::temp_dir().join("graf_typst_session");
-        let _ = fs::create_dir_all(&build_dir);
         Self {
             executable,
             build_dir,
         }
-    }
-
-    pub fn with_executable(path: impl Into<PathBuf>) -> Self {
-        let build_dir = std::env::temp_dir().join("graf_typst_session");
-        let _ = fs::create_dir_all(&build_dir);
-        Self {
-            executable: Some(path.into()),
-            build_dir,
-        }
-    }
-
-    pub fn is_native_available(&self) -> bool {
-        self.executable.is_some()
     }
 }
 
 impl DocumentEngine for TypstEngine {
     fn compile(&self, request: CompileRequest) -> Result<CompileOutput, CompileError> {
         let start = Instant::now();
-        let compile_id = CompileId(NEXT_COMPILE_ID.fetch_add(1, Ordering::Relaxed));
+        let compile_id = request.compile_id;
         let revision = request.revision;
 
         let build_path = self.build_dir.join(format!("job_{}", compile_id.0));
@@ -84,7 +67,6 @@ impl DocumentEngine for TypstEngine {
         };
 
         let output_pdf = build_path.join(&output_pdf_name);
-        let _ = fs::remove_file(&output_pdf);
 
         let Some(executable) = &self.executable else {
             let message = "Typst is not installed or configured".to_string();
@@ -280,9 +262,11 @@ warning: variable 'x' is never used
             build_dir: directory.path().to_path_buf(),
         };
         let request = CompileRequest::simple("= Document", 1);
+        let compile_id = request.compile_id;
 
         let error = engine.compile(request).unwrap_err();
 
+        assert_eq!(error.compile_id, compile_id);
         assert_eq!(error.message, "Typst is not installed or configured");
         assert_eq!(error.diagnostics.len(), 1);
     }

@@ -9,6 +9,7 @@ mod plugins;
 mod preview;
 mod project;
 mod ui;
+mod util;
 mod workspace;
 
 fn main() {

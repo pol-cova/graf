@@ -70,34 +70,10 @@ pub struct ClientCapabilities {
     pub terminal: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct InitializeResult {
-    pub protocol_version: u32,
-    pub agent_info: AgentInfo,
-    pub capabilities: AgentCapabilities,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentInfo {
-    pub name: String,
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct AgentCapabilities {
-    pub streaming: bool,
-    pub tool_calls: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SessionNewParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionNewResult {
-    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_STROKE_COLOR: &str = "#528bff";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanvasDocument {
     pub version: u32,
@@ -324,7 +326,7 @@ pub struct ElementStyle {
 impl Default for ElementStyle {
     fn default() -> Self {
         Self {
-            stroke_color: "#528bff".to_string(),
+            stroke_color: DEFAULT_STROKE_COLOR.to_string(),
             stroke_width: 2.0,
             stroke_style: StrokeStyle::Solid,
             fill_color: Some("#21252b".to_string()),

@@ -4,6 +4,10 @@
 [![Release](https://img.shields.io/github/v/release/pol-cova/graf?include_prereleases)](https://github.com/pol-cova/graf/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+<p align="center">
+  <img src="assets/icons/app-icon.png" width="144" alt="graf app icon">
+</p>
+
 graf is a native editor for LaTeX and Typst. It keeps source, compilation, and PDF preview in one local workspace.
 
 > graf is alpha software. Keep important documents under version control or backed up.
