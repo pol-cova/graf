@@ -27,11 +27,7 @@ impl AiOperationKind {
     }
 }
 
-pub fn execute_operation(
-    provider: &dyn AiProvider,
-    kind: &AiOperationKind,
-    context: &str,
-) -> Result<String, String> {
+fn request_for_operation(kind: &AiOperationKind, context: &str) -> AiRequest {
     let (system_prompt, user_prompt) = match kind {
         AiOperationKind::RewriteAcademic => (
             "You are an expert academic editor for peer-reviewed technical publications. Rewrite the selected text to enhance clarity, conciseness, and academic rigor while preserving all technical terminology and LaTeX equations verbatim. Return only the revised text.",
@@ -58,9 +54,16 @@ pub fn execute_operation(
         ),
     };
 
-    let request = AiRequest::new(system_prompt, user_prompt);
+    AiRequest::new(system_prompt, user_prompt)
+}
+
+pub fn execute_operation(
+    provider: &dyn AiProvider,
+    kind: &AiOperationKind,
+    context: &str,
+) -> Result<String, String> {
     let response = provider
-        .complete(&request)
+        .complete(&request_for_operation(kind, context))
         .map_err(|e| format!("AI generation failed: {e}"))?;
 
     Ok(response.text.trim().to_string())
@@ -80,63 +83,28 @@ pub fn parse_canvas_response(response: &str) -> Result<CanvasDocument, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::provider::{AiError, AiResponse};
-
-    struct StubProvider;
-
-    impl AiProvider for StubProvider {
-        fn complete(&self, request: &AiRequest) -> Result<AiResponse, AiError> {
-            let text = if request.user_prompt.contains("Generate .graf") {
-                CanvasDocument::new().to_json().unwrap()
-            } else if request.user_prompt.contains("Fix LaTeX") {
-                "\\begin{equation}\nE = mc^2\n\\end{equation}".to_string()
-            } else {
-                "Rewritten text".to_string()
-            };
-            Ok(AiResponse {
-                text,
-                model: "test".to_string(),
-            })
-        }
-    }
 
     #[test]
-    fn test_execute_ai_operations() {
-        let provider = StubProvider;
-
-        let rewritten = execute_operation(
-            &provider,
-            &AiOperationKind::RewriteAcademic,
-            "we did this because it is faster",
-        )
-        .unwrap();
-        assert_eq!(rewritten, "Rewritten text");
-
-        let fixed = execute_operation(
-            &provider,
+    fn builds_operation_request_from_context() {
+        let request = request_for_operation(
             &AiOperationKind::FixDiagnostic {
                 message: "Undefined control sequence".to_string(),
                 line: Some(12),
             },
             "\\begin{equation}\n ... \\end{equation}",
-        )
-        .unwrap();
-        assert!(fixed.contains("\\begin{equation}"));
+        );
+
+        assert!(request.user_prompt.contains("Undefined control sequence"));
+        assert!(request.user_prompt.contains("\\begin{equation}"));
     }
 
     #[test]
-    fn test_generate_canvas_diagram_parsing() {
-        let provider = StubProvider;
-        let json = execute_operation(
-            &provider,
-            &AiOperationKind::GenerateDiagram {
-                prompt: "Transformer architecture".to_string(),
-            },
-            "",
-        )
-        .unwrap();
+    fn parses_fenced_canvas_document() {
+        let json = CanvasDocument::new().to_json().expect("serialize canvas");
+        let response = format!("```json\n{json}\n```");
 
-        let document = parse_canvas_response(&json).expect("valid canvas document");
+        let document = parse_canvas_response(&response).expect("valid canvas document");
+
         assert!(document.elements.is_empty());
     }
 }

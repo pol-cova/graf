@@ -438,8 +438,8 @@ mod tests {
     fn test_multibyte_utf8_fuzz_operations() {
         let mut buf = TextBuffer::new();
 
-        let sample = "café graf\nこんにちは世界\nFormula: ∑_{i=1}^n x_i\n";
-        buf.insert(0, sample);
+        let unicode_text = "café graf\nこんにちは世界\nFormula: ∑_{i=1}^n x_i\n";
+        buf.insert(0, unicode_text);
         assert_eq!(buf.line_count(), 4);
 
         let line1_text = buf.line_content(1).unwrap();

@@ -156,7 +156,7 @@ The empirical results demonstrate significant improvements over baselines.
 
     #[test]
     fn test_conference_budget_summary() {
-        let mut stats = DocumentStats::compute("sample", false);
+        let mut stats = DocumentStats::compute("Technical writing", false);
         stats.word_count = 2200;
 
         let summary = stats.status_summary(&ConferenceProfile::NeurIPS);
