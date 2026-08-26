@@ -223,6 +223,60 @@ impl Workspace {
         .detach();
     }
 
+    pub fn restore_recovery(&mut self, cx: &mut Context<Self>) {
+        let Some(journal) = self.pending_recovery.take() else {
+            self.active_modal = ActiveModal::None;
+            cx.notify();
+            return;
+        };
+
+        for entry in journal.entries {
+            match crate::project::recovery::RecoveryJournal::restore_target(&entry) {
+                crate::project::recovery::RestoreTarget::Existing(path) => {
+                    if let Some(index) = self
+                        .documents
+                        .iter()
+                        .position(|document| document.path() == Some(path.as_path()))
+                    {
+                        let document = &mut self.documents[index];
+                        if document.buffer().content() != entry.content {
+                            document.buffer_mut().replace_all(entry.content);
+                        }
+                    } else if let Ok(mut document) = Document::open(&path) {
+                        document.buffer_mut().replace_all(entry.content);
+                        self.documents.push(document);
+                    }
+                }
+                crate::project::recovery::RestoreTarget::Untitled(title) => {
+                    self.documents
+                        .push(Document::new_untitled(title, entry.content));
+                }
+            }
+        }
+
+        self.clear_recovery_journal();
+        self.active_modal = ActiveModal::None;
+        if self.documents.is_empty() {
+            cx.notify();
+        } else {
+            self.activate_document(self.documents.len() - 1, cx);
+        }
+    }
+
+    pub fn discard_recovery(&mut self, cx: &mut Context<Self>) {
+        self.pending_recovery = None;
+        self.clear_recovery_journal();
+        self.active_modal = ActiveModal::None;
+        cx.notify();
+    }
+
+    fn clear_recovery_journal(&self) {
+        let recovery_dir = self.project_tree.root_path().join(".graf").join("recovery");
+        if let Err(error) = crate::project::recovery::RecoveryJournal::clear_dir(&recovery_dir) {
+            warn!("failed to clear recovery journal: {error}");
+        }
+    }
+
     pub fn save_recovery_snapshot(&self) {
         let entries: Vec<crate::project::recovery::RecoveryEntry> = self
             .documents

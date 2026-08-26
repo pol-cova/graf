@@ -17,7 +17,7 @@ graf is a native editor for LaTeX and Typst. It keeps source, compilation, and P
 - Native GPUI editor with syntax highlighting, search, completion, and undo history
 - Project tree, tabs, document outline, diagnostics, and quick open
 - Background compilation with Tectonic and Typst
-- PDF preview beside the source
+- Multi-page PDF preview beside the source
 - Citation, bibliography, label, and reference indexing
 - Local files with crash recovery
 
@@ -36,7 +36,9 @@ Linux users can build from source. Release automation also publishes a Linux arc
 - Stable Rust for source builds
 - [Tectonic](https://tectonic-typesetting.github.io/) for LaTeX
 - [Typst](https://typst.app/) for Typst documents
-- `sips` on macOS or `pdftoppm` on other platforms for PDF preview
+- [`pdftoppm`](https://poppler.freedesktop.org/) from Poppler for multi-page PDF preview (`sips` provides a single-page fallback on macOS)
+
+Optional AI operations use any OpenAI-compatible endpoint. Configure with `GRAF_AI_API_KEY`, and optionally `GRAF_AI_BASE_URL` (for example `http://localhost:11434/v1` for Ollama) and `GRAF_AI_MODEL`; `settings.json` also accepts `ai.base_url` and `ai.model`.
 
 ## Build from source
 

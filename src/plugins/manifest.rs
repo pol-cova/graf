@@ -3,10 +3,21 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PluginCapability {
-    Formatter { language: String },
+    Formatter {
+        language: String,
+        #[serde(default)]
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+    },
     Linter,
-    Command { id: String, title: String },
-    Exporter { target_format: String },
+    Command {
+        id: String,
+        title: String,
+    },
+    Exporter {
+        target_format: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -46,6 +57,8 @@ mod tests {
             capabilities: vec![
                 PluginCapability::Formatter {
                     language: "typst".to_string(),
+                    command: "typstyle".to_string(),
+                    args: vec![],
                 },
                 PluginCapability::Command {
                     id: "typst.format".to_string(),

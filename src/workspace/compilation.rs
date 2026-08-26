@@ -4,6 +4,7 @@ impl Workspace {
     pub(super) fn on_editor_changed(&mut self, editor: Entity<EditorView>, cx: &mut Context<Self>) {
         let rev = editor.read(cx).revision();
         self.sync_active_doc_from_editor(cx);
+        self.save_recovery_snapshot();
         self.reload_editor_labels(cx);
         self.trigger_autocomplete(cx);
 

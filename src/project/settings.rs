@@ -11,6 +11,8 @@ pub struct GrafSettings {
     pub editor: EditorSettings,
     #[serde(default)]
     pub layout: LayoutSettings,
+    #[serde(default)]
+    pub ai: AiSettings,
 }
 
 impl GrafSettings {
@@ -103,6 +105,12 @@ impl GrafSettings {
         }
         atomic_write(path, self.to_json().as_bytes())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct AiSettings {
+    pub base_url: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

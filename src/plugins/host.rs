@@ -1,4 +1,6 @@
 use crate::plugins::manifest::{PluginCapability, PluginManifest};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone)]
 pub struct LoadedPlugin {
@@ -56,9 +58,15 @@ impl PluginHost {
                 continue;
             }
             for cap in &plugin.manifest.capabilities {
-                if matches!(cap, PluginCapability::Formatter { language } if language.eq_ignore_ascii_case(lang))
+                if let PluginCapability::Formatter {
+                    language,
+                    command,
+                    args,
+                } = cap
+                    && language.eq_ignore_ascii_case(lang)
+                    && !command.is_empty()
                 {
-                    return Some(text.trim().to_string());
+                    return run_formatter(command, args, text);
                 }
             }
         }
@@ -81,6 +89,28 @@ impl PluginHost {
     }
 }
 
+fn run_formatter(command: &str, args: &[String], text: &str) -> Option<String> {
+    let mut child = Command::new(command)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    let input = text.to_string();
+    let mut stdin = child.stdin.take()?;
+    std::thread::spawn(move || {
+        stdin.write_all(input.as_bytes()).ok();
+    });
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -100,6 +130,8 @@ mod tests {
             capabilities: vec![
                 PluginCapability::Formatter {
                     language: "latex".to_string(),
+                    command: String::new(),
+                    args: vec![],
                 },
                 PluginCapability::Command {
                     id: "latex.prettify".to_string(),
@@ -114,8 +146,53 @@ mod tests {
         let commands = host.list_commands();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].0, "latex.prettify");
+    }
 
-        let formatted = host.dispatch_format("latex", "  \\section{Hello}  \n");
-        assert_eq!(formatted.as_deref(), Some("\\section{Hello}"));
+    #[cfg(unix)]
+    #[test]
+    fn dispatch_format_runs_plugin_command() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let script = temp.path().join("upper.sh");
+        std::fs::write(&script, "#!/bin/sh\ntr '[:lower:]' '[:upper:]'\n").expect("write script");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let mut host = PluginHost::new();
+        host.register_plugin(PluginManifest {
+            id: "graf.test.formatter".to_string(),
+            name: "Upper Formatter".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            author: None,
+            entrypoint: PathBuf::from("plugin.wasm"),
+            capabilities: vec![PluginCapability::Formatter {
+                language: "latex".to_string(),
+                command: script.display().to_string(),
+                args: vec![],
+            }],
+        });
+
+        let formatted = host.dispatch_format("latex", "hello formatter");
+        assert_eq!(formatted.as_deref(), Some("HELLO FORMATTER"));
+    }
+
+    #[test]
+    fn dispatch_format_ignores_plugins_without_commands() {
+        let mut host = PluginHost::new();
+        host.register_plugin(PluginManifest {
+            id: "graf.latex.formatter".to_string(),
+            name: "LaTeX Formatter".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            author: None,
+            entrypoint: PathBuf::from("latex_fmt.wasm"),
+            capabilities: vec![PluginCapability::Formatter {
+                language: "latex".to_string(),
+                command: String::new(),
+                args: vec![],
+            }],
+        });
+
+        assert_eq!(host.dispatch_format("latex", "\\section{Hello}"), None);
     }
 }
