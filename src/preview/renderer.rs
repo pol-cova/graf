@@ -2,6 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+const PREVIEW_RASTER_WIDTH: &str = "1224";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
     pub page_index: usize,
@@ -11,8 +13,11 @@ pub struct RenderedPage {
 }
 
 pub trait PdfRenderer: Send + Sync {
-    fn render_document(&self, revision: u64, pdf_bytes: &[u8])
-    -> Result<Vec<RenderedPage>, String>;
+    fn render_document(
+        &self,
+        render_id: u64,
+        pdf_bytes: &[u8],
+    ) -> Result<Vec<RenderedPage>, String>;
 }
 
 pub struct NativePdfRenderer {
@@ -27,10 +32,8 @@ impl Default for NativePdfRenderer {
 
 impl NativePdfRenderer {
     pub fn new() -> Self {
-        let temp_dir = std::env::temp_dir().join("graf_pdf_cache");
-        fs::create_dir_all(&temp_dir).ok();
         Self {
-            cache_dir: temp_dir,
+            cache_dir: std::env::temp_dir().join("graf_pdf_cache"),
         }
     }
 }
@@ -38,21 +41,21 @@ impl NativePdfRenderer {
 impl PdfRenderer for NativePdfRenderer {
     fn render_document(
         &self,
-        revision: u64,
+        render_id: u64,
         pdf_bytes: &[u8],
     ) -> Result<Vec<RenderedPage>, String> {
         if pdf_bytes.is_empty() || !pdf_bytes.starts_with(b"%PDF-") {
             return Err("Invalid or empty PDF data".to_string());
         }
 
-        let run_dir = self.cache_dir.join(format!("rev_{revision}"));
-        fs::create_dir_all(&run_dir).map_err(|e| format!("Failed to create rev dir: {e}"))?;
+        let run_dir = self.cache_dir.join(format!("render_{render_id}"));
+        fs::create_dir_all(&run_dir)
+            .map_err(|error| format!("Failed to create preview directory: {error}"))?;
 
         let pdf_file = run_dir.join("document.pdf");
         let png_file = run_dir.join("page_1.png");
 
         fs::write(&pdf_file, pdf_bytes).map_err(|e| format!("Failed to write PDF: {e}"))?;
-        let _ = fs::remove_file(&png_file);
 
         #[cfg(target_os = "macos")]
         let (tool, output) = (
@@ -62,7 +65,7 @@ impl PdfRenderer for NativePdfRenderer {
                 .arg("format")
                 .arg("png")
                 .arg("--resampleWidth")
-                .arg("1224")
+                .arg(PREVIEW_RASTER_WIDTH)
                 .arg(&pdf_file)
                 .arg("--out")
                 .arg(&png_file)
@@ -80,7 +83,7 @@ impl PdfRenderer for NativePdfRenderer {
                     .arg("1")
                     .arg("-singlefile")
                     .arg("-scale-to-x")
-                    .arg("1224")
+                    .arg(PREVIEW_RASTER_WIDTH)
                     .arg("-scale-to-y")
                     .arg("-1")
                     .arg(&pdf_file)

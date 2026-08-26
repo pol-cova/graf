@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::diagnostics::Diagnostic;
@@ -15,21 +16,26 @@ pub enum ArtifactKind {
 
 #[derive(Debug, Clone)]
 pub struct CompileRequest {
+    pub compile_id: CompileId,
     pub source: String,
     pub revision: u64,
     pub project_root: Option<PathBuf>,
     pub root_document: Option<PathBuf>,
-    pub build_dir: Option<PathBuf>,
 }
 
 impl CompileRequest {
+    fn next_id() -> CompileId {
+        static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
+        CompileId(NEXT_COMPILE_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
     pub fn simple(source: impl Into<String>, revision: u64) -> Self {
         Self {
+            compile_id: Self::next_id(),
             source: source.into(),
             revision,
             project_root: None,
             root_document: None,
-            build_dir: None,
         }
     }
 
@@ -40,11 +46,11 @@ impl CompileRequest {
         root_document: Option<PathBuf>,
     ) -> Self {
         Self {
+            compile_id: Self::next_id(),
             source: source.into(),
             revision,
             project_root,
             root_document,
-            build_dir: None,
         }
     }
 }

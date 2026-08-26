@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use super::persistence::atomic_write;
 
+const SETTINGS_FILE_NAME: &str = "settings.json";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GrafSettings {
     #[serde(default)]
@@ -21,14 +23,18 @@ impl GrafSettings {
                     .join("Library")
                     .join("Application Support")
                     .join("graf")
-                    .join("settings.json"),
+                    .join(SETTINGS_FILE_NAME),
             )
         }
 
         #[cfg(target_os = "windows")]
         {
             let app_data = std::env::var_os("APPDATA")?;
-            Some(PathBuf::from(app_data).join("graf").join("settings.json"))
+            Some(
+                PathBuf::from(app_data)
+                    .join("graf")
+                    .join(SETTINGS_FILE_NAME),
+            )
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -37,7 +43,7 @@ impl GrafSettings {
                 return Some(
                     PathBuf::from(config_home)
                         .join("graf")
-                        .join("settings.json"),
+                        .join(SETTINGS_FILE_NAME),
                 );
             }
             let home = std::env::var_os("HOME")?;
@@ -45,7 +51,7 @@ impl GrafSettings {
                 PathBuf::from(home)
                     .join(".config")
                     .join("graf")
-                    .join("settings.json"),
+                    .join(SETTINGS_FILE_NAME),
             )
         }
     }
@@ -180,7 +186,7 @@ mod tests {
     fn test_settings_file_io() {
         let temp_dir =
             std::env::temp_dir().join(format!("graf_settings_test_{}", std::process::id()));
-        let settings_path = temp_dir.join("settings.json");
+        let settings_path = temp_dir.join(SETTINGS_FILE_NAME);
 
         let mut settings = GrafSettings::default();
         settings.editor.font_size = 16.0;

@@ -92,16 +92,16 @@ impl CanvasView {
         export_to_svg(&self.document)
     }
 
-    pub fn export_tikz(&self) -> String {
-        crate::canvas::tikz::export_to_tikz(&self.document)
-    }
-
     pub fn document(&self) -> &CanvasDocument {
         &self.document
     }
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    fn next_element_id(&self) -> String {
+        format!("elem-{}", self.document.elements.len() + 1)
     }
 
     pub fn set_tool(&mut self, tool: CanvasTool, cx: &mut Context<Self>) {
@@ -176,7 +176,7 @@ impl CanvasView {
             }
             CanvasTool::Rectangle => {
                 self.history.push_snapshot(self.document.clone());
-                let id = format!("elem-{}", self.document.elements.len() + 1);
+                let id = self.next_element_id();
                 let rect = CanvasElement::new_rectangle(id.clone(), x, y, 120.0, 80.0, 4.0);
                 self.document.add_element(rect);
                 self.selected_element_id = Some(id);
@@ -185,7 +185,7 @@ impl CanvasView {
             }
             CanvasTool::Ellipse => {
                 self.history.push_snapshot(self.document.clone());
-                let id = format!("elem-{}", self.document.elements.len() + 1);
+                let id = self.next_element_id();
                 let ellipse = CanvasElement::new_ellipse(id.clone(), x, y, 100.0, 100.0);
                 self.document.add_element(ellipse);
                 self.selected_element_id = Some(id);
@@ -194,7 +194,7 @@ impl CanvasView {
             }
             CanvasTool::Arrow => {
                 self.history.push_snapshot(self.document.clone());
-                let id = format!("elem-{}", self.document.elements.len() + 1);
+                let id = self.next_element_id();
                 let arrow = CanvasElement::new_arrow(id.clone(), x, y, x + 80.0, y);
                 self.document.add_element(arrow);
                 self.selected_element_id = Some(id);
@@ -203,7 +203,7 @@ impl CanvasView {
             }
             CanvasTool::Line => {
                 self.history.push_snapshot(self.document.clone());
-                let id = format!("elem-{}", self.document.elements.len() + 1);
+                let id = self.next_element_id();
                 let line = CanvasElement::new_line(id.clone(), x, y, x + 80.0, y);
                 self.document.add_element(line);
                 self.selected_element_id = Some(id);
@@ -212,7 +212,7 @@ impl CanvasView {
             }
             CanvasTool::Text => {
                 self.history.push_snapshot(self.document.clone());
-                let id = format!("elem-{}", self.document.elements.len() + 1);
+                let id = self.next_element_id();
                 let text = CanvasElement::new_text(id.clone(), x, y, "Label", 14.0);
                 self.document.add_element(text);
                 self.selected_element_id = Some(id);

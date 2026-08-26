@@ -1,15 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
-use super::engine::{
-    ArtifactKind, CompileError, CompileId, CompileOutput, CompileRequest, DocumentEngine,
-};
-
-static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
+use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
 
 pub struct TectonicEngine {
     executable: PathBuf,
@@ -26,18 +21,8 @@ impl TectonicEngine {
     pub fn new() -> Self {
         let executable = which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic"));
         let build_dir = std::env::temp_dir().join("graf_tectonic_session");
-        let _ = fs::create_dir_all(&build_dir);
         Self {
             executable,
-            build_dir,
-        }
-    }
-
-    pub fn with_executable(path: impl Into<PathBuf>) -> Self {
-        let build_dir = std::env::temp_dir().join("graf_tectonic_session");
-        let _ = fs::create_dir_all(&build_dir);
-        Self {
-            executable: path.into(),
             build_dir,
         }
     }
@@ -53,7 +38,7 @@ impl TectonicEngine {
 impl DocumentEngine for TectonicEngine {
     fn compile(&self, request: CompileRequest) -> Result<CompileOutput, CompileError> {
         let start = Instant::now();
-        let compile_id = CompileId(NEXT_COMPILE_ID.fetch_add(1, Ordering::Relaxed));
+        let compile_id = request.compile_id;
         let revision = request.revision;
 
         let build_path = self.build_dir.join(format!("job_{}", compile_id.0));
@@ -86,7 +71,6 @@ impl DocumentEngine for TectonicEngine {
         };
 
         let output_pdf = build_path.join(output_pdf_name);
-        let _ = fs::remove_file(&output_pdf);
 
         let output = Command::new(&self.executable)
             .arg("--keep-intermediates")

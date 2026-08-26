@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use crate::ai::acp::ACP_PROTOCOL_VERSION;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiRequest {
     pub system_prompt: String,
@@ -48,7 +46,6 @@ pub trait AiProvider: Send + Sync {
 pub struct AcpConfig {
     pub agent_command: Option<String>,
     pub server_url: Option<String>,
-    pub protocol_version: u32,
 }
 
 impl Default for AcpConfig {
@@ -56,7 +53,6 @@ impl Default for AcpConfig {
         Self {
             agent_command: std::env::var("GRAF_ACP_COMMAND").ok(),
             server_url: std::env::var("GRAF_ACP_SERVER").ok(),
-            protocol_version: ACP_PROTOCOL_VERSION,
         }
     }
 }
@@ -68,10 +64,6 @@ pub struct AcpAiProvider {
 impl AcpAiProvider {
     pub fn new(config: AcpConfig) -> Self {
         Self { config }
-    }
-
-    pub fn config(&self) -> &AcpConfig {
-        &self.config
     }
 }
 
@@ -100,7 +92,6 @@ mod tests {
         let provider = AcpAiProvider::new(AcpConfig {
             agent_command: None,
             server_url: None,
-            protocol_version: ACP_PROTOCOL_VERSION,
         });
         let request = AiRequest::new("system", "prompt");
 
