@@ -1,11 +1,8 @@
-use std::path::PathBuf;
-
 use crate::plugins::manifest::{PluginCapability, PluginManifest};
 
 #[derive(Debug, Clone)]
 pub struct LoadedPlugin {
     pub manifest: PluginManifest,
-    pub base_path: PathBuf,
     pub is_enabled: bool,
 }
 
@@ -21,11 +18,10 @@ impl PluginHost {
         }
     }
 
-    pub fn register_plugin(&mut self, manifest: PluginManifest, base_path: PathBuf) {
+    pub fn register_plugin(&mut self, manifest: PluginManifest) {
         if !self.plugins.iter().any(|p| p.manifest.id == manifest.id) {
             self.plugins.push(LoadedPlugin {
                 manifest,
-                base_path,
                 is_enabled: true,
             });
         }
@@ -33,7 +29,7 @@ impl PluginHost {
 
     pub fn scan_plugin_directory(&mut self) -> usize {
         let mut count = 0;
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::util::home_dir() {
             let plugins_dir = home.join(".graf/plugins");
             if plugins_dir.is_dir()
                 && let Ok(entries) = std::fs::read_dir(&plugins_dir)
@@ -45,7 +41,7 @@ impl PluginHost {
                         .and_then(|c| PluginManifest::from_json(&c).ok());
 
                     if let Some(manifest) = manifest_res {
-                        self.register_plugin(manifest, entry.path());
+                        self.register_plugin(manifest);
                         count += 1;
                     }
                 }
@@ -85,16 +81,10 @@ impl PluginHost {
     }
 }
 
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -118,7 +108,7 @@ mod tests {
             ],
         };
 
-        host.register_plugin(manifest, PathBuf::from("/mock/plugin"));
+        host.register_plugin(manifest);
         assert_eq!(host.plugins.len(), 1);
 
         let commands = host.list_commands();

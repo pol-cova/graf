@@ -6,6 +6,7 @@ pub mod document;
 pub mod linter;
 pub mod outline;
 mod persistence;
+pub(crate) use persistence::atomic_write;
 #[allow(dead_code)]
 pub mod recovery;
 #[allow(dead_code)]

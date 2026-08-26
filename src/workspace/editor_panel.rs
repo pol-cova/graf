@@ -8,6 +8,14 @@ use crate::ui::theme;
 
 impl Workspace {
     pub fn render_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.show_welcome {
+            return div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .child(self.render_welcome(cx));
+        }
+
         let mut body = div().flex().flex_1().min_h_0();
 
         if self.sidebar_visible {

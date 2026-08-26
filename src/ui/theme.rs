@@ -10,14 +10,6 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Dark => "Zed Dark",
-            Self::Light => "Zed Light",
-            Self::HighContrast => "High Contrast",
-        }
-    }
-
     pub fn palette(&self) -> ThemePalette {
         match self {
             Self::Dark => ThemePalette::dark(),
@@ -52,24 +44,24 @@ pub struct ThemePalette {
 impl ThemePalette {
     pub fn dark() -> Self {
         Self {
-            bg: 0x181818,
-            bg_surface: 0x1e1e1e,
-            bg_canvas: 0x1a1d24,
-            bg_bar: 0x141414,
-            tab_active: 0x181818,
-            border: 0x2b2b2b,
-            line_highlight: 0x202020,
-            text: 0xe0e0e0,
-            text_muted: 0x9a9a9a,
-            accent_green: 0x49aa63,
-            accent_orange: 0xe59c38,
-            accent_red: 0xe05555,
-            accent_blue: 0x4f8cc9,
-            hover_bg: 0x292929,
-            syntax_command: 0x569cd6,
-            syntax_math: 0xdcdcaa,
-            syntax_comment: 0x6a9955,
-            syntax_punctuation: 0x8a8a8a,
+            bg: BG,
+            bg_surface: BG_SURFACE,
+            bg_canvas: BG_CANVAS,
+            bg_bar: BG_BAR,
+            tab_active: TAB_ACTIVE,
+            border: BORDER,
+            line_highlight: LINE_HIGHLIGHT,
+            text: TEXT,
+            text_muted: TEXT_MUTED,
+            accent_green: ACCENT_GREEN,
+            accent_orange: ACCENT_ORANGE,
+            accent_red: ACCENT_RED,
+            accent_blue: ACCENT_BLUE,
+            hover_bg: HOVER_BG,
+            syntax_command: SYNTAX_COMMAND,
+            syntax_math: SYNTAX_MATH,
+            syntax_comment: SYNTAX_COMMENT,
+            syntax_punctuation: SYNTAX_PUNCTUATION,
         }
     }
 

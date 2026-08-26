@@ -77,7 +77,7 @@ impl ZoteroLibrary {
     pub fn scan_local_storage() -> Self {
         let mut lib = Self::new();
 
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::util::home_dir() {
             let candidates = [
                 home.join("Zotero/better-bibtex.bib"),
                 home.join("Zotero/My Library.bib"),
@@ -137,14 +137,6 @@ impl ZoteroLibrary {
                     || item.authors.iter().any(|a| a.to_lowercase().contains(&q))
             })
             .collect()
-    }
-}
-
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn home_dir() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(PathBuf::from)
     }
 }
 

@@ -683,17 +683,14 @@ impl Workspace {
             let ai_ops = [
                 (
                     AiOperationKind::RewriteAcademic,
-                    "Polish Academic Tone",
                     "Rewrite buffer with formal tone & mathematical rigor",
                 ),
                 (
                     AiOperationKind::Shorten,
-                    "Shorten and Condense",
                     "Tighten prose while retaining formulas and key claims",
                 ),
                 (
                     AiOperationKind::Explain,
-                    "Explain Section or Formula",
                     "Generate clear walkthrough of selected technical concepts",
                 ),
                 (
@@ -701,14 +698,12 @@ impl Workspace {
                         message: "Auto-detected diagnostic".to_string(),
                         line: None,
                     },
-                    "Fix LaTeX Compiler Errors",
                     "Analyze errors and apply automated syntax patch",
                 ),
                 (
                     AiOperationKind::GenerateDiagram {
                         prompt: "System Architecture Pipeline".to_string(),
                     },
-                    "Generate Vector Diagram",
                     "Create structured vector scene from description",
                 ),
             ];
@@ -719,7 +714,8 @@ impl Workspace {
                 .flex_col()
                 .py_1()
                 .overflow_scroll();
-            for (op, name, desc) in ai_ops {
+            for (op, desc) in ai_ops {
+                let name = op.label();
                 let row = div()
                     .id(format!("ai-op-{}", name))
                     .flex()
