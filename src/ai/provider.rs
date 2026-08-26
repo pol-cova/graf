@@ -1,5 +1,8 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+
+use crate::project::settings::{AcpSettings, AiProviderKind, AiSettings};
 
 use serde::{Deserialize, Serialize};
 
@@ -170,15 +173,29 @@ impl AiProvider for OpenAiCompatibleProvider {
 
 #[derive(Debug, Clone)]
 pub struct AcpConfig {
-    pub agent_command: Option<String>,
-    pub server_url: Option<String>,
+    pub command: Option<PathBuf>,
+    pub args: Vec<String>,
+    pub timeout: Duration,
 }
 
-impl Default for AcpConfig {
-    fn default() -> Self {
+impl AcpConfig {
+    fn from_settings(settings: &AcpSettings) -> Self {
+        let command = std::env::var_os("GRAF_ACP_COMMAND")
+            .map(PathBuf::from)
+            .or_else(|| settings.command.clone());
+        let args = std::env::var("GRAF_ACP_ARGS")
+            .ok()
+            .and_then(|args| serde_json::from_str(&args).ok())
+            .unwrap_or_else(|| settings.args.clone());
+        let timeout_seconds = if settings.timeout_seconds == 0 {
+            120
+        } else {
+            settings.timeout_seconds
+        };
         Self {
-            agent_command: std::env::var("GRAF_ACP_COMMAND").ok(),
-            server_url: std::env::var("GRAF_ACP_SERVER").ok(),
+            command,
+            args,
+            timeout: Duration::from_secs(timeout_seconds),
         }
     }
 }
@@ -194,26 +211,53 @@ impl AcpAiProvider {
 }
 
 impl AiProvider for AcpAiProvider {
+    fn complete(&self, request: &AiRequest) -> Result<AiResponse, AiError> {
+        let command = self.config.command.as_deref().ok_or_else(|| AiError {
+            message: "No ACP agent is configured. Set ai.acp.command or GRAF_ACP_COMMAND."
+                .to_string(),
+        })?;
+        let cwd = std::env::current_dir().map_err(|error| AiError {
+            message: format!("Failed to determine ACP working directory: {error}"),
+        })?;
+        let mut client =
+            crate::ai::acp::AcpClient::connect(command, &self.config.args, self.config.timeout)
+                .map_err(|message| AiError { message })?;
+        let model = client.initialize().map_err(|message| AiError { message })?;
+        let text = client
+            .complete(&cwd, &request.system_prompt, &request.user_prompt)
+            .map_err(|message| AiError { message })?;
+        Ok(AiResponse { text, model })
+    }
+}
+
+pub struct DisabledAiProvider;
+
+impl AiProvider for DisabledAiProvider {
     fn complete(&self, _request: &AiRequest) -> Result<AiResponse, AiError> {
         Err(AiError {
-            message: if self.config.agent_command.is_none() && self.config.server_url.is_none() {
-                "No ACP agent is configured".to_string()
-            } else {
-                "ACP transport is not implemented".to_string()
-            },
+            message: "AI is disabled in settings".to_string(),
         })
     }
 }
 
-pub fn create_default_provider(
-    base_url: Option<String>,
-    model: Option<String>,
-) -> Arc<dyn AiProvider> {
-    let config = OpenAiConfig::from_env(base_url, model);
-    if config.api_key.is_some() {
-        Arc::new(OpenAiCompatibleProvider::new(config))
-    } else {
-        Arc::new(AcpAiProvider::new(AcpConfig::default()))
+pub fn create_provider(settings: &AiSettings) -> Arc<dyn AiProvider> {
+    let provider = std::env::var("GRAF_AI_PROVIDER")
+        .ok()
+        .and_then(|value| match value.as_str() {
+            "acp" => Some(AiProviderKind::Acp),
+            "openai_compatible" => Some(AiProviderKind::OpenAiCompatible),
+            "disabled" => Some(AiProviderKind::Disabled),
+            _ => None,
+        })
+        .unwrap_or_else(|| settings.provider.clone());
+    match provider {
+        AiProviderKind::Acp => {
+            Arc::new(AcpAiProvider::new(AcpConfig::from_settings(&settings.acp)))
+        }
+        AiProviderKind::OpenAiCompatible => Arc::new(OpenAiCompatibleProvider::new(
+            OpenAiConfig::from_env(settings.base_url.clone(), settings.model.clone()),
+        )),
+        AiProviderKind::Disabled => Arc::new(DisabledAiProvider),
     }
 }
 
@@ -250,6 +294,19 @@ mod tests {
         let parsed: ChatCompletionResponse = serde_json::from_str(json).expect("parse");
 
         assert_eq!(parsed.choices[0].message.content.trim(), "rewritten text");
+    }
+
+    #[test]
+    fn reads_acp_settings() {
+        let config = AcpConfig::from_settings(&AcpSettings {
+            command: Some(PathBuf::from("/usr/local/bin/agent")),
+            args: vec!["--acp".to_string()],
+            timeout_seconds: 45,
+        });
+
+        assert_eq!(config.command, Some(PathBuf::from("/usr/local/bin/agent")));
+        assert_eq!(config.args, vec!["--acp"]);
+        assert_eq!(config.timeout, Duration::from_secs(45));
     }
 
     #[test]
