@@ -3,6 +3,9 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
+
+use crate::util::prune_numbered_dirs;
 
 const PREVIEW_RASTER_WIDTH: &str = "1224";
 const PAGE_PREFIX: &str = "page";
@@ -23,8 +26,11 @@ pub trait PdfRenderer: Send + Sync {
     ) -> Result<Vec<RenderedPage>, String>;
 }
 
+const RENDER_RUNS_TO_KEEP: usize = 2;
+const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
+
 pub struct NativePdfRenderer {
-    cache_dir: PathBuf,
+    cache_dir: crate::util::TemporarySessionDir,
 }
 
 impl Default for NativePdfRenderer {
@@ -36,7 +42,7 @@ impl Default for NativePdfRenderer {
 impl NativePdfRenderer {
     pub fn new() -> Self {
         Self {
-            cache_dir: std::env::temp_dir().join("graf_pdf_cache"),
+            cache_dir: crate::util::TemporarySessionDir::new("graf_pdf"),
         }
     }
 
@@ -94,11 +100,20 @@ impl PdfRenderer for NativePdfRenderer {
         render_id: u64,
         pdf_bytes: &[u8],
     ) -> Result<Vec<RenderedPage>, String> {
+        // Each render gets a fresh directory, so the cache would grow by a
+        // full PDF and page images on every compile. Age-guarded pruning
+        // leaves in-flight renders alone.
+        prune_numbered_dirs(
+            self.cache_dir.path(),
+            "render_",
+            RENDER_RUNS_TO_KEEP,
+            PRUNE_MIN_IDLE,
+        );
         if pdf_bytes.is_empty() || !pdf_bytes.starts_with(b"%PDF-") {
             return Err("Invalid or empty PDF data".to_string());
         }
 
-        let run_dir = self.cache_dir.join(format!("render_{render_id}"));
+        let run_dir = self.cache_dir.path().join(format!("render_{render_id}"));
         fs::create_dir_all(&run_dir)
             .map_err(|error| format!("Failed to create preview directory: {error}"))?;
 

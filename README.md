@@ -34,8 +34,7 @@ Linux users can build from source. Release automation also publishes a Linux arc
 ## Requirements
 
 - Stable Rust for source builds
-- [Tectonic](https://tectonic-typesetting.github.io/) for LaTeX
-- [Typst](https://typst.app/) for Typst documents
+- [Tectonic](https://tectonic-typesetting.github.io/) and [Typst](https://typst.app/), bundled in release builds. Source builds use system installs when present.
 - [`pdftoppm`](https://poppler.freedesktop.org/) from Poppler for multi-page PDF preview (`sips` provides a single-page fallback on macOS)
 
 AI uses a local Agent Client Protocol process by default. Configure `ai.acp.command` and `ai.acp.args` in `settings.json`, or set `GRAF_ACP_COMMAND` and `GRAF_ACP_ARGS` (a JSON argument array). Graf sends only the active document text and does not grant filesystem or terminal capabilities to ACP agents. OpenAI-compatible HTTP remains available with `ai.provider` set to `openai_compatible`, `GRAF_AI_API_KEY`, and optionally `GRAF_AI_BASE_URL` or `GRAF_AI_MODEL`.
@@ -84,9 +83,15 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use [GitH
 
 ## Acknowledgements
 
-graf is written in [Rust](https://www.rust-lang.org/) and uses [GPUI](https://www.gpui.rs/) from the [Zed](https://github.com/zed-industries/zed) project for its native interface. Its Rust dependencies include [Serde](https://serde.rs/), [unicode-segmentation](https://crates.io/crates/unicode-segmentation), [log](https://crates.io/crates/log), [env_logger](https://crates.io/crates/env_logger), and [tempfile](https://crates.io/crates/tempfile). See [Cargo.toml](Cargo.toml) and [Cargo.lock](Cargo.lock) for the complete dependency list and pinned versions.
+graf is written in [Rust](https://www.rust-lang.org/) and uses [GPUI](https://www.gpui.rs/) from the [Zed](https://github.com/zed-industries/zed) project for its native interface.
 
-graf also works with separately installed tools: [Tectonic](https://tectonic-typesetting.github.io/) and [Typst](https://typst.app/) compile documents, while macOS `sips` and Poppler's [`pdftoppm`](https://poppler.freedesktop.org/) rasterize PDF previews.
+- [Tectonic](https://tectonic-typesetting.github.io/) (MIT) compiles LaTeX. Bundled into release builds.
+- [Typst](https://typst.app/) (Apache-2.0) compiles Typst. Bundled into release builds.
+- Poppler's [`pdftoppm`](https://poppler.freedesktop.org/) rasterizes multi-page PDF previews when installed.
+- macOS `sips` rasterizes single-page PDF previews.
+- [Serde](https://serde.rs/), [unicode-segmentation](https://crates.io/crates/unicode-segmentation), [log](https://crates.io/crates/log), [env_logger](https://crates.io/crates/env_logger), and [tempfile](https://crates.io/crates/tempfile). See [Cargo.toml](Cargo.toml) and [Cargo.lock](Cargo.lock) for the complete dependency list.
+
+License texts for the bundled compilers live in [`bundle/licenses/`](bundle/licenses) and ship inside the app under `Resources/bin/LICENSES`.
 
 ## License
 

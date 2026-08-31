@@ -28,10 +28,16 @@ impl Workspace {
 
     pub fn trigger_compile(&mut self, cx: &mut Context<Self>) {
         if !self.active_document_is_compilable() {
+            self.compile_pending = false;
             self.controller.reset();
             self.latest_diagnostics.clear();
             self.preview.update(cx, |preview, cx| preview.clear(cx));
             cx.notify();
+            return;
+        }
+
+        if self.compile_running {
+            self.compile_pending = true;
             return;
         }
 
@@ -68,6 +74,8 @@ impl Workspace {
 
         let request = CompileRequest::with_project(text, rev, project_root, root_document);
         self.controller.begin_compile(request.compile_id, rev);
+        self.compile_running = true;
+        self.compile_pending = false;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -76,26 +84,46 @@ impl Workspace {
                 .spawn(async move { compiler.compile(request) })
                 .await;
 
-            match &result {
-                Ok(output) => info!(
-                    "compile finished for revision {} in {:.0}ms",
-                    output.revision,
-                    output.duration.as_secs_f64() * 1000.0
-                ),
-                Err(error) => warn!("compile failed for revision {}: {}", error.revision, error),
-            }
-
             match result {
                 Ok(output) => {
-                    let pdf_bytes = output.artifact.clone();
+                    info!(
+                        "compile finished for revision {} in {:.0}ms",
+                        output.revision,
+                        output.duration.as_secs_f64() * 1000.0
+                    );
+
                     let output_rev = output.revision;
                     let render_id = output.compile_id.0;
-                    let diags = output.diagnostics.clone();
+                    let should_render = this
+                        .update(cx, |this, _| {
+                            this.controller
+                                .accepts_result(output.compile_id, output.revision)
+                        })
+                        .unwrap_or(false);
 
-                    let render_result = cx
+                    if !should_render {
+                        this.update(cx, |this, cx| {
+                            if let Err(stale) = this.controller.handle_output(&output) {
+                                info!(
+                                    "discarded compile output for revision {}; current revision is {}",
+                                    stale.completed_revision, stale.current_revision
+                                );
+                            }
+                            this.finish_compile(cx);
+                        })
+                        .ok();
+                        return;
+                    }
+
+                    let (output, render_result) = cx
                         .background_executor()
-                        .spawn(async move { pdf_renderer.render_document(render_id, &pdf_bytes) })
+                        .spawn(async move {
+                            let result =
+                                pdf_renderer.render_document(render_id, &output.artifact);
+                            (output, result)
+                        })
                         .await;
+
                     match &render_result {
                         Ok(pages) => info!(
                             "preview rendered for revision {output_rev} with {} page(s)",
@@ -106,15 +134,17 @@ impl Workspace {
                         }
                     }
 
-                    this.update(cx, |this, cx| {
-                        if let Err(stale) = this.controller.handle_output(output) {
+                    this.update(cx, move |this, cx| {
+                        if let Err(stale) = this.controller.handle_output(&output) {
                             info!(
                                 "discarded compile output for revision {}; current revision is {}",
                                 stale.completed_revision, stale.current_revision
                             );
+                            this.finish_compile(cx);
                             return;
                         }
 
+                        let diags = output.diagnostics;
                         this.latest_diagnostics = diags.clone();
                         this.editor.update(cx, |editor, cx| {
                             editor.set_diagnostics(diags, cx);
@@ -125,20 +155,22 @@ impl Workspace {
                                 preview.set_rendered_pages(pages, cx);
                             });
                         }
-                        cx.notify();
+                        this.finish_compile(cx);
                     })
                     .ok();
                 }
                 Err(err) => {
+                    warn!("compile failed for revision {}: {}", err.revision, err);
                     let err_summary = Some(err.message.clone());
                     let diags = err.diagnostics.clone();
 
-                    this.update(cx, |this, cx| {
+                    this.update(cx, move |this, cx| {
                         if let Err(stale) = this.controller.handle_error(err) {
                             info!(
                                 "discarded compile error for revision {}; current revision is {}",
                                 stale.completed_revision, stale.current_revision
                             );
+                            this.finish_compile(cx);
                             return;
                         }
 
@@ -149,12 +181,22 @@ impl Workspace {
                         this.preview.update(cx, |preview, cx| {
                             preview.set_compile_failed(err_summary, cx);
                         });
-                        cx.notify();
+                        this.finish_compile(cx);
                     })
                     .ok();
                 }
             }
         })
         .detach();
+    }
+
+    fn finish_compile(&mut self, cx: &mut Context<Self>) {
+        self.compile_running = false;
+        if self.compile_pending {
+            self.compile_pending = false;
+            self.trigger_compile(cx);
+        } else {
+            cx.notify();
+        }
     }
 }

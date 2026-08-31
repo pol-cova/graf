@@ -3,18 +3,6 @@ pub enum StyleCategory {
     PassiveVoice,
     Wordiness,
     WeaselWords,
-    Cliché,
-}
-
-impl StyleCategory {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::PassiveVoice => "Passive Voice",
-            Self::Wordiness => "Wordiness / Redundancy",
-            Self::WeaselWords => "Weak / Weasel Word",
-            Self::Cliché => "Cliché / Informal",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,0 +1,15 @@
+# Compiler backends bundled into graf.app by scripts/fetch_compilers.sh.
+# To bump a version: update url/sha256/inner, re-fetch, and re-run
+# scripts/build_app.sh. Hashes are over the downloaded artifact.
+
+[tectonic]
+version = 0.15.0
+url = https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-aarch64-apple-darwin.tar.gz
+sha256 = 24bd46566fa30d41101848405e9cbc4645edb92d8f857c9d21262174fb70cd33
+inner = tectonic
+
+[typst]
+version = 0.15.1
+url = https://github.com/typst/typst/releases/download/v0.15.1/typst-aarch64-apple-darwin.tar.xz
+sha256 = 48f62ed034aa3a7978309579ac6ca00045e2ef0da73114e8af27cfd8e74dc05a
+inner = typst-aarch64-apple-darwin/typst

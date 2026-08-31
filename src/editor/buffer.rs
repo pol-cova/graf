@@ -21,6 +21,10 @@ pub struct Transaction {
     cursor_after: usize,
 }
 
+/// Cap on stored undo transactions. Each holds edit diffs, so without a cap a
+/// long editing session grows memory without bound. The oldest drop first.
+const MAX_UNDO_STACK: usize = 100;
+
 pub struct TextBuffer {
     content: String,
     revision: Revision,
@@ -146,7 +150,7 @@ impl TextBuffer {
             tx.edits.push(edit);
             tx.cursor_after = offset + text.len();
         } else {
-            self.undo_stack.push(Transaction {
+            self.push_undo(Transaction {
                 edits: vec![edit],
                 cursor_before: offset,
                 cursor_after: offset + text.len(),
@@ -171,7 +175,7 @@ impl TextBuffer {
             tx.edits.push(edit);
             tx.cursor_after = cursor_after;
         } else {
-            self.undo_stack.push(Transaction {
+            self.push_undo(Transaction {
                 edits: vec![edit],
                 cursor_before,
                 cursor_after,
@@ -184,7 +188,7 @@ impl TextBuffer {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
         {
-            self.undo_stack.push(tx);
+            self.push_undo(tx);
             self.redo_stack.clear();
         }
         self.pending = Some(Transaction {
@@ -199,16 +203,23 @@ impl TextBuffer {
             && !tx.edits.is_empty()
         {
             tx.cursor_after = cursor;
-            self.undo_stack.push(tx);
+            self.push_undo(tx);
             self.redo_stack.clear();
         }
+    }
+
+    fn push_undo(&mut self, tx: Transaction) {
+        if self.undo_stack.len() >= MAX_UNDO_STACK {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(tx);
     }
 
     pub fn undo(&mut self) -> Option<usize> {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
         {
-            self.undo_stack.push(tx);
+            self.push_undo(tx);
         }
 
         let tx = self.undo_stack.pop()?;
@@ -235,7 +246,7 @@ impl TextBuffer {
         if let Some(tx) = self.pending.take()
             && !tx.edits.is_empty()
         {
-            self.undo_stack.push(tx);
+            self.push_undo(tx);
             self.redo_stack.clear();
             return None;
         }
@@ -255,7 +266,7 @@ impl TextBuffer {
         }
 
         let cursor = tx.cursor_after;
-        self.undo_stack.push(tx);
+        self.push_undo(tx);
         Some(cursor)
     }
 }
@@ -344,6 +355,21 @@ mod tests {
         assert_eq!(buf.line_content(0), Some(""));
         assert_eq!(buf.line_range(1), None);
         assert_eq!(buf.line_content(1), None);
+    }
+
+    #[test]
+    fn undo_history_is_bounded() {
+        let mut buffer = TextBuffer::new();
+        for _ in 0..(MAX_UNDO_STACK + 10) {
+            buffer.insert(buffer.len(), "x");
+        }
+
+        assert_eq!(buffer.undo_stack.len(), MAX_UNDO_STACK);
+        for _ in 0..MAX_UNDO_STACK {
+            buffer.undo().expect("retained edit should be undoable");
+        }
+        assert_eq!(buffer.content(), "xxxxxxxxxx");
+        assert!(buffer.undo().is_none());
     }
 
     #[test]
