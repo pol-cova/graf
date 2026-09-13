@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_STROKE_COLOR: &str = "#528bff";
 
+/// Memoized scene bounding box: the inner value is the `(min_x, min_y,
+/// max_x, max_y)` result, the outer `None` means "not computed yet".
+pub(crate) type BoundingBoxCache = std::cell::Cell<Option<Option<(f32, f32, f32, f32)>>>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CanvasDocument {
     pub version: u32,
@@ -9,6 +13,10 @@ pub struct CanvasDocument {
     pub elements: Vec<CanvasElement>,
     pub grid_enabled: bool,
     pub background_color: Option<String>,
+    /// Memoized `bounding_box` result, cleared by every mutator. `None`
+    /// means "stale", so an empty-document result is cached too.
+    #[serde(skip)]
+    bounding_box_cache: BoundingBoxCache,
 }
 
 impl Default for CanvasDocument {
@@ -25,6 +33,7 @@ impl CanvasDocument {
             elements: Vec::new(),
             grid_enabled: true,
             background_color: None,
+            bounding_box_cache: std::cell::Cell::new(None),
         }
     }
 
@@ -38,17 +47,35 @@ impl CanvasDocument {
 
     pub fn add_element(&mut self, element: CanvasElement) {
         self.elements.push(element);
+        self.bounding_box_cache.set(None);
     }
 
     pub fn remove_element(&mut self, id: &str) -> Option<CanvasElement> {
         if let Some(pos) = self.elements.iter().position(|e| e.id == id) {
+            self.bounding_box_cache.set(None);
             Some(self.elements.remove(pos))
         } else {
             None
         }
     }
 
+    /// Clears cached geometry for direct element edits that bypass the
+    /// `add`/`remove` mutators (e.g. interactive dragging).
+    pub fn invalidate_geometry_cache(&mut self) {
+        self.bounding_box_cache.set(None);
+    }
+
     pub fn bounding_box(&self) -> Option<(f32, f32, f32, f32)> {
+        if let Some(cached) = self.bounding_box_cache.get() {
+            return cached;
+        }
+
+        let result = self.compute_bounding_box();
+        self.bounding_box_cache.set(Some(result));
+        result
+    }
+
+    fn compute_bounding_box(&self) -> Option<(f32, f32, f32, f32)> {
         if self.elements.is_empty() {
             return None;
         }
@@ -340,6 +367,46 @@ pub enum StrokeStyle {
     Solid,
     Dashed,
     Dotted,
+}
+
+#[cfg(test)]
+mod tests_extra {
+    use super::*;
+
+    #[test]
+    fn bounding_box_cache_stays_consistent_through_mutators() {
+        let mut doc = CanvasDocument::new();
+        assert!(doc.bounding_box().is_none());
+
+        doc.add_element(CanvasElement::new_rectangle(
+            "r1", 0.0, 0.0, 10.0, 10.0, 0.0,
+        ));
+        assert_eq!(doc.bounding_box(), Some((0.0, 0.0, 10.0, 10.0)));
+        // Cached until invalidated.
+        assert_eq!(doc.bounding_box(), Some((0.0, 0.0, 10.0, 10.0)));
+
+        // Direct (drag-style) mutation bypasses mutators; explicit invalidation.
+        doc.elements[0].x = 100.0;
+        doc.invalidate_geometry_cache();
+        assert_eq!(doc.bounding_box(), Some((100.0, 0.0, 110.0, 10.0)));
+
+        doc.remove_element("r1");
+        assert!(doc.bounding_box().is_none());
+
+        doc.add_element(CanvasElement::new_arrow("a1", 5.0, 5.0, 50.0, 40.0));
+        assert_eq!(doc.bounding_box(), Some((5.0, 5.0, 50.0, 40.0)));
+    }
+
+    #[test]
+    fn surviving_serialization_roundtrip_recomputes_bbox() {
+        let mut doc = CanvasDocument::new();
+        doc.add_element(CanvasElement::new_rectangle(
+            "r1", 3.0, 4.0, 50.0, 20.0, 2.0,
+        ));
+        let json = doc.to_json().unwrap();
+        let restored = CanvasDocument::from_json(&json).unwrap();
+        assert_eq!(restored.bounding_box(), Some((3.0, 4.0, 53.0, 24.0)));
+    }
 }
 
 #[cfg(test)]

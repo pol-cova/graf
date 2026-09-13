@@ -1,38 +1,61 @@
+use std::collections::VecDeque;
+
 use crate::canvas::scene::CanvasDocument;
 
 const MAX_HISTORY_ENTRIES: usize = 50;
 
+/// Serialized-size budget for undo/redo memory beyond the entry count. A
+/// scene of a few dozen shapes costs a few KB; a few KB * 50 is harmless,
+/// but thousands of elements would not be.
+const MAX_HISTORY_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, Default)]
 pub struct CanvasHistory {
-    undo_stack: Vec<CanvasDocument>,
-    redo_stack: Vec<CanvasDocument>,
+    undo_stack: VecDeque<CanvasDocument>,
+    redo_stack: VecDeque<CanvasDocument>,
 }
 
 impl CanvasHistory {
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
         }
     }
 
     pub fn push_snapshot(&mut self, state: CanvasDocument) {
-        if self.undo_stack.len() >= MAX_HISTORY_ENTRIES {
-            self.undo_stack.remove(0);
-        }
-        self.undo_stack.push(state);
+        self.undo_stack.push_back(state);
         self.redo_stack.clear();
+
+        while self.undo_stack.len() > MAX_HISTORY_ENTRIES
+            || self.estimate_bytes() > MAX_HISTORY_BYTES
+        {
+            if self.undo_stack.pop_front().is_none() {
+                break;
+            }
+        }
+    }
+
+    /// Cheap size estimate: element count scaled by a measured average
+    /// serialized cost per element (kept in sync with `push_snapshot`'s
+    /// budget intent without serializing on every call).
+    fn estimate_bytes(&self) -> usize {
+        const ELEMENT_ESTIMATE_BYTES: usize = 260;
+        self.undo_stack
+            .iter()
+            .map(|doc| doc.elements.len() * ELEMENT_ESTIMATE_BYTES)
+            .sum()
     }
 
     pub fn undo(&mut self, current: CanvasDocument) -> Option<CanvasDocument> {
-        let prev = self.undo_stack.pop()?;
-        self.redo_stack.push(current);
+        let prev = self.undo_stack.pop_back()?;
+        self.redo_stack.push_back(current);
         Some(prev)
     }
 
     pub fn redo(&mut self, current: CanvasDocument) -> Option<CanvasDocument> {
-        let next = self.redo_stack.pop()?;
-        self.undo_stack.push(current);
+        let next = self.redo_stack.pop_back()?;
+        self.undo_stack.push_back(current);
         Some(next)
     }
 

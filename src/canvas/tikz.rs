@@ -114,16 +114,24 @@ fn clean_hex_color(hex: &str) -> String {
     }
 }
 
+/// Single pass over the input; the net of chained `replace` calls marched
+/// over the same bytes eight times per text element.
 fn escape_latex(input: &str) -> String {
-    input
-        .replace('\\', "\\textbackslash{}")
-        .replace('%', "\\%")
-        .replace('$', "\\$")
-        .replace('&', "\\&")
-        .replace('#', "\\#")
-        .replace('_', "\\_")
-        .replace('{', "\\{")
-        .replace('}', "\\}")
+    let mut out = String::with_capacity(input.len());
+    for character in input.chars() {
+        match character {
+            '\\' => out.push_str("\\textbackslash{}"),
+            '%' => out.push_str("\\%"),
+            '$' => out.push_str("\\$"),
+            '&' => out.push_str("\\&"),
+            '#' => out.push_str("\\#"),
+            '_' => out.push_str("\\_"),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
