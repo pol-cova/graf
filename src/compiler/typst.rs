@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -144,13 +145,15 @@ impl DocumentEngine for TypstEngine {
             });
         }
 
-        let artifact = fs::read(&output_pdf).map_err(|error| CompileError {
-            compile_id,
-            revision,
-            diagnostics: diagnostics.clone(),
-            message: format!("Failed to read Typst PDF output: {error}"),
-            duration: start.elapsed(),
-        })?;
+        let artifact: Arc<[u8]> = fs::read(&output_pdf)
+            .map_err(|error| CompileError {
+                compile_id,
+                revision,
+                diagnostics: diagnostics.clone(),
+                message: format!("Failed to read Typst PDF output: {error}"),
+                duration: start.elapsed(),
+            })?
+            .into();
 
         Ok(CompileOutput {
             compile_id,
