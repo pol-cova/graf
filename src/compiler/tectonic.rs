@@ -22,7 +22,7 @@ const KEEP_JOB_DIRS: usize = 2;
 const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
 pub struct TectonicEngine {
-    resolved: Option<ResolvedEngine>,
+    resolved: std::sync::OnceLock<Option<ResolvedEngine>>,
     build_dir: crate::util::TemporarySessionDir,
 }
 
@@ -33,37 +33,50 @@ impl Default for TectonicEngine {
 }
 
 impl TectonicEngine {
+    /// Cheap constructor for the UI thread. Engine resolution (which spawns
+    /// `which` and probes the filesystem) is deferred until the first
+    /// background `warm_up`/`compile` call via [`Self::resolved_engine`].
     pub fn new() -> Self {
-        let resolved = resolve("tectonic", "GRAF_TECTONIC_PATH", TECTONIC_COMMON_PATHS);
-        match &resolved {
-            Some(engine) => info!(
-                "tectonic: {} engine at {}",
-                engine.source,
-                engine.path.display()
-            ),
-            None => info!("tectonic: no engine found"),
-        }
         let build_dir = crate::util::TemporarySessionDir::new("graf_tectonic");
         Self {
-            resolved,
+            resolved: std::sync::OnceLock::new(),
             build_dir,
         }
     }
 
     pub fn with_paths(executable: impl Into<PathBuf>, build_dir: impl Into<PathBuf>) -> Self {
         Self {
-            resolved: Some(ResolvedEngine {
+            resolved: std::sync::OnceLock::from(Some(ResolvedEngine {
                 path: executable.into(),
                 source: EngineSource::System,
-            }),
+            })),
             build_dir: crate::util::TemporarySessionDir::from_path(build_dir.into()),
         }
+    }
+
+    /// Resolve on first background use and cache the result. Must not be
+    /// called on the UI thread: the first call may spawn `which`.
+    fn resolved_engine(&self) -> Option<&ResolvedEngine> {
+        self.resolved
+            .get_or_init(|| {
+                let resolved = resolve("tectonic", "GRAF_TECTONIC_PATH", TECTONIC_COMMON_PATHS);
+                match &resolved {
+                    Some(engine) => info!(
+                        "tectonic: {} engine at {}",
+                        engine.source,
+                        engine.path.display()
+                    ),
+                    None => info!("tectonic: no engine found"),
+                }
+                resolved
+            })
+            .as_ref()
     }
 }
 
 impl DocumentEngine for TectonicEngine {
     fn warm_up(&self) {
-        let Some(engine) = &self.resolved else {
+        let Some(engine) = self.resolved_engine() else {
             info!("tectonic warm-up skipped: no engine found");
             return;
         };
@@ -79,7 +92,7 @@ impl DocumentEngine for TectonicEngine {
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let Some(engine) = &self.resolved else {
+        let Some(engine) = self.resolved_engine() else {
             let message = "Tectonic is not installed or configured".to_string();
             return Err(CompileError {
                 compile_id,
@@ -124,7 +137,7 @@ impl DocumentEngine for TectonicEngine {
             (root_doc.clone(), cwd, pdf_name)
         } else {
             let input_file = build_path.join("input.tex");
-            fs::write(&input_file, &request.source).map_err(|err| CompileError {
+            fs::write(&input_file, request.source.as_bytes()).map_err(|err| CompileError {
                 compile_id,
                 revision,
                 diagnostics: Vec::new(),
@@ -326,7 +339,7 @@ mod tests {
     fn reports_when_tectonic_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
         let engine = TectonicEngine {
-            resolved: None,
+            resolved: std::sync::OnceLock::from(None),
             build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
         };
         let request = CompileRequest::simple("\\documentclass{article}", 1);

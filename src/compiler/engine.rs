@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -15,7 +16,10 @@ pub enum ArtifactKind {
 #[derive(Debug, Clone)]
 pub struct CompileRequest {
     pub compile_id: CompileId,
-    pub source: String,
+    /// Shared snapshot of the edited source. `Arc<str>` keeps the per-change
+    /// snapshot cheap to move into background compile tasks without an extra
+    /// UI-thread `String` clone before spawn.
+    pub source: Arc<str>,
     pub revision: u64,
     pub project_root: Option<PathBuf>,
     pub root_document: Option<PathBuf>,
@@ -27,7 +31,7 @@ impl CompileRequest {
         CompileId(NEXT_COMPILE_ID.fetch_add(1, Ordering::Relaxed))
     }
 
-    pub fn simple(source: impl Into<String>, revision: u64) -> Self {
+    pub fn simple(source: impl Into<Arc<str>>, revision: u64) -> Self {
         Self {
             compile_id: Self::next_id(),
             source: source.into(),
@@ -38,7 +42,7 @@ impl CompileRequest {
     }
 
     pub fn with_project(
-        source: impl Into<String>,
+        source: impl Into<Arc<str>>,
         revision: u64,
         project_root: Option<PathBuf>,
         root_document: Option<PathBuf>,

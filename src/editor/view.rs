@@ -2,14 +2,17 @@ mod element;
 mod input;
 
 use self::element::{EditorElement, SingleLineInputElement};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::Arc;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Role, ScrollWheelEvent, ShapedLine, Style, TextRun, UTF16Selection, Window, actions, div, fill,
-    point, prelude::*, px, relative, rgba, size,
+    Role, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window,
+    actions, div, fill, point, prelude::*, px, relative, rgba, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -128,12 +131,28 @@ pub struct EditorView {
 
     is_selecting: bool,
 
-    last_line_layouts: Vec<ShapedLine>,
+    last_line_layouts: Vec<Arc<ShapedLine>>,
     last_first_line: usize,
     last_bounds: Option<Bounds<Pixels>>,
     last_line_height: f32,
     goal_x: Option<f32>,
     diagnostics: Vec<crate::compiler::diagnostics::Diagnostic>,
+    /// 0-indexed line -> worst severity on that line. Rebuilt once per
+    /// `set_diagnostics` so prepaint/paint do O(1) lookups instead of
+    /// O(V*D) scans.
+    diagnostic_severity_by_line: HashMap<usize, crate::compiler::diagnostics::Severity>,
+    /// Visible-line shaping cache keyed by line index. Hit when the stored
+    /// content hash + style fingerprint match, so scrolling / focus changes
+    /// reuse `Arc<ShapedLine>` without reshaping or `SharedString` allocs.
+    /// Only dirty lines (hash mismatch) are reshaped.
+    shaped_line_cache: HashMap<usize, CachedShapedLine>,
+    /// Gutter number cache keyed by (line, color, font_size_bits).
+    /// Shaped once in prepaint, painted without reshaping.
+    gutter_cache: HashMap<(usize, u32, u32), Arc<ShapedLine>>,
+    /// Single-line overlay text. Keyed by buffer revision (plus length +
+    /// content hash for safety); cloned as `Arc` on hits so `render()`
+    /// performs no full-doc `to_string` when nothing changed.
+    single_line_cached: Option<(u64, u64, SharedString)>,
     pub is_typst: bool,
     plain_text: bool,
     font_size: f32,
@@ -144,12 +163,123 @@ pub struct EditorView {
     single_line: bool,
 }
 
+/// Cached shaped line with the keys needed to decide a hit without
+/// reshaping. `revision` is the buffer revision at shape time: when it
+/// matches the current revision the content at this index cannot have
+/// changed, so the cached `Arc` is reused without even hashing.
+#[derive(Clone)]
+pub(crate) struct CachedShapedLine {
+    pub revision: u64,
+    pub content_hash: u64,
+    pub font_size_bits: u32,
+    pub highlight_mode: u8,
+    pub shaped: Arc<ShapedLine>,
+}
+
+/// Upper bounds keep the caches from growing without limit; prepaint prunes
+/// out-of-window entries once exceeded (LRU-ish by visibility).
+pub(crate) const MAX_SHAPED_LINE_CACHE: usize = 512;
+pub(crate) const MAX_GUTTER_CACHE: usize = 512;
+
+/// 0 = plain text, 1 = LaTeX, 2 = Typst. Part of the shaping fingerprint.
+#[inline]
+pub(crate) fn highlight_mode_for(plain_text: bool, is_typst: bool) -> u8 {
+    if plain_text {
+        0
+    } else if is_typst {
+        2
+    } else {
+        1
+    }
+}
+
+#[inline]
+pub(crate) fn hash_str(text: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Build the 0-indexed line -> worst-severity map once per diagnostics
+/// update. Errors dominate warnings on the same line.
+pub(crate) fn build_diagnostic_severity_map(
+    diags: &[crate::compiler::diagnostics::Diagnostic],
+) -> HashMap<usize, crate::compiler::diagnostics::Severity> {
+    use crate::compiler::diagnostics::Severity;
+    let mut map = HashMap::new();
+    for diag in diags {
+        if let Some(one_indexed) = diag.line {
+            let line_0 = one_indexed.saturating_sub(1);
+            map.entry(line_0)
+                .and_modify(|existing: &mut Severity| {
+                    if *existing != Severity::Error && diag.severity == Severity::Error {
+                        *existing = Severity::Error;
+                    }
+                })
+                .or_insert(diag.severity);
+        }
+    }
+    map
+}
+
+/// Resolve the gutter number color so prepaint can cache by the resolved
+/// value instead of re-scanning diagnostics per line in paint.
+pub(crate) fn gutter_color_for(
+    line_idx: usize,
+    cursor_line: usize,
+    is_focused: bool,
+    severity: Option<crate::compiler::diagnostics::Severity>,
+) -> u32 {
+    use crate::compiler::diagnostics::Severity;
+    match severity {
+        Some(Severity::Error) => crate::ui::theme::ACCENT_RED,
+        Some(Severity::Warning) => crate::ui::theme::ACCENT_ORANGE,
+        None => {
+            if is_focused && line_idx == cursor_line {
+                crate::ui::theme::TEXT
+            } else {
+                crate::ui::theme::TEXT_MUTED
+            }
+        }
+    }
+}
+
+/// Clamp a UTF-8 byte column to the line and snap down to a char boundary.
+#[inline]
+pub(crate) fn snap_byte_col(line: &str, byte_col: usize) -> usize {
+    let mut clamped = byte_col.min(line.len());
+    while clamped > 0 && !line.is_char_boundary(clamped) {
+        clamped -= 1;
+    }
+    clamped
+}
+
+/// Byte-column of a buffer offset relative to its line start.
+/// `ShapedLine::x_for_index` / `closest_index_for_x` both use UTF-8 byte
+/// indices, so shaping paths must use this (not the char column).
+#[inline]
+pub(crate) fn line_byte_col(buffer: &TextBuffer, offset: usize) -> (usize, usize) {
+    let line = buffer.line_of_offset(offset);
+    let start = buffer.line_start_offset(line);
+    (line, offset.saturating_sub(start))
+}
+
+/// Inverse of [`line_byte_col`]: byte column clamped + snapped to boundary.
+pub(crate) fn offset_for_line_byte_col(buffer: &TextBuffer, line: usize, byte_col: usize) -> usize {
+    let line = line.min(buffer.line_count().saturating_sub(1));
+    let start = buffer.line_start_offset(line);
+    let content = buffer.line_content(line).unwrap_or("");
+    start + snap_byte_col(content, byte_col)
+}
+
 impl EventEmitter<EditorEvent> for EditorView {}
 
 impl EditorView {
     pub fn set_is_typst(&mut self, is_typst: bool, cx: &mut Context<Self>) {
         if self.is_typst != is_typst {
             self.is_typst = is_typst;
+            self.shaped_line_cache.clear();
             cx.notify();
         }
     }
@@ -157,6 +287,7 @@ impl EditorView {
     pub fn set_plain_text(&mut self, plain_text: bool, cx: &mut Context<Self>) {
         if self.plain_text != plain_text {
             self.plain_text = plain_text;
+            self.shaped_line_cache.clear();
             cx.notify();
         }
     }
@@ -177,6 +308,10 @@ impl EditorView {
             last_line_height: 22.0,
             goal_x: None,
             diagnostics: Vec::new(),
+            diagnostic_severity_by_line: HashMap::new(),
+            shaped_line_cache: HashMap::new(),
+            gutter_cache: HashMap::new(),
+            single_line_cached: None,
             is_typst: false,
             plain_text: false,
             font_size: 14.0,
@@ -199,10 +334,19 @@ impl EditorView {
         line_numbers: bool,
         cx: &mut Context<Self>,
     ) {
-        self.font_size = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
-        self.tab_size = tab_size.clamp(MIN_TAB_SIZE, MAX_TAB_SIZE);
-        self.line_numbers = line_numbers;
-        cx.notify();
+        let new_font_size = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+        let new_tab_size = tab_size.clamp(MIN_TAB_SIZE, MAX_TAB_SIZE);
+        let font_changed = (new_font_size - self.font_size).abs() > f32::EPSILON;
+        if font_changed || new_tab_size != self.tab_size || line_numbers != self.line_numbers {
+            self.font_size = new_font_size;
+            self.tab_size = new_tab_size;
+            self.line_numbers = line_numbers;
+            if font_changed {
+                self.shaped_line_cache.clear();
+                self.gutter_cache.clear();
+            }
+            cx.notify();
+        }
     }
 
     pub fn set_diagnostics(
@@ -211,7 +355,42 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) {
         self.diagnostics = diags;
+        self.diagnostic_severity_by_line = build_diagnostic_severity_map(&self.diagnostics);
+        // Severity feeds the gutter color key; drop stale shaped numbers.
+        self.gutter_cache.clear();
         cx.notify();
+    }
+
+    /// O(1) severity lookup for a 0-indexed line.
+    pub(crate) fn diagnostic_severity_for_line(
+        &self,
+        line_idx: usize,
+    ) -> Option<crate::compiler::diagnostics::Severity> {
+        self.diagnostic_severity_by_line.get(&line_idx).copied()
+    }
+
+    /// Cached single-line text for the overlay in `render()`.
+    ///
+    /// Keyed by buffer revision (cleared on `set_text`, which resets the
+    /// revision) with the content hash stored alongside for safety. Hits
+    /// clone the inner `Arc` without touching the document; misses allocate
+    /// exactly once. Empty content returns a static string without alloc.
+    pub(crate) fn single_line_shared(&mut self) -> SharedString {
+        let revision = self.buffer.revision();
+        if let Some((cached_revision, _, cached)) = &self.single_line_cached
+            && *cached_revision == revision
+        {
+            return cached.clone();
+        }
+        let content = self.buffer.content();
+        let shared: SharedString = if content.is_empty() {
+            "".into()
+        } else {
+            content.into()
+        };
+        let content_hash = hash_str(content);
+        self.single_line_cached = Some((revision, content_hash, shared.clone()));
+        shared
     }
 
     pub fn gutter_width(&self) -> f32 {
@@ -464,7 +643,9 @@ impl EditorView {
             .and_then(|li| self.last_line_layouts.get(li))
             .map_or(0, |layout| layout.closest_index_for_x(px(text_x)));
 
-        self.offset_for_line_col(line_idx, col)
+        // `closest_index_for_x` returns a UTF-8 byte index; convert with the
+        // byte-column helper so multibyte lines hit-test correctly.
+        offset_for_line_byte_col(&self.buffer, line_idx, col)
     }
 
     fn offset_from_utf16(&self, offset: usize) -> usize {
@@ -515,6 +696,12 @@ impl EditorView {
         self.marked_range = None;
         self.scroll_offset = 0.0;
         self.goal_x = None;
+        // Revision resets to 0, which could collide with the cached single-line
+        // revision key: drop per-content caches so stale shapes never reuse.
+        self.single_line_cached = None;
+        self.shaped_line_cache.clear();
+        self.gutter_cache.clear();
+        self.last_line_layouts.clear();
         cx.notify();
     }
 
@@ -590,12 +777,12 @@ impl EditorView {
     }
 
     pub fn completion_anchor(&self) -> (f32, f32) {
-        let (line, column) = self.line_col_for_offset(self.cursor);
+        let (line, byte_col) = line_byte_col(&self.buffer, self.cursor);
         let visible_line = line.saturating_sub(self.last_first_line);
         let x = self
             .last_line_layouts
             .get(visible_line)
-            .map_or(0.0, |layout| layout.x_for_index(column).as_f32());
+            .map_or(0.0, |layout| layout.x_for_index(byte_col).as_f32());
         let y = line as f32 * self.last_line_height - self.scroll_offset + self.last_line_height;
         let desired_x = self.gutter_width() + TEXT_PADDING + x;
         let max_x = self.last_bounds.map_or(desired_x, |bounds| {
@@ -655,8 +842,12 @@ const TEXT_PADDING: f32 = 14.0;
 
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let single_line_content = self.buffer.content().to_string();
-        let single_line_focused = self.focus_handle.is_focused(window);
+        // Single-line text comes from the revision-keyed `SharedString` cache:
+        // no full-doc `to_string` when nothing changed, and no alloc at all
+        // for the empty fast path.
+        let single_line_content: Option<SharedString> =
+            self.single_line.then(|| self.single_line_shared());
+        let single_line_focused = self.single_line && self.focus_handle.is_focused(window);
         let mut root = div()
             .id("editor-view")
             .key_context("Editor")
@@ -726,6 +917,7 @@ impl Render for EditorView {
             root = root.child(SingleLineInputElement {
                 editor: cx.entity(),
             });
+            let overlay_text: SharedString = single_line_content.unwrap_or_else(|| "".into());
             root = root.child(
                 div()
                     .absolute()
@@ -739,7 +931,7 @@ impl Render for EditorView {
                     .whitespace_nowrap()
                     .text_xs()
                     .text_color(theme::color(theme::TEXT))
-                    .child(single_line_content)
+                    .child(overlay_text)
                     .when(single_line_focused, |line| {
                         line.child(
                             div()
@@ -906,7 +1098,13 @@ impl Focusable for EditorView {
 
 #[cfg(test)]
 mod tests {
-    use super::word_range_at;
+    use super::{
+        build_diagnostic_severity_map, gutter_color_for, hash_str, highlight_mode_for,
+        line_byte_col, offset_for_line_byte_col, snap_byte_col, word_range_at,
+    };
+    use crate::compiler::diagnostics::{Diagnostic, DiagnosticSource, Severity};
+    use crate::editor::buffer::TextBuffer;
+    use crate::ui::theme;
 
     #[test]
     fn word_selection_handles_words_punctuation_and_unicode() {
@@ -916,5 +1114,113 @@ mod tests {
         assert_eq!(&text[word_range_at(text, 7)], "beta");
         assert_eq!(&text[word_range_at(text, 10)], ", ");
         assert_eq!(&text[word_range_at(text, text.len())], "café");
+    }
+
+    #[test]
+    fn byte_columns_stay_consistent_for_multibyte_lines() {
+        let buffer = TextBuffer::from_text("café\nこんにちは\nplain");
+        // "café": c(1) a(1) f(1) é(2) = 5 bytes, 4 chars.
+        let line0 = buffer.line_content(0).unwrap();
+        assert_eq!(line0.len(), 5);
+        let start0 = buffer.line_start_offset(0);
+        let end_of_cafe = start0 + line0.len();
+        let (line, byte_col) = line_byte_col(&buffer, end_of_cafe);
+        assert_eq!((line, byte_col), (0, 5));
+        assert_eq!(offset_for_line_byte_col(&buffer, 0, 5), end_of_cafe);
+        // Mid-character byte column snaps down to the char boundary.
+        assert_eq!(snap_byte_col(line0, 4), 3);
+        assert_eq!(offset_for_line_byte_col(&buffer, 0, 4), start0 + 3);
+        // CJK line: 5 chars x 3 bytes.
+        let line1 = buffer.line_content(1).unwrap();
+        assert_eq!(line1.chars().count(), 5);
+        assert_eq!(line1.len(), 15);
+        let start1 = buffer.line_start_offset(1);
+        let (line, byte_col) = line_byte_col(&buffer, start1 + 6);
+        assert_eq!((line, byte_col), (1, 6));
+        assert_eq!(offset_for_line_byte_col(&buffer, 1, 7), start1 + 6);
+        // Clamping beyond end of line.
+        assert_eq!(
+            offset_for_line_byte_col(&buffer, 0, 10_000),
+            start0 + line0.len()
+        );
+    }
+
+    #[test]
+    fn selection_byte_spans_avoid_char_byte_mixing() {
+        // Regression for `line_len` bytes mixed with char columns: the end of
+        // "éa" is byte 3 but char 2; byte helpers must agree.
+        let buffer = TextBuffer::from_text("éa\nxy");
+        let line0 = buffer.line_content(0).unwrap();
+        assert_eq!(line0.len(), 3);
+        let sel_end = buffer.line_start_offset(0) + line0.len();
+        let (_, end_byte) = line_byte_col(&buffer, sel_end);
+        assert_eq!(end_byte, line0.len());
+        assert_eq!(snap_byte_col(line0, end_byte), line0.len());
+    }
+
+    #[test]
+    fn diagnostic_map_keeps_worst_severity_per_line() {
+        let diags = vec![
+            Diagnostic::new(
+                1,
+                Severity::Warning,
+                DiagnosticSource::Parser,
+                None,
+                Some(3),
+                "w",
+            ),
+            Diagnostic::new(
+                2,
+                Severity::Error,
+                DiagnosticSource::Parser,
+                None,
+                Some(3),
+                "e",
+            ),
+            Diagnostic::new(
+                3,
+                Severity::Warning,
+                DiagnosticSource::Parser,
+                None,
+                Some(5),
+                "w2",
+            ),
+            Diagnostic::new(
+                4,
+                Severity::Error,
+                DiagnosticSource::Parser,
+                None,
+                None,
+                "no line",
+            ),
+        ];
+        let map = build_diagnostic_severity_map(&diags);
+        assert_eq!(map.get(&2), Some(&Severity::Error));
+        assert_eq!(map.get(&4), Some(&Severity::Warning));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn gutter_colors_prioritize_diagnostics_then_active_line() {
+        assert_eq!(
+            gutter_color_for(0, 0, true, Some(Severity::Error)),
+            theme::ACCENT_RED
+        );
+        assert_eq!(
+            gutter_color_for(0, 1, true, Some(Severity::Warning)),
+            theme::ACCENT_ORANGE
+        );
+        assert_eq!(gutter_color_for(2, 2, true, None), theme::TEXT);
+        assert_eq!(gutter_color_for(2, 3, true, None), theme::TEXT_MUTED);
+        assert_eq!(gutter_color_for(2, 2, false, None), theme::TEXT_MUTED);
+    }
+
+    #[test]
+    fn highlight_modes_and_hashes_are_stable() {
+        assert_eq!(highlight_mode_for(true, false), 0);
+        assert_eq!(highlight_mode_for(false, false), 1);
+        assert_eq!(highlight_mode_for(false, true), 2);
+        assert_eq!(hash_str("hello"), hash_str("hello"));
+        assert_ne!(hash_str("hello"), hash_str("world"));
     }
 }

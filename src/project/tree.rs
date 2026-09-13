@@ -64,6 +64,30 @@ pub struct ProjectTree {
 }
 
 impl ProjectTree {
+    /// Cheap skeleton for first-frame rendering. Performs no filesystem I/O;
+    /// the real contents are filled in by the background startup scan.
+    pub fn empty(root_path: impl Into<PathBuf>) -> Self {
+        let root_path = root_path.into();
+        let name = root_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project")
+            .to_string();
+
+        let root_node = FileNode::Directory {
+            path: root_path.clone(),
+            name,
+            is_expanded: true,
+            children: Vec::new(),
+        };
+
+        Self {
+            root_path,
+            root_node,
+            root_document: None,
+        }
+    }
+
     pub fn scan(root_path: impl Into<PathBuf>) -> Self {
         let root_path = root_path.into();
         let name = root_path
@@ -256,6 +280,13 @@ mod tests {
             FileKind::from_path(Path::new("readme.txt")),
             FileKind::Other
         );
+    }
+
+    #[test]
+    fn empty_tree_performs_no_io() {
+        let tree = ProjectTree::empty("/nonexistent/graf-startup-probe");
+        assert_eq!(tree.root_document(), None);
+        assert!(tree.file_paths().is_empty());
     }
 
     #[test]

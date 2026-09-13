@@ -20,6 +20,11 @@ pub fn run() {
 
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
 
+        // `Workspace::new` builds only a cheap skeleton (empty tree,
+        // placeholder document) and defers `ProjectTree::scan`,
+        // `Document::open`, recovery load, `.bib`/label indexing, engine
+        // resolution, and the first compile to background tasks, so the
+        // welcome/loading frame appears immediately.
         let window = match cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

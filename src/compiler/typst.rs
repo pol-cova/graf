@@ -20,7 +20,7 @@ const TYPST_COMMON_PATHS: &[&str] = &[
 static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct TypstEngine {
-    resolved: Option<ResolvedEngine>,
+    resolved: std::sync::OnceLock<Option<ResolvedEngine>>,
     build_dir: crate::util::TemporarySessionDir,
 }
 
@@ -31,21 +31,34 @@ impl Default for TypstEngine {
 }
 
 impl TypstEngine {
+    /// Cheap constructor for the UI thread. Engine resolution (which spawns
+    /// `which` and probes the filesystem) is deferred until the first
+    /// background `compile` call via [`Self::resolved_engine`].
     pub fn new() -> Self {
-        let resolved = resolve("typst", "GRAF_TYPST_PATH", TYPST_COMMON_PATHS);
-        match &resolved {
-            Some(engine) => info!(
-                "typst: {} engine at {}",
-                engine.source,
-                engine.path.display()
-            ),
-            None => info!("typst: no engine found"),
-        }
         let build_dir = crate::util::TemporarySessionDir::new("graf_typst");
         Self {
-            resolved,
+            resolved: std::sync::OnceLock::new(),
             build_dir,
         }
+    }
+
+    /// Resolve on first background use and cache the result. Must not be
+    /// called on the UI thread: the first call may spawn `which`.
+    fn resolved_engine(&self) -> Option<&ResolvedEngine> {
+        self.resolved
+            .get_or_init(|| {
+                let resolved = resolve("typst", "GRAF_TYPST_PATH", TYPST_COMMON_PATHS);
+                match &resolved {
+                    Some(engine) => info!(
+                        "typst: {} engine at {}",
+                        engine.source,
+                        engine.path.display()
+                    ),
+                    None => info!("typst: no engine found"),
+                }
+                resolved
+            })
+            .as_ref()
     }
 }
 
@@ -55,7 +68,7 @@ impl DocumentEngine for TypstEngine {
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let Some(engine) = &self.resolved else {
+        let Some(engine) = self.resolved_engine() else {
             let message = "Typst is not installed or configured".to_string();
             return Err(CompileError {
                 compile_id,
@@ -92,7 +105,7 @@ impl DocumentEngine for TypstEngine {
             (root_doc.clone(), cwd, pdf_name)
         } else {
             let input_file = build_path.join("document.typ");
-            fs::write(&input_file, &request.source).map_err(|err| CompileError {
+            fs::write(&input_file, request.source.as_bytes()).map_err(|err| CompileError {
                 compile_id,
                 revision,
                 diagnostics: Vec::new(),
@@ -256,10 +269,10 @@ warning: variable 'x' is never used
 
         let temp_build = tempfile::tempdir().unwrap();
         let engine = TypstEngine {
-            resolved: Some(ResolvedEngine {
+            resolved: std::sync::OnceLock::from(Some(ResolvedEngine {
                 path: executable,
                 source: EngineSource::System,
-            }),
+            })),
             build_dir: crate::util::TemporarySessionDir::from_path(temp_build.path()),
         };
         let request = CompileRequest::with_project(
@@ -279,7 +292,7 @@ warning: variable 'x' is never used
     fn reports_when_typst_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
         let engine = TypstEngine {
-            resolved: None,
+            resolved: std::sync::OnceLock::from(None),
             build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
         };
         let request = CompileRequest::simple("= Document", 1);

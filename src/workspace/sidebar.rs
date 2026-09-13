@@ -1,7 +1,7 @@
 use gpui::{Context, IntoElement, ParentElement, Styled, div, prelude::*, px};
 
-use super::{SidebarTab, Workspace};
-use crate::project::outline::{OutlineItem, parse_latex_outline};
+use super::{ActiveViewKind, SidebarTab, Workspace};
+use crate::project::outline::OutlineItem;
 use crate::project::tree::FileNode;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
@@ -98,6 +98,16 @@ impl Workspace {
                 .overflow_scroll();
             let root_node = self.project_tree.root_node();
             if let FileNode::Directory { children, .. } = root_node {
+                if children.is_empty() && self.startup_loading {
+                    file_list = file_list.child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .text_xs()
+                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .child("Loading project…"),
+                    );
+                }
                 for child in children {
                     file_list = file_list.child(self.render_file_node(child, 0, cx));
                 }
@@ -111,8 +121,12 @@ impl Workspace {
     }
 
     pub fn render_outline_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let text = self.editor.read(cx).text().to_string();
-        let items: Vec<OutlineItem> = parse_latex_outline(&text);
+        // Cached by buffer revision; render never copies or parses the text.
+        let items: Vec<OutlineItem> = if self.active_view_kind == ActiveViewKind::Canvas {
+            Vec::new()
+        } else {
+            self.cached_outline_items().to_vec()
+        };
 
         let mut list = div()
             .id("outline-list")

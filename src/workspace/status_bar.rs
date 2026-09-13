@@ -8,6 +8,8 @@ impl Workspace {
     pub fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         let (status_color, status_text) = if let Some(error) = &self.workspace_error {
             (theme::ACCENT_RED, error.clone())
+        } else if self.startup_loading {
+            (theme::TEXT_MUTED, "Loading project…".to_string())
         } else {
             match self.controller.state() {
                 CompileState::Idle => (theme::TEXT_MUTED, "Ready".to_string()),
@@ -32,7 +34,11 @@ impl Workspace {
         };
 
         let (line, col) = self.editor.read(cx).cursor_line_col();
-        let title = self.documents[self.active_doc_idx].title();
+        let title = self
+            .documents
+            .get(self.active_doc_idx)
+            .map(|doc| doc.title())
+            .unwrap_or("");
         let is_typst = title.ends_with(".typ");
         let language = if is_typst {
             "Typst"
@@ -41,6 +47,10 @@ impl Workspace {
         } else {
             "Plain Text"
         };
+        // Cached by buffer revision; render never copies the text or
+        // recomputes stats. Stale values stay visible until the debounced
+        // background refresh lands.
+        let word_count = self.cached_stats().word_count;
 
         div()
             .flex()
@@ -89,9 +99,7 @@ impl Workspace {
                     .child(if self.active_view_kind == ActiveViewKind::Canvas {
                         String::new()
                     } else {
-                        let text = self.editor.read(cx).text();
-                        let stats = crate::project::stats::DocumentStats::compute(text, is_typst);
-                        format!("{} words", stats.word_count)
+                        format!("{word_count} words")
                     })
                     .child("UTF-8")
                     .when(self.active_document_is_compilable(), |status| {

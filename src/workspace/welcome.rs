@@ -55,7 +55,11 @@ impl Workspace {
                                         div()
                                             .text_sm()
                                             .text_color(theme::color(theme::TEXT_MUTED))
-                                            .child("A native workspace for LaTeX and Typst"),
+                                            .child(if self.startup_loading {
+                                                "Loading project…"
+                                            } else {
+                                                "A native workspace for LaTeX and Typst"
+                                            }),
                                     ),
                             ),
                     )

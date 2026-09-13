@@ -59,17 +59,28 @@ impl RecoveryJournal {
     }
 
     pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_default()
+        // Compact JSON: smaller journal, faster to write on every debounced
+        // flush. Never pretty-print recovery data on the hot path.
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    pub fn try_to_compact_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 
     pub fn from_json(json: &str) -> Option<Self> {
         serde_json::from_str(json).ok()
     }
 
+    fn json_error_to_io(error: serde_json::Error) -> std::io::Error {
+        std::io::Error::other(error.to_string())
+    }
+
     pub fn save_to_dir(&self, dir: &Path) -> std::io::Result<PathBuf> {
         fs::create_dir_all(dir)?;
         let file_path = dir.join(RECOVERY_FILE_NAME);
-        atomic_write(&file_path, self.to_json().as_bytes())?;
+        let json = serde_json::to_string(self).map_err(Self::json_error_to_io)?;
+        atomic_write(&file_path, json.as_bytes())?;
         Ok(file_path)
     }
 
@@ -159,5 +170,44 @@ mod tests {
         assert!(RecoveryJournal::load_from_dir(&temp_dir).is_none());
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn recovery_json_is_compact_not_pretty() {
+        let entry = RecoveryEntry::new("main.tex", None, "\\documentclass{article}");
+        let journal = RecoveryJournal::new(vec![entry]);
+
+        let json = journal
+            .try_to_compact_json()
+            .expect("recovery journal should serialize");
+        assert_eq!(json, journal.to_json());
+        assert!(
+            !json.contains("\n  "),
+            "recovery JSON must be compact (to_string), not pretty"
+        );
+
+        let loaded = RecoveryJournal::from_json(&json).expect("compact JSON should round-trip");
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(loaded.entries[0].title, "main.tex");
+    }
+
+    #[test]
+    fn recovery_disk_payload_is_compact() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let entry = RecoveryEntry::new("draft.tex", None, "Unsaved text content");
+        let journal = RecoveryJournal::new(vec![entry]);
+
+        journal
+            .save_to_dir(temp.path())
+            .expect("Failed to save recovery journal");
+
+        let raw = std::fs::read_to_string(temp.path().join("session_recovery.json"))
+            .expect("recovery file should exist");
+        assert!(
+            !raw.contains("\n  "),
+            "recovery file must be compact JSON, not pretty-printed"
+        );
+        let loaded = RecoveryJournal::from_json(&raw).expect("compact payload should deserialize");
+        assert_eq!(loaded.entries[0].content, "Unsaved text content");
     }
 }

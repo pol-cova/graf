@@ -1,4 +1,6 @@
 mod ai;
+pub(crate) mod caches;
+pub(crate) mod coalesce;
 mod commands;
 mod compilation;
 mod diagnostics;
@@ -162,6 +164,23 @@ pub struct Workspace {
     pub(crate) settings: GrafSettings,
     pub(crate) controller: CompilerController,
     pub(crate) compile_task: Option<Task<()>>,
+    pub(crate) outline_cache: caches::OutlineCache,
+    pub(crate) stats_cache: caches::StatsCache,
+    pub(crate) outline_task: Option<Task<()>>,
+    pub(crate) stats_task: Option<Task<()>>,
+    /// Revision of the editor text last synced into the active document.
+    /// Cursor-only activity leaves the revision unchanged, so per-keystroke
+    /// fanout (clones, recovery fsync, label parses) is skipped entirely.
+    pub(crate) last_synced_editor_rev: u64,
+    /// Revision for which label/autocomplete output is current. Debounced
+    /// assist tasks reject stale revisions.
+    pub(crate) last_assist_rev: Option<u64>,
+    /// Coalescing timers. Overwriting drops (cancels) the previous pending
+    /// task, so rapid keystrokes collapse into a single background flush.
+    pub(crate) assist_task: Option<Task<()>>,
+    pub(crate) recovery_task: Option<Task<()>>,
+    /// Revision last flushed to the recovery journal (debounced or explicit).
+    pub(crate) last_recovery_rev: Option<u64>,
     pub(crate) compile_running: bool,
     pub(crate) compile_pending: bool,
     pub(crate) show_welcome: bool,
@@ -186,22 +205,92 @@ pub struct Workspace {
     pub(crate) find_bar_open: bool,
     pub(crate) active_modal: ActiveModal,
     pub(crate) pending_recovery: Option<crate::project::recovery::RecoveryJournal>,
+    pub(crate) startup_generation: u64,
+    pub(crate) startup_loading: bool,
+}
+
+/// Blocking filesystem work for first-frame startup, run on a background
+/// thread. All fields are owned (`Send`) so the payload can cross threads.
+struct StartupPayload {
+    generation: u64,
+    project_tree: ProjectTree,
+    initial_doc: Document,
+    /// Editor text of the cheap skeleton, used to detect user edits that
+    /// happened while the background scan was in flight.
+    skeleton_content: String,
+    recovery: Option<crate::project::recovery::RecoveryJournal>,
+    bib_index: crate::project::bibtex::BibtexIndex,
+    label_index: crate::project::bibtex::LabelIndex,
+}
+
+/// Generation guard for startup results. A background payload is current only
+/// when its generation matches the workspace's current generation.
+pub(crate) fn startup_result_is_current(current: u64, result_generation: u64) -> bool {
+    current == result_generation
+}
+
+const STARTUP_PLACEHOLDER_TEXT: &str = "\\documentclass{article}\n\\title{Untitled}\n\\author{}\n\n\\begin{document}\n\\maketitle\n\n\\section{Introduction}\nStart writing here.\n\n\\end{document}\n";
+
+/// Runs entirely on a background thread: project scan, root document open,
+/// recovery journal load, and `.bib`/label indexing. No GPUI handles.
+fn load_startup_payload(
+    root: PathBuf,
+    skeleton_content: String,
+    generation: u64,
+) -> StartupPayload {
+    let project_tree = ProjectTree::scan(&root);
+
+    let initial_doc = if let Some(root_doc) = project_tree.root_document() {
+        Document::open(root_doc)
+            .unwrap_or_else(|_| Document::new_untitled("main.tex", STARTUP_PLACEHOLDER_TEXT))
+    } else {
+        Document::new_untitled("main.tex", STARTUP_PLACEHOLDER_TEXT)
+    };
+
+    let recovery_dir = root.join(".graf").join("recovery");
+    let recovery = crate::project::recovery::RecoveryJournal::load_from_dir(&recovery_dir)
+        .filter(|journal| !journal.entries.is_empty());
+
+    let mut bib_index = crate::project::bibtex::BibtexIndex::new();
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "bib")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                bib_index.parse_and_load(&content);
+            }
+        }
+    }
+
+    let mut label_index = crate::project::bibtex::LabelIndex::default();
+    label_index.parse_and_load(initial_doc.buffer().content());
+
+    StartupPayload {
+        generation,
+        project_tree,
+        initial_doc,
+        skeleton_content,
+        recovery,
+        bib_index,
+        label_index,
+    }
 }
 
 impl Workspace {
+    /// Cheap skeleton for the first frame. Performs no blocking project I/O:
+    /// no `ProjectTree::scan`, no `Document::open`, no recovery load, no
+    /// `.bib` scan, and no engine resolution (engines resolve lazily on
+    /// background threads). The real project is loaded by
+    /// [`Self::spawn_startup_load`] and applied with a generation guard.
     pub fn new(cx: &mut Context<Self>) -> Self {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let project_tree = ProjectTree::scan(&current_dir);
+        // Empty tree: no filesystem walk on the UI thread.
+        let project_tree = ProjectTree::empty(&current_dir);
 
-        let initial_text = "\\documentclass{article}\n\\title{Untitled}\n\\author{}\n\n\\begin{document}\n\\maketitle\n\n\\section{Introduction}\nStart writing here.\n\n\\end{document}\n";
-
-        let show_welcome = project_tree.root_document().is_none();
-        let initial_doc = if let Some(root_doc) = project_tree.root_document() {
-            Document::open(root_doc)
-                .unwrap_or_else(|_| Document::new_untitled("main.tex", initial_text))
-        } else {
-            Document::new_untitled("main.tex", initial_text)
-        };
+        // Cheap placeholder document; replaced once the background load
+        // finishes (unless the user typed meanwhile — see apply path).
+        let initial_doc = Document::new_untitled("main.tex", STARTUP_PLACEHOLDER_TEXT);
 
         let settings = GrafSettings::load_default();
         let editor_settings = settings.editor.clone();
@@ -232,12 +321,6 @@ impl Workspace {
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
 
-        // Prime the Tectonic support-file cache in the background so the
-        // first user compile is not the one waiting on downloads.
-        let warm_up_engine = tectonic_compiler.clone();
-        cx.background_executor()
-            .spawn(async move { warm_up_engine.warm_up() })
-            .detach();
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
         let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_provider(&settings.ai);
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
@@ -285,9 +368,20 @@ impl Workspace {
             settings,
             controller,
             compile_task: None,
+            outline_cache: caches::OutlineCache::new(),
+            stats_cache: caches::StatsCache::new(),
+            outline_task: None,
+            stats_task: None,
+            last_synced_editor_rev: 0,
+            last_assist_rev: None,
+            assist_task: None,
+            recovery_task: None,
+            last_recovery_rev: None,
             compile_running: false,
             compile_pending: false,
-            show_welcome,
+            // Show welcome/loading immediately; the background load decides
+            // whether a real project exists.
+            show_welcome: true,
             sidebar_visible: true,
             sidebar_tab: SidebarTab::Files,
             preview_visible: true,
@@ -309,26 +403,123 @@ impl Workspace {
             find_bar_open: false,
             active_modal: ActiveModal::None,
             pending_recovery: None,
+            startup_generation: 1,
+            startup_loading: true,
         };
 
-        let recovery_dir = workspace
-            .project_tree
-            .root_path()
-            .join(".graf")
-            .join("recovery");
-        if let Some(journal) =
-            crate::project::recovery::RecoveryJournal::load_from_dir(&recovery_dir)
-            && !journal.entries.is_empty()
+        // Prime outline + stats caches from the cheap placeholder so the
+        // first frame never parses in render. One small copy here only.
         {
-            workspace.pending_recovery = Some(journal);
-            workspace.active_modal = ActiveModal::RestoreRecovery;
+            let doc_id = workspace
+                .documents
+                .get(workspace.active_doc_idx)
+                .map(|doc| doc.id());
+            let is_typst = workspace
+                .documents
+                .get(workspace.active_doc_idx)
+                .is_some_and(|doc| doc.title().ends_with(".typ"));
+            let (revision, text) = {
+                let editor = workspace.editor.read(cx);
+                (editor.revision(), editor.text().to_string())
+            };
+            workspace.prime_caches_from_text(doc_id, revision, &text, is_typst);
         }
 
-        workspace.reload_bibtex_and_labels(cx);
-        if !workspace.show_welcome {
-            workspace.trigger_compile(cx);
-        }
+        // Prime the Tectonic support-file cache in the background so the
+        // first user compile is not the one waiting on downloads. Resolution
+        // itself is lazy, so this never blocks the UI thread.
+        // (Spawned after `workspace` exists so borrows are clear; the engine
+        // handle is cheap to clone via the workspace fields.)
+        //
+        // Defer all blocking startup I/O (scan, open, recovery, bib/labels)
+        // plus the first compile to the background. Results are applied with
+        // a generation guard so stale loads are rejected.
+        workspace.spawn_startup_load(cx);
         workspace
+    }
+
+    fn spawn_startup_load(&self, cx: &mut Context<Self>) {
+        let root = self.project_tree.root_path().to_path_buf();
+        let skeleton_content = self.editor.read(cx).text().to_string();
+        let generation = self.startup_generation;
+        let warm_up_engine = self.tectonic_compiler.clone();
+
+        cx.spawn(async move |this, cx| {
+            // Blocking I/O runs on the background executor, off the UI thread.
+            let payload = cx
+                .background_executor()
+                .spawn(async move { load_startup_payload(root, skeleton_content, generation) })
+                .await;
+            cx.background_executor()
+                .spawn(async move {
+                    warm_up_engine.warm_up();
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                this.apply_startup_payload(payload, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn apply_startup_payload(&mut self, payload: StartupPayload, cx: &mut Context<Self>) {
+        if !startup_result_is_current(self.startup_generation, payload.generation) {
+            info!(
+                "discarded stale startup payload for generation {}; current is {}",
+                payload.generation, self.startup_generation
+            );
+            return;
+        }
+        self.startup_loading = false;
+
+        self.project_tree = payload.project_tree;
+        self.bib_index = payload.bib_index;
+        self.label_index = payload.label_index;
+
+        if let Some(journal) = payload.recovery {
+            self.pending_recovery = Some(journal);
+            // Do not silently clobber an already-open modal (e.g. the user
+            // opened quick-open during load); recovery still waits in
+            // `pending_recovery` and can be surfaced without loss.
+            if self.active_modal == ActiveModal::None {
+                self.active_modal = ActiveModal::RestoreRecovery;
+            }
+        }
+
+        // If the user typed into the skeleton editor while the scan was in
+        // flight, keep their work: install the tree/indexes/recovery above
+        // but leave documents and editor text untouched.
+        let current_text = self.editor.read(cx).text().to_string();
+        if current_text != payload.skeleton_content {
+            info!("startup load preserved user edits made during background scan");
+            cx.notify();
+            return;
+        }
+
+        let title = payload.initial_doc.title().to_string();
+        let content = payload.initial_doc.buffer().content().to_string();
+        let is_typst = title.ends_with(".typ");
+        let is_plain_text = !is_typst && !title.ends_with(".tex");
+
+        self.documents = vec![payload.initial_doc];
+        self.active_doc_idx = 0;
+        self.controller.reset();
+        self.show_welcome = self.project_tree.root_document().is_none();
+        self.editor.update(cx, |editor, cx| {
+            editor.set_text(content, cx);
+            editor.set_is_typst(is_typst, cx);
+            editor.set_plain_text(is_plain_text, cx);
+        });
+        // `set_text` notifies observers (see `on_editor_changed`), but refresh
+        // explicitly so a missed notification can never leave stale caches.
+        self.refresh_caches_for_doc_switch(cx);
+
+        cx.notify();
+        if !self.show_welcome {
+            self.trigger_compile(cx);
+        }
     }
 
     pub fn active_engine(&self) -> EngineKind {
@@ -653,6 +844,8 @@ impl Workspace {
         self.documents.push(doc);
         self.active_doc_idx = self.documents.len() - 1;
         self.active_view_kind = ActiveViewKind::Canvas;
+        // Canvas tabs show no outline and no word count.
+        self.refresh_caches_for_doc_switch(cx);
         cx.notify();
     }
 
@@ -1002,5 +1195,80 @@ impl Render for Workspace {
         }
 
         root
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn generation_guard_accepts_current_and_rejects_stale() {
+        assert!(startup_result_is_current(1, 1));
+        assert!(!startup_result_is_current(2, 1));
+        assert!(!startup_result_is_current(1, 2));
+    }
+
+    #[test]
+    fn background_payload_loads_tree_doc_bib_and_labels() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("main.tex"),
+            "\\documentclass{article}\n\\begin{document}\nSee \\label{sec:intro}.\n\\end{document}\n",
+        )
+        .expect("write main.tex");
+        std::fs::write(
+            dir.path().join("refs.bib"),
+            "@article{key,\n  title = {Some Title},\n  author = {Some Author},\n  year = {2024}\n}\n",
+        )
+        .expect("write refs.bib");
+
+        let payload = load_startup_payload(
+            dir.path().to_path_buf(),
+            STARTUP_PLACEHOLDER_TEXT.to_string(),
+            7,
+        );
+
+        assert_eq!(payload.generation, 7);
+        assert_eq!(
+            payload.project_tree.root_document(),
+            Some(dir.path().join("main.tex").as_path())
+        );
+        assert!(
+            payload
+                .initial_doc
+                .buffer()
+                .content()
+                .contains("\\documentclass")
+        );
+        assert!(
+            payload.skeleton_content.contains("\\documentclass"),
+            "skeleton content must round-trip for edit detection"
+        );
+        assert!(
+            payload.recovery.is_none(),
+            "no recovery journal was written in this fixture"
+        );
+        assert_eq!(payload.bib_index.entries.len(), 1);
+        assert_eq!(payload.bib_index.entries[0].key, "key");
+        assert_eq!(payload.label_index.labels, vec!["sec:intro".to_string()]);
+    }
+
+    #[test]
+    fn background_payload_falls_back_to_placeholder_without_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let payload = load_startup_payload(dir.path().to_path_buf(), String::new(), 3);
+
+        assert_eq!(payload.generation, 3);
+        assert_eq!(payload.project_tree.root_document(), None);
+        assert_eq!(payload.initial_doc.title(), "main.tex");
+        assert!(
+            payload
+                .initial_doc
+                .buffer()
+                .content()
+                .contains("Start writing here")
+        );
     }
 }

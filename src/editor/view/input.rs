@@ -662,17 +662,18 @@ impl EntityInputHandler for EditorView {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
-        let (line, col) = self.line_col_for_offset(range.start);
+        let (line, start_byte) = line_byte_col(&self.buffer, range.start);
         let local_line = line.checked_sub(self.last_first_line)?;
         let layout = self.last_line_layouts.get(local_line)?;
 
         let lh = self.last_line_height;
-        let x_start = layout.x_for_index(col);
-        let end_col = range
+        let line_text = self.buffer.line_content(line).unwrap_or("");
+        let line_len = line_text.len();
+        let x_start = layout.x_for_index(snap_byte_col(line_text, start_byte.min(line_len)));
+        let end_byte = range
             .end
             .saturating_sub(self.buffer.line_start_offset(line));
-        let line_len = self.buffer.line_content(line).map_or(0, str::len);
-        let x_end = layout.x_for_index(end_col.min(line_len));
+        let x_end = layout.x_for_index(snap_byte_col(line_text, end_byte.min(line_len)));
 
         let top = bounds.top() + px(line as f32 * lh - self.scroll_offset);
         let gutter_offset = px(self.gutter_width() + TEXT_PADDING);

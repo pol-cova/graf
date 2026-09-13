@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 
 /// Where a resolved engine executable came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +102,31 @@ pub(crate) fn resolve_with(
     None
 }
 
+fn which_cache() -> &'static Mutex<HashMap<String, Option<PathBuf>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Cached `which` lookup. The underlying subprocess spawn blocks, so callers
+/// must only invoke this from a background thread (engine resolution is lazy
+/// for exactly this reason). Results are cached per binary name so repeated
+/// compiles do not re-spawn `which`.
 fn which_system(name: &str) -> Option<PathBuf> {
+    if let Ok(cache) = which_cache().lock()
+        && let Some(cached) = cache.get(name)
+    {
+        return cached.clone();
+    }
+
+    let result = which_system_uncached(name);
+
+    if let Ok(mut cache) = which_cache().lock() {
+        cache.insert(name.to_string(), result.clone());
+    }
+    result
+}
+
+fn which_system_uncached(name: &str) -> Option<PathBuf> {
     let output = Command::new("which").arg(name).output().ok()?;
     if !output.status.success() {
         return None;
@@ -206,6 +232,16 @@ mod tests {
         let resolved = resolve_with("tectonic", None, None, &[], None, &which_none);
 
         assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn which_system_caches_negative_results() {
+        // Exercises the OnceLock+Mutex cache: the second lookup for a
+        // missing binary must hit the cache and still return None.
+        let first = which_system("graf-definitely-missing-binary-xyz");
+        let second = which_system("graf-definitely-missing-binary-xyz");
+        assert_eq!(first, None);
+        assert_eq!(second, None);
     }
 
     #[test]

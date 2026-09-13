@@ -3,10 +3,27 @@ use super::*;
 impl Workspace {
     pub(super) fn on_editor_changed(&mut self, editor: Entity<EditorView>, cx: &mut Context<Self>) {
         let rev = editor.read(cx).revision();
+        // Fast path for cursor/selection-only notifications: the revision is
+        // unchanged, so skip document sync, recovery, and compile entirely.
+        // Assist still refreshes (debounced) because the cursor moved.
+        if !crate::workspace::coalesce::should_sync_editor_text(rev, self.last_synced_editor_rev) {
+            self.schedule_assist_debounced(cx);
+            self.refresh_outline_cache(cx);
+            self.schedule_stats_refresh(cx);
+            return;
+        }
+        // Single snapshot sync: reads editor text once, compares borrowed
+        // content before cloning, clones at most once.
         self.sync_active_doc_from_editor(cx);
-        self.save_recovery_snapshot();
-        self.reload_editor_labels(cx);
-        self.trigger_autocomplete(cx);
+        // Debounced, coalesced background work. No `create_dir`, pretty
+        // JSON, `fsync`, label parse, or completion compute on the UI thread
+        // per keystroke.
+        self.schedule_recovery_snapshot(cx, rev);
+        self.schedule_assist_debounced(cx);
+        // Cached outline (inline or background for large docs) and debounced
+        // background stats. Render paths only read the caches.
+        self.refresh_outline_cache(cx);
+        self.schedule_stats_refresh(cx);
 
         if self.active_document_is_compilable()
             && rev > self.controller.current_revision()
@@ -26,6 +43,89 @@ impl Workspace {
         }
     }
 
+    /// Debounced label-index reload plus autocomplete. Captures the revision
+    /// at schedule time; after a 150ms quiet period a single editor snapshot
+    /// (one `to_string`) is parsed and completed on the background executor,
+    /// and stale results are rejected by revision. Overwriting `assist_task`
+    /// cancels the previous timer, coalescing rapid keystrokes.
+    pub(crate) fn schedule_assist_debounced(&mut self, cx: &mut Context<Self>) {
+        use crate::workspace::coalesce::{ASSIST_DEBOUNCE, assist_result_is_current};
+        let scheduled_rev = self.editor.read(cx).revision();
+        self.assist_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(ASSIST_DEBOUNCE).await;
+            // Single snapshot after the quiet period (one UI-thread clone).
+            let snapshot: Option<(
+                u64,
+                String,
+                usize,
+                bool,
+                crate::project::bibtex::BibtexIndex,
+            )> = this
+                .update(cx, |this, cx| {
+                    let current_rev = this.editor.read(cx).revision();
+                    if !assist_result_is_current(scheduled_rev, current_rev) {
+                        return None;
+                    }
+                    let (text, cursor) = {
+                        let editor = this.editor.read(cx);
+                        (editor.text().to_string(), editor.cursor_offset())
+                    };
+                    let is_tex = this
+                        .documents
+                        .get(this.active_doc_idx)
+                        .is_some_and(|doc| doc.title().ends_with(".tex"));
+                    let bib = this.bib_index.clone();
+                    Some((current_rev, text, cursor, is_tex, bib))
+                })
+                .ok()
+                .flatten();
+            let Some((snap_rev, text, cursor, is_tex, bib)) = snapshot else {
+                return;
+            };
+            // Parse labels and compute completions off the UI thread.
+            let (labels, completions) = cx
+                .background_executor()
+                .spawn(async move {
+                    let labels = crate::project::bibtex::parse_latex_labels(&text);
+                    let label_index = crate::project::bibtex::LabelIndex { labels };
+                    let mut completions = if is_tex {
+                        crate::editor::completion::compute_completions(
+                            &text,
+                            cursor,
+                            &bib,
+                            &label_index,
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    completions.truncate(8);
+                    (label_index.labels, completions)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let current_rev = this.editor.read(cx).revision();
+                if !assist_result_is_current(snap_rev, current_rev) {
+                    return;
+                }
+                this.label_index.labels = labels;
+                this.completions = completions;
+                this.completion_open = is_tex && !this.completions.is_empty();
+                if !is_tex {
+                    this.completions.clear();
+                    this.completion_open = false;
+                }
+                this.completion_selected = 0;
+                let open = this.completion_open;
+                this.editor.update(cx, |editor, _| {
+                    editor.set_completion_active(open);
+                });
+                this.last_assist_rev = Some(snap_rev);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     pub fn trigger_compile(&mut self, cx: &mut Context<Self>) {
         if !self.active_document_is_compilable() {
             self.compile_pending = false;
@@ -43,11 +143,14 @@ impl Workspace {
 
         self.preview
             .update(cx, |preview, cx| preview.set_rendering(cx));
-        let (rev, text) = {
-            let ed = self.editor.read(cx);
-            (ed.revision(), ed.text().to_string())
-        };
-
+        // Snapshot the revision plus cheap metadata on the UI thread. The
+        // editor text itself is NOT cloned here: a single `Arc<str>` snapshot
+        // happens inside the spawned task (after spawn, after the revision
+        // snapshot), and the shared snapshot moves to the background compile
+        // with no extra UI-thread `String` clone before spawn. Debounce
+        // timing (controller 150ms default / settings value) is unchanged:
+        // callers still debounce before calling `trigger_compile`.
+        let trigger_rev = self.editor.read(cx).revision();
         let engine = self.active_engine();
         let compiler = if engine == EngineKind::Typst {
             self.typst_compiler.clone()
@@ -72,13 +175,44 @@ impl Workspace {
                     .and_then(|document| document.path().map(Path::to_path_buf))
             });
 
-        let request = CompileRequest::with_project(text, rev, project_root, root_document);
-        self.controller.begin_compile(request.compile_id, rev);
+        // Reserve the compile slot synchronously so concurrent triggers
+        // coalesce via `compile_pending`. `begin_compile` (with the real
+        // id/rev) happens inside the spawned task once the text snapshot
+        // exists, keeping id/rev consistent for stale-revision rejection.
         self.compile_running = true;
         self.compile_pending = false;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
+            let request_opt: Option<CompileRequest> = this
+                .update(cx, |this, cx| {
+                    let editor = this.editor.read(cx);
+                    let snap_rev = editor.revision();
+                    if snap_rev != trigger_rev {
+                        info!(
+                            "compile snapshot advanced from rev {trigger_rev} to rev {snap_rev}; compiling latest"
+                        );
+                    }
+                    let text: Arc<str> = Arc::from(editor.text());
+                    let request = CompileRequest::with_project(
+                        text,
+                        snap_rev,
+                        project_root.clone(),
+                        root_document.clone(),
+                    );
+                    this.controller.begin_compile(request.compile_id, snap_rev);
+                    Some(request)
+                })
+                .ok()
+                .flatten();
+            let Some(request) = request_opt else {
+                this.update(cx, |this, cx| {
+                    this.finish_compile(cx);
+                })
+                .ok();
+                return;
+            };
+
             let result = cx
                 .background_executor()
                 .spawn(async move { compiler.compile(request) })
