@@ -51,11 +51,42 @@ impl FindState {
             for (idx, _) in content.match_indices(&self.query) {
                 self.matches.push(idx..idx + query_len);
             }
+        } else if self.query.is_ascii() {
+            // Fast path: the query is ASCII, so folding per byte keeps the
+            // byte ranges valid and needs no full-document copy.
+            let query = self.query.as_bytes();
+            for start in 0..content.len().saturating_sub(query_len - 1) {
+                if equal_ignoring_ascii_case(&content.as_bytes()[start..start + query_len], query) {
+                    self.matches.push(start..start + query_len);
+                }
+            }
         } else {
-            let lower_content = content.to_lowercase();
-            let lower_query = self.query.to_lowercase();
-            for (idx, _) in lower_content.match_indices(&lower_query) {
-                self.matches.push(idx..idx + query_len);
+            // General Unicode path: walk char boundaries and compare each
+            // candidate with full lowercase folding, so multi-byte characters
+            // whose fold changes byte length (İ) can never shift ranges the
+            // way a folded copy would.
+            let query_chars: Vec<char> = self.query.chars().collect();
+            for (start, first) in content.char_indices() {
+                if !chars_fold_equal(first, query_chars[0]) {
+                    continue;
+                }
+                let mut consumed = first.len_utf8();
+                let mut matched = true;
+                let mut rest = content[start + consumed..].chars();
+                for &expected in &query_chars[1..] {
+                    match rest.next() {
+                        Some(candidate) if chars_fold_equal(candidate, expected) => {
+                            consumed += candidate.len_utf8();
+                        }
+                        _ => {
+                            matched = false;
+                            break;
+                        }
+                    }
+                }
+                if matched {
+                    self.matches.push(start..start + consumed);
+                }
             }
         }
 
@@ -141,6 +172,19 @@ impl FindState {
     }
 }
 
+/// Byte-wise ASCII case-insensitive comparison; non-ASCII bytes (never
+/// present in the query on this path) simply must match exactly, so a
+/// multi-byte character can never be confused with an ASCII one.
+fn equal_ignoring_ascii_case(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
+}
+
+/// Case-fold equivalence per character using full lowercase expansion, no
+/// allocations.
+fn chars_fold_equal(a: char, b: char) -> bool {
+    a.to_lowercase().eq(b.to_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +253,41 @@ mod tests {
 
         buffer.undo();
         assert_eq!(buffer.content(), "foo bar foo baz foo");
+    }
+
+    #[test]
+    fn case_insensitive_matches_stay_byte_aligned_after_folding_anomalies() {
+        // 'İ' (U+0130, 2 bytes) lowers to 3 bytes in a folded copy, which
+        // used to shift every highlight after it.
+        let text = "İx İstanbul latex İ";
+        let mut find = FindState::new();
+        find.set_query("latex", text);
+        assert_eq!(find.matches.len(), 1);
+        assert_eq!(find.active_match(), Some(&(14..19)));
+        // Exact ranges point at real chars.
+        assert_eq!(&text[14..19], "latex");
+    }
+
+    #[test]
+    fn case_insensitive_matches_chars_of_differing_width() {
+        let mut find = FindState::new();
+        // Σ (2 bytes) folds to σ (2 bytes) — ok; and 'İ' as haystack char.
+        find.set_query("σ", "Σx Σy");
+        assert_eq!(find.matches.len(), 2);
+        assert_eq!(&"Σx Σy"[find.active_match().unwrap().clone()], "Σ");
+
+        // A non-ASCII query never matches half of a multi-byte cluster.
+        find.set_query("x", "日本語");
+        assert!(find.matches.is_empty());
+    }
+
+    #[test]
+    fn ascii_query_is_allocation_free_path() {
+        let text = "TYPE type";
+        let mut find = FindState::new();
+        find.set_query("type", text);
+        assert_eq!(find.matches.len(), 2);
+        assert_eq!(find.matches[0], 0..4);
+        assert_eq!(find.matches[1], 5..9);
     }
 }

@@ -142,6 +142,10 @@ pub struct EditorView {
     completion_active: bool,
     context_menu_position: Option<(f32, f32)>,
     single_line: bool,
+    /// Per-revision UTF16 offset of each line start, built lazily on the
+    /// first IME conversion query. (revision, offsets per line + final total)
+    /// Interior-mutable because the IME input handler reads through `&self`.
+    utf16_cache: std::cell::RefCell<Option<(u64, Vec<usize>)>>,
 }
 
 impl EventEmitter<EditorEvent> for EditorView {}
@@ -185,6 +189,7 @@ impl EditorView {
             completion_active: false,
             context_menu_position: None,
             single_line: false,
+            utf16_cache: std::cell::RefCell::new(None),
         }
     }
 
@@ -317,36 +322,60 @@ impl EditorView {
     }
 
     fn previous_boundary(&self, offset: usize) -> usize {
-        self.buffer
-            .content()
+        let content = self.buffer.content();
+        let safe_offset = offset.min(content.len());
+        let window_start = char_floor(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
+        match content[window_start..safe_offset]
             .grapheme_indices(true)
-            .rev()
-            .find_map(|(idx, _)| (idx < offset).then_some(idx))
-            .unwrap_or(0)
+            .next_back()
+        {
+            // Interior cluster of the window (or the document start): a real
+            // boundary. A single truncated cluster right after the cut falls
+            // back to a whole-document scan.
+            Some((idx, _)) if idx > 0 || window_start == 0 => window_start + idx,
+            _ => content[..safe_offset]
+                .grapheme_indices(true)
+                .next_back()
+                .map(|(idx, _)| idx)
+                .unwrap_or(0),
+        }
     }
 
     fn next_boundary(&self, offset: usize) -> usize {
-        self.buffer
-            .content()
-            .grapheme_indices(true)
-            .find_map(|(idx, _)| (idx > offset).then_some(idx))
-            .unwrap_or(self.buffer.len())
+        let content = self.buffer.content();
+        if offset >= content.len() {
+            return content.len();
+        }
+        let safe_offset = offset.min(content.len());
+        // Yields at most two clusters regardless of document length: the
+        // first cluster after `safe_offset` plus the start of the next one.
+        let mut iter = content[safe_offset..].grapheme_indices(true);
+        let _first = iter.next();
+        iter.next()
+            .map(|(idx, _)| safe_offset + idx)
+            .unwrap_or(content.len())
     }
 
     fn previous_word_boundary(&self, offset: usize) -> usize {
         let content = self.buffer.content();
         let safe_offset = offset.min(content.len());
-        content[..safe_offset]
+        let window_start = char_floor(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
+        let windowed = content[window_start..safe_offset]
             .split_word_bound_indices()
             .rev()
-            .find_map(|(idx, word)| {
-                if idx < safe_offset && !word.trim().is_empty() {
-                    Some(idx)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0)
+            .find_map(|(idx, word)| (!word.trim().is_empty()).then_some(idx));
+        match windowed {
+            // A word sitting at the window cut may be truncated by the left
+            // edge; fall back to the whole document to stay exact.
+            Some(idx) if idx > 0 || window_start == 0 => window_start + idx,
+            _ => content[..safe_offset]
+                .split_word_bound_indices()
+                .rev()
+                .find_map(|(idx, word)| {
+                    (idx < safe_offset && !word.trim().is_empty()).then_some(idx)
+                })
+                .unwrap_or(0),
+        }
     }
 
     fn next_word_boundary(&self, offset: usize) -> usize {
@@ -354,15 +383,12 @@ impl EditorView {
         if offset >= content.len() {
             return content.len();
         }
-        content[offset..]
+        let safe_offset = offset.min(content.len());
+        content[safe_offset..]
             .split_word_bound_indices()
+            .take_while(|(rel_idx, _)| *rel_idx <= BOUNDARY_WINDOW_BYTES)
             .find_map(|(rel_idx, word)| {
-                let abs_idx = offset + rel_idx;
-                if abs_idx > offset && !word.trim().is_empty() {
-                    Some(abs_idx)
-                } else {
-                    None
-                }
+                (rel_idx > 0 && !word.trim().is_empty()).then_some(safe_offset + rel_idx)
             })
             .unwrap_or(content.len())
     }
@@ -467,25 +493,55 @@ impl EditorView {
         self.offset_for_line_col(line_idx, col)
     }
 
+    /// UTF16 offsets for every line start plus the document total, memoized
+    /// per buffer revision so repeated IME conversions never re-scan.
+    fn utf16_line_offsets(&self) -> std::cell::RefMut<'_, Vec<usize>> {
+        let revision = self.buffer.revision();
+        let mut cache = self.utf16_cache.borrow_mut();
+        match cache.as_mut() {
+            Some((cached_rev, offsets)) if *cached_rev == revision => {}
+            _ => {
+                let offsets = compute_utf16_line_offsets(self.buffer.content());
+                *cache = Some((revision, offsets));
+            }
+        }
+        std::cell::RefMut::map(cache, |cache| &mut cache.as_mut().expect("just built").1)
+    }
+
     fn offset_from_utf16(&self, offset: usize) -> usize {
-        let mut utf8_offset = 0;
-        let mut utf16_count = 0;
-        for ch in self.buffer.content().chars() {
-            if utf16_count >= offset {
+        let offsets = self.utf16_line_offsets();
+        let line = offsets.partition_point(|&start_utf16| start_utf16 <= offset) - 1;
+        let line_byte_start = self.buffer.line_start_offset(line);
+        let mut target_within_line = offset - offsets[line];
+        let mut byte_offset = line_byte_start;
+        for character in self.buffer.content()[line_byte_start..].chars() {
+            if target_within_line == 0 {
                 break;
             }
-            utf16_count += ch.len_utf16();
-            utf8_offset += ch.len_utf8();
+            if character.len_utf16() > target_within_line {
+                // Offset fell inside a surrogate pair; snap to its start.
+                break;
+            }
+            target_within_line -= character.len_utf16();
+            byte_offset += character.len_utf8();
         }
-        utf8_offset
+        byte_offset
     }
 
     fn offset_to_utf16(&self, offset: usize) -> usize {
-        let offset = offset.min(self.buffer.len());
-        self.buffer.content()[..offset]
+        let safe_offset = offset.min(self.buffer.len());
+        let line = self.buffer.line_of_offset(safe_offset);
+        let line_byte_start = self.buffer.line_start_offset(line);
+        let within_line: usize = self.buffer.content()[line_byte_start..safe_offset]
             .chars()
             .map(char::len_utf16)
-            .sum()
+            .sum();
+        let offsets = self.utf16_line_offsets();
+        offsets
+            .get(line)
+            .copied()
+            .unwrap_or_else(|| offsets.last().copied().unwrap_or(0))
+            + within_line
     }
 
     fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
@@ -652,6 +708,33 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
 }
 
 const TEXT_PADDING: f32 = 14.0;
+
+/// Typeface-independent cap on how far a movement scan looks around the
+/// cursor. Arrow keys and word jumps scan this window instead of the whole
+/// document; boundaries always exist well within it.
+const BOUNDARY_WINDOW_BYTES: usize = 256;
+
+fn char_floor(content: &str, mut index: usize) -> usize {
+    while index > 0 && !content.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+/// UTF16 offset of every line start plus the document total, one pass.
+fn compute_utf16_line_offsets(content: &str) -> Vec<usize> {
+    let mut offsets = Vec::new();
+    let mut acc = 0usize;
+    offsets.push(0);
+    for character in content.chars() {
+        acc += character.len_utf16();
+        if character == '\n' {
+            offsets.push(acc);
+        }
+    }
+    offsets.shrink_to_fit();
+    offsets
+}
 
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

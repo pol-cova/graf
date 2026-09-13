@@ -48,6 +48,7 @@ pub fn compute_completions(
             return bib_index
                 .search(after)
                 .into_iter()
+                .take(MAX_COMPLETIONS)
                 .map(|e| CompletionItem {
                     label: e.key.clone(),
                     detail: e.display_summary(),
@@ -66,6 +67,7 @@ pub fn compute_completions(
                 return label_index
                     .search(after)
                     .into_iter()
+                    .take(MAX_COMPLETIONS)
                     .map(|l| CompletionItem {
                         label: l.to_string(),
                         detail: "Cross-reference label".to_string(),
@@ -80,27 +82,16 @@ pub fn compute_completions(
     if let Some(begin_pos) = prefix.rfind("\\begin{") {
         let after = &prefix[begin_pos + 7..];
         if !after.contains('}') && !after.contains('\n') {
-            let common_envs = [
-                ("equation", "Numbered mathematical equation"),
-                ("align", "Aligned equations"),
-                ("figure", "Floating figure with caption"),
-                ("table", "Floating table"),
-                ("itemize", "Bulleted list"),
-                ("enumerate", "Numbered list"),
-                ("abstract", "Paper abstract section"),
-                ("proof", "Mathematical proof block"),
-                ("theorem", "Theorem statement block"),
-                ("lemma", "Lemma statement block"),
-                ("lstlisting", "Source code listing"),
-            ];
-
+            // Names in the table are already lowercase; folding each
+            // candidate per keystroke was pure waste.
             let query_lower = after.to_lowercase();
-            return common_envs
+            return COMMON_ENVS
                 .into_iter()
-                .filter(|(name, _)| name.to_lowercase().contains(&query_lower))
+                .filter(|(name, _)| name.contains(&query_lower))
+                .take(MAX_COMPLETIONS)
                 .map(|(name, detail)| CompletionItem {
-                    label: name.to_string(),
-                    detail: detail.to_string(),
+                    label: (*name).to_string(),
+                    detail: (*detail).to_string(),
                     insert_text: format!(
                         "{}}}\n    \n\\end{{{name}}}",
                         completion_suffix(name, after)
@@ -120,32 +111,14 @@ pub fn compute_completions(
             && !after.contains('\n')
             && after.chars().all(|c| c.is_alphabetic())
         {
-            let common_commands = [
-                ("begin", "Environment", "begin{}"),
-                ("section", "Section heading", "section{}"),
-                ("subsection", "Subsection heading", "subsection{}"),
-                ("subsubsection", "Subsubsection heading", "subsubsection{}"),
-                ("textbf", "Bold font weight", "textbf{}"),
-                ("textit", "Italic font slant", "textit{}"),
-                ("usepackage", "Include LaTeX package", "usepackage{}"),
-                (
-                    "newcommand",
-                    "Define custom command macro",
-                    "newcommand{}{}",
-                ),
-                ("frac", "Fraction numerator over denominator", "frac{}{}"),
-                ("sqrt", "Square root", "sqrt{}"),
-                ("label", "Cross-reference anchor label", "label{}"),
-                ("caption", "Figure or table caption", "caption{}"),
-            ];
-
             let query_lower = after.to_lowercase();
-            return common_commands
+            return COMMON_COMMANDS
                 .into_iter()
-                .filter(|(name, _, _)| name.to_lowercase().starts_with(&query_lower))
+                .filter(|(name, _, _)| name.starts_with(query_lower.as_str()))
+                .take(MAX_COMPLETIONS)
                 .map(|(name, detail, snippet)| CompletionItem {
                     label: format!("\\{name}"),
-                    detail: detail.to_string(),
+                    detail: (*detail).to_string(),
                     insert_text: completion_suffix(snippet, after).to_string(),
                     kind: CompletionKind::Command,
                 })
@@ -155,6 +128,47 @@ pub fn compute_completions(
 
     Vec::new()
 }
+
+/// Cap on returned completions; the UI only shows a handful.
+const MAX_COMPLETIONS: usize = 50;
+
+type EnvEntry = (&'static str, &'static str);
+type CommandEntry = (&'static str, &'static str, &'static str);
+
+/// LaTeX environments and commands are lowercase, so this table is shared
+/// directly with case-insensitive matching without per-candidate folding.
+const COMMON_ENVS: [EnvEntry; 11] = [
+    ("equation", "Numbered mathematical equation"),
+    ("align", "Aligned equations"),
+    ("figure", "Floating figure with caption"),
+    ("table", "Floating table"),
+    ("itemize", "Bulleted list"),
+    ("enumerate", "Numbered list"),
+    ("abstract", "Paper abstract section"),
+    ("proof", "Mathematical proof block"),
+    ("theorem", "Theorem statement block"),
+    ("lemma", "Lemma statement block"),
+    ("lstlisting", "Source code listing"),
+];
+
+const COMMON_COMMANDS: [CommandEntry; 12] = [
+    ("begin", "Environment", "begin{}"),
+    ("section", "Section heading", "section{}"),
+    ("subsection", "Subsection heading", "subsection{}"),
+    ("subsubsection", "Subsubsection heading", "subsubsection{}"),
+    ("textbf", "Bold font weight", "textbf{}"),
+    ("textit", "Italic font slant", "textit{}"),
+    ("usepackage", "Include LaTeX package", "usepackage{}"),
+    (
+        "newcommand",
+        "Define custom command macro",
+        "newcommand{}{}",
+    ),
+    ("frac", "Fraction numerator over denominator", "frac{}{}"),
+    ("sqrt", "Square root", "sqrt{}"),
+    ("label", "Cross-reference anchor label", "label{}"),
+    ("caption", "Figure or table caption", "caption{}"),
+];
 
 fn completion_suffix<'a>(candidate: &'a str, typed: &str) -> &'a str {
     candidate.strip_prefix(typed).unwrap_or(candidate)
