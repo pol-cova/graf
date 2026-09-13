@@ -8,11 +8,6 @@ use super::diagnostics::Diagnostic;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompileId(pub u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArtifactKind {
-    Pdf,
-}
-
 #[derive(Debug, Clone)]
 pub struct CompileRequest {
     pub compile_id: CompileId,
@@ -62,12 +57,6 @@ impl CompileRequest {
     pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.cancel = Some(cancel);
         self
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancel
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
     }
 }
 
@@ -173,7 +162,6 @@ pub struct CompileOutput {
     pub compile_id: CompileId,
     pub revision: u64,
     pub artifact: ArtifactBytes,
-    pub artifact_kind: ArtifactKind,
     pub diagnostics: Vec<Diagnostic>,
     pub duration: Duration,
 }
@@ -301,13 +289,22 @@ mod cancel_tests {
     fn compile_request_cancel_helpers() {
         let request = CompileRequest::simple("x", 1);
         assert!(request.cancel.is_none());
-        assert!(!request.is_cancelled());
 
         let flag = Arc::new(AtomicBool::new(false));
         let request = CompileRequest::simple("x", 1).with_cancel(flag.clone());
-        assert!(!request.is_cancelled());
+        assert!(
+            request
+                .cancel
+                .as_ref()
+                .is_some_and(|flag| !flag.load(Ordering::Relaxed))
+        );
         flag.store(true, Ordering::Relaxed);
-        assert!(request.is_cancelled());
+        assert!(
+            request
+                .cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        );
     }
 }
 

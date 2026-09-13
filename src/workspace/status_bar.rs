@@ -6,29 +6,17 @@ use crate::ui::theme;
 
 impl Workspace {
     pub fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {
+        // Text comes from the canonical `CompileState::status_text` so the
+        // bar can never drift from the controller; only the tint is local.
         let (status_color, status_text) = if let Some(error) = &self.workspace_error {
             (theme::ACCENT_RED, error.clone())
         } else {
-            match self.controller.state() {
-                CompileState::Idle => (theme::TEXT_MUTED, "Ready".to_string()),
-                CompileState::Waiting => (theme::ACCENT_ORANGE, "Compile queued".to_string()),
-                CompileState::Compiling { .. } => {
-                    (theme::ACCENT_ORANGE, "Compiling...".to_string())
-                }
-                CompileState::Success { duration, .. } => (
-                    theme::TEXT_MUTED,
-                    format!("Compiled in {:.0} ms", duration.as_secs_f64() * 1000.0),
-                ),
-                CompileState::Failed { diagnostics, .. } => {
-                    let count = diagnostics.len();
-                    let label = if count == 1 {
-                        "1 error".to_string()
-                    } else {
-                        format!("{count} errors")
-                    };
-                    (theme::ACCENT_RED, label)
-                }
-            }
+            let status_color = match self.controller.state() {
+                CompileState::Idle | CompileState::Success { .. } => theme::TEXT_MUTED,
+                CompileState::Waiting | CompileState::Compiling { .. } => theme::ACCENT_ORANGE,
+                CompileState::Failed { .. } => theme::ACCENT_RED,
+            };
+            (status_color, self.controller.status_text().to_string())
         };
 
         let (line, col) = self.editor.read(cx).cursor_line_col();

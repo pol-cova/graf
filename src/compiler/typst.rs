@@ -8,7 +8,7 @@ use std::time::Instant;
 use log::info;
 
 use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
-use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
+use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
 use super::resolve::{ResolvedEngine, resolve};
 
 const TYPST_COMMON_PATHS: &[&str] = &[
@@ -174,7 +174,6 @@ impl DocumentEngine for TypstEngine {
             compile_id,
             revision,
             artifact,
-            artifact_kind: ArtifactKind::Pdf,
             diagnostics,
             duration: start.elapsed(),
         })
@@ -184,8 +183,9 @@ impl DocumentEngine for TypstEngine {
 /// Cap on parsed diagnostics so pathological builds cannot balloon memory.
 const MAX_DIAGNOSTICS: usize = 100;
 
-pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
-    parse_typst_diagnostics_from_streams(output.lines(), std::iter::empty())
+#[cfg(test)]
+pub(crate) fn parse_typst_diagnostics(log: &str) -> Vec<Diagnostic> {
+    parse_typst_diagnostics_from_streams(log.lines(), std::iter::empty())
 }
 
 pub fn parse_typst_diagnostics_from_streams<'a>(

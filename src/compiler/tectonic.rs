@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use log::{info, warn};
 
 use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
-use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
-use super::resolve::{EngineSource, ResolvedEngine, resolve};
+use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
+use super::resolve::{ResolvedEngine, resolve};
 
 const TECTONIC_COMMON_PATHS: &[&str] = &[
     "/opt/homebrew/bin/tectonic",
@@ -51,11 +51,13 @@ impl TectonicEngine {
         }
     }
 
+    /// Test-only constructor; production engines resolve their own paths.
+    #[cfg(test)]
     pub fn with_paths(executable: impl Into<PathBuf>, build_dir: impl Into<PathBuf>) -> Self {
         Self {
             resolved: Some(ResolvedEngine {
                 path: executable.into(),
-                source: EngineSource::System,
+                source: super::resolve::EngineSource::System,
             }),
             build_dir: crate::util::TemporarySessionDir::from_path(build_dir.into()),
         }
@@ -200,7 +202,6 @@ impl DocumentEngine for TectonicEngine {
                 compile_id,
                 revision,
                 artifact,
-                artifact_kind: ArtifactKind::Pdf,
                 diagnostics,
                 duration,
             })
@@ -269,7 +270,8 @@ fn support_cache_dir_with(user_override: bool, home: Option<&Path>) -> Option<Pa
 /// repeated warnings) cannot balloon memory or stall the UI.
 const MAX_DIAGNOSTICS: usize = 100;
 
-pub fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
+#[cfg(test)]
+pub(crate) fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
     parse_tectonic_diagnostics_from_streams(log.lines(), std::iter::empty())
 }
 
@@ -397,7 +399,6 @@ Hello from Tectonic Engine Test.
         );
         let output = result.unwrap();
         assert_eq!(output.revision, 1);
-        assert_eq!(output.artifact_kind, ArtifactKind::Pdf);
         assert!(!output.artifact.is_empty());
         assert!(output.artifact.starts_with(b"%PDF-"));
     }

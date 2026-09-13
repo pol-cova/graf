@@ -1,43 +1,18 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableAlignment {
     Left,
-    Center,
-    Right,
 }
 
 impl TableAlignment {
     pub fn latex_spec(self) -> &'static str {
         match self {
             Self::Left => "l",
-            Self::Center => "c",
-            Self::Right => "r",
         }
     }
 
     pub fn typst_spec(self) -> &'static str {
         match self {
             Self::Left => "left",
-            Self::Center => "center",
-            Self::Right => "right",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatrixStyle {
-    Parentheses,
-    Brackets,
-    Determinant,
-    None,
-}
-
-impl MatrixStyle {
-    pub fn latex_env(self) -> &'static str {
-        match self {
-            Self::Parentheses => "pmatrix",
-            Self::Brackets => "bmatrix",
-            Self::Determinant => "vmatrix",
-            Self::None => "matrix",
         }
     }
 }
@@ -66,52 +41,6 @@ impl TableData {
         }
     }
 
-    pub fn from_tsv(tsv: &str) -> Self {
-        Self::from_delimited(tsv, '\t')
-    }
-
-    pub fn from_csv(csv: &str) -> Self {
-        Self::from_delimited(csv, ',')
-    }
-
-    /// One parse for both twins: split, trim, pad ragged rows, default the
-    /// empty input to a 2x2 blank grid.
-    fn from_delimited(input: &str, separator: char) -> Self {
-        let mut rows = Vec::new();
-        let mut max_cols = 0;
-
-        for line in input.lines() {
-            let cols: Vec<String> = line
-                .split(separator)
-                .map(|c| c.trim().to_string())
-                .collect();
-            if !cols.is_empty() {
-                max_cols = max_cols.max(cols.len());
-                rows.push(cols);
-            }
-        }
-
-        if rows.is_empty() {
-            return Self::new(2, 2);
-        }
-
-        for row in &mut rows {
-            while row.len() < max_cols {
-                row.push(String::new());
-            }
-        }
-
-        let alignments = vec![TableAlignment::Left; max_cols];
-        Self {
-            rows,
-            alignments,
-            has_header: true,
-            has_booktabs: true,
-            caption: None,
-            label: None,
-        }
-    }
-
     pub fn to_latex(&self) -> String {
         if self.rows.is_empty() {
             return String::new();
@@ -120,7 +49,6 @@ impl TableData {
         let mut out = String::new();
         out.push_str("\\begin{table}[htbp]\n");
         out.push_str("  \\centering\n");
-
         if let Some(caption) = &self.caption {
             out.push_str(&format!("  \\caption{{{caption}}}\n"));
         }
@@ -128,8 +56,12 @@ impl TableData {
             out.push_str(&format!("  \\label{{{label}}}\n"));
         }
 
-        let col_specs: String = self.alignments.iter().map(|a| a.latex_spec()).collect();
-        out.push_str(&format!("  \\begin{{tabular}}{{{col_specs}}}\n"));
+        let cols_spec = self
+            .alignments
+            .iter()
+            .map(|a| a.latex_spec())
+            .collect::<String>();
+        out.push_str(&format!("  \\begin{{tabular}}{{{cols_spec}}}\n"));
 
         if self.has_booktabs {
             out.push_str("    \\toprule\n");
@@ -184,36 +116,30 @@ impl TableData {
         ));
 
         for (i, row) in self.rows.iter().enumerate() {
+            let header_mark = if i == 0 && self.has_header { "*" } else { "" };
+            let cells = row
+                .iter()
+                .map(|cell| {
+                    let trimmed = cell.trim();
+                    format!("[{header_mark}{trimmed}{header_mark}]")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             if i == 0 && self.has_header {
-                let header_cells: Vec<String> = row.iter().map(|c| format!("[*{c}*]")).collect();
-                out.push_str(&format!("    table.header({}),\n", header_cells.join(", ")));
+                out.push_str(&format!("    table.header({cells}),\n"));
             } else {
-                let row_cells: Vec<String> = row.iter().map(|c| format!("[{c}]")).collect();
-                out.push_str(&format!("    {},\n", row_cells.join(", ")));
+                out.push_str(&format!("    {cells},\n"));
             }
         }
-
         out.push_str("  ),\n");
+
         if let Some(caption) = &self.caption {
             out.push_str(&format!("  caption: [{caption}],\n"));
         }
-        out.push(')');
-
         if let Some(label) = &self.label {
-            out.push_str(&format!(" <{label}>"));
+            out.push_str(&format!("  <{label}>\n"));
         }
-        out.push('\n');
-        out
-    }
-
-    pub fn to_matrix_latex(&self, style: MatrixStyle) -> String {
-        let env = style.latex_env();
-        let mut out = format!("\\begin{{{env}}}\n");
-        for row in &self.rows {
-            let row_str = row.join(" & ");
-            out.push_str(&format!("  {row_str} \\\\\n"));
-        }
-        out.push_str(&format!("\\end{{{env}}}"));
+        out.push_str(")\n");
         out
     }
 }
@@ -222,56 +148,45 @@ impl TableData {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_tsv_parsing_and_latex_export() {
-        let tsv = "Model\tAccuracy\tF1 Score\nResNet-50\t92.4\t91.8\nTransformer\t96.8\t96.5";
-        let mut table = TableData::from_tsv(tsv);
-        table.caption = Some("Model Performance Comparison".to_string());
-        table.label = Some("tab:models".to_string());
-        table.alignments = vec![
-            TableAlignment::Left,
-            TableAlignment::Center,
-            TableAlignment::Right,
+    /// The default 3x3 grid the workspace inserts and exports per engine.
+    fn insertable_table() -> TableData {
+        let mut table = TableData::new(3, 3);
+        table.rows[0] = vec![
+            "Column 1".to_string(),
+            "Column 2".to_string(),
+            "Column 3".to_string(),
         ];
+        table
+    }
+
+    #[test]
+    fn latex_export_shapes_a_booktabs_table() {
+        let mut table = insertable_table();
+        table.caption = Some("Demo".to_string());
+        table.label = Some("tab:demo".to_string());
 
         let latex = table.to_latex();
         assert!(latex.contains("\\begin{table}[htbp]"));
-        assert!(latex.contains("\\caption{Model Performance Comparison}"));
-        assert!(latex.contains("\\label{tab:models}"));
-        assert!(latex.contains("\\begin{tabular}{lcr}"));
+        assert!(latex.contains("\\caption{Demo}"));
+        assert!(latex.contains("\\label{tab:demo}"));
+        assert!(latex.contains("\\begin{tabular}{lll}"));
         assert!(latex.contains("\\toprule"));
-        assert!(latex.contains("Model & Accuracy & F1 Score \\\\"));
-        assert!(latex.contains("\\midrule"));
-        assert!(latex.contains("Transformer & 96.8 & 96.5 \\\\"));
+        assert!(latex.contains("Column 1 & Column 2 & Column 3 \\\\"));
         assert!(latex.contains("\\bottomrule"));
     }
 
     #[test]
-    fn test_csv_parsing_and_typst_export() {
-        let csv = "Epoch,Loss,Accuracy\n1,0.45,88.2\n2,0.21,94.6";
-        let mut table = TableData::from_csv(csv);
-        table.caption = Some("Training Progress".to_string());
-        table.label = Some("tab:training".to_string());
-
+    fn typst_export_uses_a_table_header_row() {
+        let table = insertable_table();
         let typst = table.to_typst();
         assert!(typst.contains("#figure("));
-        assert!(typst.contains("table("));
-        assert!(typst.contains("table.header([*Epoch*], [*Loss*], [*Accuracy*])"));
-        assert!(typst.contains("[1], [0.45], [88.2]"));
-        assert!(typst.contains("caption: [Training Progress]"));
-        assert!(typst.contains("<tab:training>"));
+        assert!(typst.contains("table.header([*Column 1*], [*Column 2*], [*Column 3*])"));
+        assert!(typst.contains("[], [], []"));
     }
 
     #[test]
-    fn test_latex_matrix_generation() {
-        let mut table = TableData::new(2, 2);
-        table.rows[0] = vec!["a".to_string(), "b".to_string()];
-        table.rows[1] = vec!["c".to_string(), "d".to_string()];
-
-        let matrix = table.to_matrix_latex(MatrixStyle::Brackets);
-        assert_eq!(
-            matrix,
-            "\\begin{bmatrix}\n  a & b \\\\\n  c & d \\\\\n\\end{bmatrix}"
-        );
+    fn empty_grid_exports_nothing() {
+        assert!(TableData::new(0, 0).to_latex().is_empty());
+        assert!(TableData::new(0, 0).to_typst().is_empty());
     }
 }
