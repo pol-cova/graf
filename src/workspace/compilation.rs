@@ -1,6 +1,15 @@
 use super::*;
 
 impl Workspace {
+    /// Abort any in-flight compile whose result would be stale: flip its
+    /// cancel flag so the engine kills the subprocess instead of running to
+    /// completion. Called whenever the source changes faster than the build.
+    pub(super) fn cancel_in_flight_compile(&mut self) {
+        if let Some(flag) = self.compile_cancel.as_ref() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     pub(super) fn on_editor_changed(&mut self, editor: Entity<EditorView>, cx: &mut Context<Self>) {
         let rev = editor.read(cx).revision();
         self.sync_active_doc_from_editor(cx);
@@ -12,6 +21,7 @@ impl Workspace {
             && rev > self.controller.current_revision()
             && self.settings.editor.auto_compile
         {
+            self.cancel_in_flight_compile();
             self.controller.on_source_edited(rev);
             cx.notify();
 
@@ -40,6 +50,10 @@ impl Workspace {
             self.compile_pending = true;
             return;
         }
+
+        // Drop the previous token so a fresh one guards this compile.
+        self.cancel_in_flight_compile();
+        self.compile_cancel = None;
 
         self.preview
             .update(cx, |preview, cx| preview.set_rendering(cx));
@@ -72,7 +86,11 @@ impl Workspace {
                     .and_then(|document| document.path().map(Path::to_path_buf))
             });
 
-        let request = CompileRequest::with_project(text, rev, project_root, root_document);
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.compile_cancel = Some(cancel_flag.clone());
+        let render_cancel = cancel_flag.clone();
+        let request = CompileRequest::with_project(text, rev, project_root, root_document)
+            .with_cancel(cancel_flag);
         self.controller.begin_compile(request.compile_id, rev);
         self.compile_running = true;
         self.compile_pending = false;
@@ -118,8 +136,11 @@ impl Workspace {
                     let (output, render_result) = cx
                         .background_executor()
                         .spawn(async move {
-                            let result =
-                                pdf_renderer.render_document(render_id, &output.artifact);
+                            let result = pdf_renderer.render_document(
+                                render_id,
+                                &output.artifact,
+                                Some(&render_cancel),
+                            );
                             (output, result)
                         })
                         .await;

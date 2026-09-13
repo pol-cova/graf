@@ -155,13 +155,28 @@ impl DocumentEngine for TectonicEngine {
         if let Some(cache_dir) = support_cache_dir() {
             command.env("TECTONIC_CACHE_DIR", cache_dir);
         }
-        let output = command.output().map_err(|err| CompileError {
-            compile_id,
-            revision,
-            diagnostics: Vec::new(),
-            message: format!("Failed to execute tectonic: {err}"),
-            duration: start.elapsed(),
-        })?;
+        let result = super::engine::run_with_cancel(command, request.cancel.as_ref());
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(_)) => {
+                return Err(CompileError {
+                    compile_id,
+                    revision,
+                    diagnostics: Vec::new(),
+                    message: "Compile cancelled by a newer edit".to_string(),
+                    duration: start.elapsed(),
+                });
+            }
+            Err(err) => {
+                return Err(CompileError {
+                    compile_id,
+                    revision,
+                    diagnostics: Vec::new(),
+                    message: format!("Failed to execute tectonic: {err}"),
+                    duration: start.elapsed(),
+                });
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
