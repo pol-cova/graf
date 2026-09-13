@@ -119,13 +119,28 @@ impl DocumentEngine for TypstEngine {
         if let Some(root) = request.project_root.as_deref() {
             command.arg("--root").arg(root);
         }
-        let output = command.output().map_err(|error| CompileError {
-            compile_id,
-            revision,
-            diagnostics: Vec::new(),
-            message: format!("Failed to execute Typst: {error}"),
-            duration: start.elapsed(),
-        })?;
+        let result = super::engine::run_with_cancel(command, request.cancel.as_ref());
+        let output = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(_)) => {
+                return Err(CompileError {
+                    compile_id,
+                    revision,
+                    diagnostics: Vec::new(),
+                    message: "Compile cancelled by a newer edit".to_string(),
+                    duration: start.elapsed(),
+                });
+            }
+            Err(err) => {
+                return Err(CompileError {
+                    compile_id,
+                    revision,
+                    diagnostics: Vec::new(),
+                    message: format!("Failed to execute Typst: {err}"),
+                    duration: start.elapsed(),
+                });
+            }
+        };
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);

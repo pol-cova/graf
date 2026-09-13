@@ -3,8 +3,11 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use crate::compiler::engine::run_with_cancel;
 use crate::util::prune_numbered_dirs;
 
 const PREVIEW_RASTER_WIDTH: &str = "1224";
@@ -23,6 +26,7 @@ pub trait PdfRenderer: Send + Sync {
         &self,
         render_id: u64,
         pdf_bytes: &[u8],
+        cancel: Option<&Arc<AtomicBool>>,
     ) -> Result<Vec<RenderedPage>, String>;
 }
 
@@ -46,19 +50,28 @@ impl NativePdfRenderer {
         }
     }
 
-    fn rasterize_with_pdftoppm(&self, pdf_file: &Path, run_dir: &Path) -> Option<String> {
+    fn rasterize_with_pdftoppm(
+        &self,
+        pdf_file: &Path,
+        run_dir: &Path,
+        cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<String> {
         let output_root = run_dir.join(PAGE_PREFIX);
-        let output = Command::new("pdftoppm")
+        let mut command = Command::new("pdftoppm");
+        command
             .arg("-png")
             .arg("-scale-to-x")
             .arg(PREVIEW_RASTER_WIDTH)
             .arg("-scale-to-y")
             .arg("-1")
             .arg(pdf_file)
-            .arg(&output_root)
-            .output()
-            .ok()?;
+            .arg(&output_root);
+        let output = run_with_cancel(command, cancel).ok()?;
 
+        let output = match output {
+            Ok(output) => output,
+            Err(_) => return Some("rasterization cancelled".to_string()),
+        };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Some(format!("pdftoppm rasterization failed: {stderr}"));
@@ -67,9 +80,14 @@ impl NativePdfRenderer {
     }
 
     #[cfg(target_os = "macos")]
-    fn rasterize_with_sips(&self, pdf_file: &Path) -> Option<String> {
+    fn rasterize_with_sips(
+        &self,
+        pdf_file: &Path,
+        cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<String> {
         let png_file = pdf_file.parent()?.join(format!("{PAGE_PREFIX}-1.png"));
-        let output = Command::new("/usr/bin/sips")
+        let mut command = Command::new("/usr/bin/sips");
+        command
             .arg("-s")
             .arg("format")
             .arg("png")
@@ -77,10 +95,13 @@ impl NativePdfRenderer {
             .arg(PREVIEW_RASTER_WIDTH)
             .arg(pdf_file)
             .arg("--out")
-            .arg(&png_file)
-            .output()
-            .ok()?;
+            .arg(&png_file);
+        let output = run_with_cancel(command, cancel).ok()?;
 
+        let output = match output {
+            Ok(output) => output,
+            Err(_) => return Some("rasterization cancelled".to_string()),
+        };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Some(format!("sips rasterization failed: {stderr}"));
@@ -89,7 +110,11 @@ impl NativePdfRenderer {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn rasterize_with_sips(&self, _pdf_file: &Path) -> Option<String> {
+    fn rasterize_with_sips(
+        &self,
+        _pdf_file: &Path,
+        _cancel: Option<&Arc<AtomicBool>>,
+    ) -> Option<String> {
         None
     }
 }
@@ -99,6 +124,7 @@ impl PdfRenderer for NativePdfRenderer {
         &self,
         render_id: u64,
         pdf_bytes: &[u8],
+        cancel: Option<&Arc<AtomicBool>>,
     ) -> Result<Vec<RenderedPage>, String> {
         // Each render gets a fresh directory, so the cache would grow by a
         // full PDF and page images on every compile. Age-guarded pruning
@@ -121,8 +147,8 @@ impl PdfRenderer for NativePdfRenderer {
         fs::write(&pdf_file, pdf_bytes).map_err(|error| format!("Failed to write PDF: {error}"))?;
 
         let failure = self
-            .rasterize_with_pdftoppm(&pdf_file, &run_dir)
-            .or_else(|| self.rasterize_with_sips(&pdf_file));
+            .rasterize_with_pdftoppm(&pdf_file, &run_dir, cancel)
+            .or_else(|| self.rasterize_with_sips(&pdf_file, cancel));
 
         if let Some(message) = failure {
             return Err(message);
@@ -200,7 +226,7 @@ mod tests {
     #[test]
     fn test_invalid_pdf_bytes() {
         let renderer = NativePdfRenderer::new();
-        let result = renderer.render_document(1, b"not a pdf");
+        let result = renderer.render_document(1, b"not a pdf", None);
         assert!(result.is_err());
     }
 
@@ -214,7 +240,7 @@ mod tests {
         let compile_output = engine.compile(request).expect("compile must succeed");
 
         let renderer = NativePdfRenderer::new();
-        let result = renderer.render_document(1, &compile_output.artifact);
+        let result = renderer.render_document(1, &compile_output.artifact, None);
         assert!(result.is_ok(), "Rasterization failed: {:?}", result.err());
 
         let pages = result.unwrap();
@@ -245,7 +271,7 @@ Page three.
 
         let renderer = NativePdfRenderer::new();
         let pages = renderer
-            .render_document(3, &compile_output.artifact)
+            .render_document(3, &compile_output.artifact, None)
             .expect("rasterization must succeed");
 
         let has_pdftoppm = Command::new("pdftoppm").arg("-v").output().is_ok();
@@ -268,7 +294,7 @@ Page three.
 
         let renderer = NativePdfRenderer::new();
         let pages = renderer
-            .render_document(2, &compile_output.artifact)
+            .render_document(2, &compile_output.artifact, None)
             .expect("rasterization must succeed");
 
         let (width, height) = png_dimensions(&pages[0].image_path).expect("valid PNG");

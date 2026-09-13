@@ -9,6 +9,8 @@ impl Workspace {
         self.active_doc_idx = idx;
         self.show_welcome = false;
         self.compile_task = None;
+        self.cancel_in_flight_compile();
+        self.compile_cancel = None;
         self.controller.reset();
         self.latest_diagnostics.clear();
         self.editor

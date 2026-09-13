@@ -164,6 +164,9 @@ pub struct Workspace {
     pub(crate) compile_task: Option<Task<()>>,
     pub(crate) compile_running: bool,
     pub(crate) compile_pending: bool,
+    /// Cancel flag for the in-flight compile; flipping it kills the running
+    /// compiler subprocess (and rasterization) instead of waiting it out.
+    pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub(crate) show_welcome: bool,
     pub(crate) sidebar_visible: bool,
     pub(crate) sidebar_tab: SidebarTab,
@@ -287,6 +290,7 @@ impl Workspace {
             compile_task: None,
             compile_running: false,
             compile_pending: false,
+            compile_cancel: None,
             show_welcome,
             sidebar_visible: true,
             sidebar_tab: SidebarTab::Files,
