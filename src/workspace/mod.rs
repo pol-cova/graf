@@ -700,29 +700,48 @@ impl Workspace {
         let is_typst = self.documents[self.active_doc_idx]
             .title()
             .ends_with(".typ");
-        let text = self.editor.read(cx).text();
-        let warnings = crate::project::linter::lint_academic_text(text, is_typst);
+        let text = self.editor.read(cx).text().to_string();
+        let revision_at_start = self.editor.read(cx).revision();
 
-        let mut diags = Vec::new();
-        for (i, w) in warnings.into_iter().enumerate() {
-            diags.push(crate::compiler::diagnostics::Diagnostic {
-                id: crate::compiler::diagnostics::DiagnosticId(1000 + i as u64),
-                severity: crate::compiler::diagnostics::Severity::Warning,
-                source: crate::compiler::diagnostics::DiagnosticSource::Parser,
-                file: None,
-                line: Some(w.line),
-                message: w.message,
-            });
-        }
+        cx.spawn(async move |this, cx| {
+            let warnings = cx
+                .background_executor()
+                .spawn(async move { crate::project::linter::lint_academic_text(&text, is_typst) })
+                .await;
 
-        if !diags.is_empty() {
-            self.latest_diagnostics = diags.clone();
-            self.diagnostics_drawer_open = true;
-            self.editor.update(cx, |editor, cx| {
-                editor.set_diagnostics(diags, cx);
-            });
-        }
-        cx.notify();
+            this.update(cx, |this, cx| {
+                // A newer revision means the lint describes text the user has
+                // already changed; drop it rather than mislabel lines.
+                let revision_now = this.editor.read(cx).revision();
+                if revision_now != revision_at_start {
+                    cx.notify();
+                    return;
+                }
+
+                let mut diags = Vec::new();
+                for (i, w) in warnings.into_iter().enumerate() {
+                    diags.push(crate::compiler::diagnostics::Diagnostic {
+                        id: crate::compiler::diagnostics::DiagnosticId(1000 + i as u64),
+                        severity: crate::compiler::diagnostics::Severity::Warning,
+                        source: crate::compiler::diagnostics::DiagnosticSource::Parser,
+                        file: None,
+                        line: Some(w.line),
+                        message: w.message,
+                    });
+                }
+
+                if !diags.is_empty() {
+                    this.latest_diagnostics = diags.clone();
+                    this.diagnostics_drawer_open = true;
+                    this.editor.update(cx, |editor, cx| {
+                        editor.set_diagnostics(diags, cx);
+                    });
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn sync_zotero_library(&mut self, cx: &mut Context<Self>) {
