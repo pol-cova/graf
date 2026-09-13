@@ -129,7 +129,7 @@ impl DocumentEngine for TypstEngine {
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let diagnostics = parse_typst_diagnostics(&format!("{stderr}\n{stdout}"));
+        let diagnostics = parse_typst_diagnostics_from_streams(stderr.lines(), stdout.lines());
 
         if !output.status.success() || !output_pdf.exists() {
             return Err(CompileError {
@@ -166,10 +166,23 @@ impl DocumentEngine for TypstEngine {
     }
 }
 
+/// Cap on parsed diagnostics so pathological builds cannot balloon memory.
+const MAX_DIAGNOSTICS: usize = 100;
+
 pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
+    parse_typst_diagnostics_from_streams(output.lines(), std::iter::empty())
+}
+
+pub fn parse_typst_diagnostics_from_streams<'a>(
+    stderr: impl Iterator<Item = &'a str>,
+    stdout: impl Iterator<Item = &'a str>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    for line in output.lines() {
+    for line in stderr.chain(stdout) {
+        if diagnostics.len() >= MAX_DIAGNOSTICS {
+            break;
+        }
         let trimmed = line.trim();
         if trimmed.starts_with("error:") || trimmed.starts_with("warning:") {
             let is_error = trimmed.starts_with("error:");
@@ -180,9 +193,9 @@ pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
             };
 
             let message = if is_error {
-                trimmed.trim_start_matches("error:").trim()
+                trimmed.strip_prefix("error:").unwrap_or(trimmed).trim()
             } else {
-                trimmed.trim_start_matches("warning:").trim()
+                trimmed.strip_prefix("warning:").unwrap_or(trimmed).trim()
             };
 
             diagnostics.push(Diagnostic {
@@ -195,13 +208,14 @@ pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
             });
         } else if trimmed.starts_with("-->") {
             let loc_part = trimmed.trim_start_matches("-->").trim();
-            let parts: Vec<&str> = loc_part.split(':').collect();
-            if parts.len() >= 2 {
-                let file_name = PathBuf::from(parts[0]);
-                let line_num: Option<usize> = parts[1].parse().ok();
+            if let Some((file_name, rest)) = loc_part.split_once(':') {
+                let line_num: Option<usize> = rest
+                    .split(':')
+                    .next()
+                    .and_then(|num| num.trim().parse().ok());
 
                 if let Some(last) = diagnostics.last_mut() {
-                    last.file = Some(file_name);
+                    last.file = Some(PathBuf::from(file_name));
                     last.line = line_num;
                 }
             }
@@ -235,6 +249,37 @@ warning: variable 'x' is never used
 
         assert_eq!(diags[1].severity, Severity::Warning);
         assert_eq!(diags[1].line, Some(12));
+    }
+
+    #[test]
+    fn test_typst_parses_stderr_and_stdout_without_concatenation() {
+        let stderr = "error: expected string, found integer\n";
+        let stdout = "warning: variable 'x' is never used\n";
+
+        let diags = parse_typst_diagnostics_from_streams(stderr.lines(), stdout.lines());
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert_eq!(diags[1].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_typst_diagnostics_capped_at_limit() {
+        let log: String = (0..250).map(|i| format!("error: problem {i}\n")).collect();
+
+        let diags = parse_typst_diagnostics(&log);
+        assert_eq!(diags.len(), MAX_DIAGNOSTICS);
+    }
+
+    #[test]
+    fn test_typst_location_with_column_parses_file_and_line() {
+        let log = "error: bad math\n  --> chapters/intro.typ:42:13\n";
+        let diags = parse_typst_diagnostics(log);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(
+            diags[0].file.as_deref(),
+            Some(Path::new("chapters/intro.typ"))
+        );
+        assert_eq!(diags[0].line, Some(42));
     }
 
     #[test]

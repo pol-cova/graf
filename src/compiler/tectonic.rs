@@ -165,10 +165,9 @@ impl DocumentEngine for TectonicEngine {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined_log = format!("{stdout}\n{stderr}");
 
         let duration = start.elapsed();
-        let diagnostics = parse_tectonic_diagnostics(&combined_log);
+        let diagnostics = parse_tectonic_diagnostics_from_streams(stdout.lines(), stderr.lines());
         let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 
         if output.status.success() && !has_errors && output_pdf.exists() {
@@ -251,12 +250,30 @@ fn support_cache_dir_with(user_override: bool, home: Option<&Path>) -> Option<Pa
     Some(PathBuf::from(home?).join("Library/Application Support/graf/compilers/tectonic-cache"))
 }
 
+/// Cap on parsed diagnostics so pathological builds (e.g. thousands of
+/// repeated warnings) cannot balloon memory or stall the UI.
+const MAX_DIAGNOSTICS: usize = 100;
+
 pub fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
+    parse_tectonic_diagnostics_from_streams(log.lines(), std::iter::empty())
+}
+
+pub fn parse_tectonic_diagnostics_from_streams<'a>(
+    stdout: impl Iterator<Item = &'a str>,
+    stderr: impl Iterator<Item = &'a str>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut diag_id = 1u64;
-    let mut lines = log.lines().map(str::trim).peekable();
+    let mut lines = stdout
+        .chain(stderr)
+        .map(str::trim)
+        .take(MAX_DIAGNOSTICS * 4)
+        .peekable();
 
     while let Some(line) = lines.next() {
+        if diagnostics.len() >= MAX_DIAGNOSTICS {
+            break;
+        }
         if let Some(msg) = line
             .strip_prefix("error:")
             .or_else(|| line.strip_prefix("fatal:"))
@@ -523,5 +540,25 @@ error: missing \begin{document}
         assert_eq!(diags[1].message, "citation 'xyz' undefined");
         assert_eq!(diags[2].severity, Severity::Error);
         assert_eq!(diags[2].message, "missing \\begin{document}");
+    }
+
+    #[test]
+    fn test_tectonic_parses_stderr_and_stdout_without_concatenation() {
+        let stdout = "note: rerun with tectonic -X\n";
+        let stderr = "! Undefined control sequence.\nl.5 \\invalidcmd\nwarning: unused label\n";
+
+        let diags = parse_tectonic_diagnostics_from_streams(stdout.lines(), stderr.lines());
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert_eq!(diags[0].line, Some(5));
+        assert_eq!(diags[1].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_tectonic_diagnostics_capped_at_limit() {
+        let log: String = (0..250).map(|i| format!("error: problem {i}\n")).collect();
+
+        let diags = parse_tectonic_diagnostics(&log);
+        assert_eq!(diags.len(), MAX_DIAGNOSTICS);
     }
 }
