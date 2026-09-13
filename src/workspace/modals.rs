@@ -1,11 +1,12 @@
+use super::commands::all_commands;
+use super::{ActiveModal, SettingsTab, Workspace};
 use gpui::{
     ClipboardItem, Context, Focusable, IntoElement, ParentElement, Role, Styled, div, prelude::*,
     px,
 };
-use std::path::Path;
 
-use super::commands::all_commands;
-use super::{ActiveModal, SettingsTab, Workspace};
+/// Visible QuickOpen rows; results are capped so rendering stays cheap.
+pub(crate) const QUICK_OPEN_LIMIT: usize = 50;
 use crate::ai::operations::AiOperationKind;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
@@ -921,7 +922,7 @@ impl Workspace {
             }
             modal_content = modal_content.child(list);
         } else {
-            let filter = self.prompt_editor.read(cx).text().to_lowercase();
+            let filter = self.prompt_editor.read(cx).text();
 
             let mut list = div()
                 .id("quick-open-list")
@@ -930,16 +931,15 @@ impl Workspace {
                 .py_1()
                 .overflow_scroll();
 
-            for path in self.project_tree.file_paths() {
-                let title = path
-                    .strip_prefix(self.project_tree.root_path())
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string();
-                if !filter.is_empty() && !title.to_lowercase().contains(&filter) {
-                    continue;
-                }
-
+            // MATCHES come from the prebuilt flattened list; only the
+            // filtered handful is cloned per render.
+            for entry in self
+                .project_tree
+                .quick_open_matches(filter, QUICK_OPEN_LIMIT)
+            {
+                let title = entry.relative.clone();
+                let path = entry.path.clone();
+                let kind = entry.kind;
                 let row_id = title.clone();
                 let row = div()
                     .id(format!("quick-open-{row_id}"))
@@ -965,10 +965,7 @@ impl Workspace {
                         div()
                             .w(px(32.0))
                             .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child(
-                                crate::project::tree::FileKind::from_path(Path::new(&title))
-                                    .label(),
-                            ),
+                            .child(kind.label()),
                     )
                     .child(title);
                 list = list.child(row);

@@ -6,6 +6,7 @@ mod documents;
 mod editor_panel;
 mod find_bar;
 mod modals;
+pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
 mod sidebar;
 mod status_bar;
 mod top_bar;
@@ -816,14 +817,12 @@ impl Workspace {
             match self.active_modal.clone() {
                 ActiveModal::QuickOpen(_) => {
                     let query = query.to_lowercase();
-                    if let Some(path) = self.project_tree.file_paths().into_iter().find(|path| {
-                        path.strip_prefix(self.project_tree.root_path())
-                            .unwrap_or(path)
-                            .display()
-                            .to_string()
-                            .to_lowercase()
-                            .contains(&query)
-                    }) {
+                    if let Some(path) = self
+                        .project_tree
+                        .quick_open_matches(&query, QUICK_OPEN_SEARCH_LIMIT)
+                        .first()
+                        .map(|entry| entry.path.clone())
+                    {
                         self.active_modal = ActiveModal::None;
                         self.open_file(path, cx);
                     }
