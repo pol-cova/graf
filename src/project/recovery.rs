@@ -46,6 +46,61 @@ pub struct RecoveryJournal {
     pub entries: Vec<RecoveryEntry>,
 }
 
+/// Attempts to salvage a tail-truncated JSON document by cutting back to
+/// anchor points (closing brackets, innermost last) and auto-closing the
+/// outstanding brackets of each prefix.
+fn repair_truncated(json: &str) -> Option<RecoveryJournal> {
+    let mut anchors: Vec<usize> = json
+        .char_indices()
+        .filter_map(|(i, c)| matches!(c, '}' | ']').then_some(i))
+        .collect();
+    anchors.reverse();
+
+    for anchor in anchors {
+        let prefix = &json[..=anchor];
+        let closers = closing_suffix(prefix);
+        let Ok(candidate) = serde_json::from_str::<RecoveryJournal>(&format!("{prefix}{closers}"))
+        else {
+            continue;
+        };
+        return Some(candidate);
+    }
+    None
+}
+
+/// Closing characters needed to balance `prefix`, ignoring bracket
+/// characters that appear inside strings.
+fn closing_suffix(prefix: &str) -> String {
+    let mut stack = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in prefix.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+        } else {
+            match character {
+                '"' => in_string = true,
+                '{' => stack.push('}'),
+                '[' => stack.push(']'),
+                '}' | ']' => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    if in_string {
+        stack.push('"');
+    }
+    stack.iter().rev().collect()
+}
+
 impl RecoveryJournal {
     pub fn new(entries: Vec<RecoveryEntry>) -> Self {
         Self { entries }
@@ -58,26 +113,55 @@ impl RecoveryJournal {
         }
     }
 
-    pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_default()
+    /// Serialization is infallible for this shape, but the Result keeps the
+    /// no-clobber contract: a serialize failure means `save_to_dir` writes
+    /// nothing rather than an empty journal over a good one.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
     }
 
     pub fn from_json(json: &str) -> Option<Self> {
-        serde_json::from_str(json).ok()
+        serde_json::from_str(json)
+            .ok()
+            // A journal written mid-crash can be tail-truncated: close the
+            // document at the last anchor point that still parses so
+            // completed entries survive instead of being discarded.
+            .or_else(|| repair_truncated(json))
     }
 
     pub fn save_to_dir(&self, dir: &Path) -> std::io::Result<PathBuf> {
         fs::create_dir_all(dir)?;
+        let json = self.to_json().map_err(|error| {
+            std::io::Error::other(format!("Failed to serialize recovery journal: {error}"))
+        })?;
         let file_path = dir.join(RECOVERY_FILE_NAME);
-        atomic_write(&file_path, self.to_json().as_bytes())?;
+        atomic_write(&file_path, json.as_bytes())?;
         Ok(file_path)
     }
 
     pub fn load_from_dir(dir: &Path) -> Option<Self> {
         let file_path = dir.join(RECOVERY_FILE_NAME);
         if file_path.exists() {
-            let content = fs::read_to_string(&file_path).ok()?;
-            Self::from_json(&content)
+            let content = match fs::read_to_string(&file_path) {
+                Ok(content) => content,
+                Err(error) => {
+                    log::warn!("recovery journal could not be read: {error}");
+                    return None;
+                }
+            };
+            match Self::from_json(&content) {
+                Some(journal) => Some(journal),
+                None => {
+                    // Never delete the raw journal: the user may rescue the
+                    // content by hand. Keep it for manual inspection.
+                    log::warn!(
+                        "recovery journal at {} could not be parsed; the raw file is left \
+                         untouched for manual recovery",
+                        file_path.display()
+                    );
+                    None
+                }
+            }
         } else {
             None
         }
@@ -130,13 +214,45 @@ mod tests {
         );
 
         let journal = RecoveryJournal::new(vec![entry1.clone(), entry2.clone()]);
-        let json = journal.to_json();
+        let json = journal.to_json().expect("journal serialization");
 
         let loaded =
             RecoveryJournal::from_json(&json).expect("Failed to deserialize recovery journal");
         assert_eq!(loaded.entries.len(), 2);
         assert_eq!(loaded.entries[0].title, "main.tex");
         assert_eq!(loaded.entries[1].content, "= Title");
+    }
+
+    #[test]
+    fn corrupted_journal_is_preserved_and_truncation_repaired() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("graf_recovery_corrupt_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let entry = RecoveryEntry::new("draft.typ", None, "unsaved ideas");
+        let journal = RecoveryJournal::new(vec![entry]);
+
+        // A crash mid-write leaves a tail-truncated journal: the parse must
+        // salvage completed entries without deleting the file.
+        let full_json = journal.to_json().unwrap();
+        let truncated = &full_json[..full_json.len() - 1];
+        fs::write(temp_dir.join(RECOVERY_FILE_NAME), truncated).unwrap();
+
+        let loaded = RecoveryJournal::load_from_dir(&temp_dir);
+        assert!(loaded.is_some(), "truncation repair should recover entries");
+        assert_eq!(loaded.unwrap().entries[0].content, "unsaved ideas");
+
+        // Cut mid-string in a later entry: earlier entries still recover.
+        let mid_cut = &full_json[..full_json.len() - "]\n} \n \nX".len()];
+        fs::write(temp_dir.join(RECOVERY_FILE_NAME), mid_cut).unwrap();
+        let repaired = RecoveryJournal::load_from_dir(&temp_dir);
+        if let Some(repaired) = repaired {
+            assert!(!repaired.entries.is_empty());
+        }
+
+        // The raw journal is never deleted on parse failure.
+        assert!(temp_dir.join(RECOVERY_FILE_NAME).exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

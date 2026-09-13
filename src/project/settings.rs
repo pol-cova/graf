@@ -83,27 +83,73 @@ impl GrafSettings {
         Self::default()
     }
 
-    pub fn from_json(json: &str) -> Self {
-        serde_json::from_str(json).unwrap_or_default()
+    /// Parse previously saved settings. Failing here must be loud for the
+    /// caller (`load_from_path`), never a silent reset to defaults.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
     }
 
-    pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_default()
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
     }
 
     pub fn load_from_path(path: &Path) -> Self {
         if let Ok(content) = std::fs::read_to_string(path) {
-            Self::from_json(&content)
-        } else {
-            Self::default()
+            match Self::from_json(&content) {
+                Ok(settings) => return settings,
+                Err(error) => {
+                    // A corrupt settings file must not be overwritten by the
+                    // next save: keep the raw bytes under a unique name and
+                    // surface diagnostics in the log.
+                    if let Err(backup_error) = preserve_corrupt_settings(path) {
+                        log::error!("corrupt settings file could not be preserved: {backup_error}");
+                    }
+                    log::warn!(
+                        "settings at {} could not be parsed ({error}); loading defaults. \
+                         The corrupt file has been preserved.",
+                        path.display()
+                    );
+                    return Self::default();
+                }
+            }
         }
+        Self::default()
     }
 
+    /// Serialize is effectively infallible for this struct, but propagation
+    /// keeps the no-silent-fallback contract: `save_to_path` never writes
+    /// empty output over existing settings.
     pub fn save_to_path(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        atomic_write(path, self.to_json().as_bytes())
+        let json = self.to_json().map_err(|error| {
+            std::io::Error::other(format!("Failed to serialize settings: {error}"))
+        })?;
+        atomic_write(path, json.as_bytes())
+    }
+}
+
+/// Copies the unparsable settings file next to itself with a unique, dated
+/// name so a later save never overwrites the user's original bytes.
+fn preserve_corrupt_settings(path: &Path) -> std::io::Result<()> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let file_stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("settings");
+    let backup_path = path.with_file_name(format!("{file_stem}_corrupt_{stamp}.json"));
+    let error = std::fs::copy(path, &backup_path).map(|_| ());
+    match error {
+        Ok(_) => {
+            log::info!("corrupt settings preserved at {}", backup_path.display());
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -185,11 +231,41 @@ mod tests {
         assert_eq!(settings.editor.tab_size, 2);
         assert!(settings.editor.line_numbers);
 
-        let json = settings.to_json();
+        let json = settings.to_json().unwrap_or_else(|_| String::new());
         assert!(json.contains("font_size"));
 
-        let loaded = GrafSettings::from_json(&json);
+        let loaded = GrafSettings::from_json(&json).expect("roundtrip serialize");
         assert_eq!(loaded, settings);
+    }
+
+    #[test]
+    fn corrupt_settings_preserved_and_defaults_loaded() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("graf_settings_corrupt_{}", std::process::id()));
+        let settings_path = temp_dir.join(SETTINGS_FILE_NAME);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(&settings_path, "{ not valid json").unwrap();
+
+        let loaded = GrafSettings::load_from_path(&settings_path);
+        assert_eq!(loaded, GrafSettings::default());
+
+        // The corrupt file must be preserved under a unique name...
+        let preserved: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            preserved.iter().any(|name| name.contains("corrupt")),
+            "no preserved corrupt copy found in {preserved:?}"
+        );
+        // ...and a save must never clobber the corrupt file (different name).
+        GrafSettings::default()
+            .save_to_path(&settings_path)
+            .unwrap();
+        assert!(preserved.iter().any(|name| name.ends_with(".json")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -204,7 +280,7 @@ mod tests {
             }
         }"#;
 
-        let loaded = GrafSettings::from_json(json);
+        let loaded = GrafSettings::from_json(json).expect("legacy json should parse");
         assert!(!loaded.editor.auto_compile);
         assert_eq!(loaded.editor.font_size, 15.0);
         assert_eq!(loaded.layout, LayoutSettings::default());
