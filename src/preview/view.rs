@@ -12,6 +12,7 @@ pub struct PreviewView {
     is_retained_stale: bool,
     is_rendering: bool,
     last_error_summary: Option<String>,
+    render_notice: Option<String>,
 }
 
 impl Default for PreviewView {
@@ -28,15 +29,22 @@ impl PreviewView {
             is_retained_stale: false,
             is_rendering: false,
             last_error_summary: None,
+            render_notice: None,
         }
     }
 
-    pub fn set_rendered_pages(&mut self, pages: Vec<RenderedPage>, cx: &mut Context<Self>) {
+    pub fn set_rendered_pages(
+        &mut self,
+        pages: Vec<RenderedPage>,
+        notice: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.release_page_assets(cx);
         self.pages = pages;
         self.is_retained_stale = false;
         self.is_rendering = false;
         self.last_error_summary = None;
+        self.render_notice = notice;
         cx.notify();
     }
 
@@ -53,6 +61,7 @@ impl PreviewView {
         self.is_retained_stale = false;
         self.is_rendering = false;
         self.last_error_summary = None;
+        self.render_notice = None;
         cx.notify();
     }
 
@@ -251,6 +260,36 @@ impl PreviewView {
                                         .child("Showing the last successful compile."),
                                 )
                             }),
+                    ),
+            );
+        }
+
+        if let Some(notice) = self
+            .render_notice
+            .as_deref()
+            .filter(|_| !self.pages.is_empty())
+        {
+            container = container.child(
+                div()
+                    .flex()
+                    .w_full()
+                    .max_w(px(520.0))
+                    .items_start()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .rounded_sm()
+                    .bg(theme::color(theme::BG_BAR))
+                    .border_l_2()
+                    .border_color(theme::color(theme::TEXT_MUTED))
+                    .text_xs()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .child(notice.to_string()),
                     ),
             );
         }
