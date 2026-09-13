@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use super::diagnostics::Diagnostic;
+use super::diagnostics::{Diagnostic, DiagnosticSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompileId(pub u64);
@@ -156,7 +156,6 @@ pub fn run_with_cancel(
 /// Shared, immutable compiled artifact bytes. `Arc` lets the PDF travel from
 /// the compiler through rendering without any byte-copying clones.
 pub type ArtifactBytes = Arc<[u8]>;
-
 #[derive(Debug)]
 pub struct CompileOutput {
     pub compile_id: CompileId,
@@ -318,4 +317,203 @@ pub(crate) mod test_assets {
         0xf8, 0xcf, 0x50, 0x0f, 0x00, 0x03, 0x86, 0x01, 0x80, 0x5a, 0x34, 0x7d, 0x6b, 0x00, 0x00,
         0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
     ];
+}
+
+/// Everything a backend needs to run one compile, built once per request so
+/// the tectonic/typst implementations differ only in argv and diagnostics.
+pub(crate) struct PreparedJob {
+    pub build_path: PathBuf,
+    pub cwd: PathBuf,
+    pub input_file: PathBuf,
+    pub output_pdf: PathBuf,
+}
+
+pub(crate) struct JobDirs<'a> {
+    pub build_root: &'a crate::util::TemporarySessionDir,
+    pub keep_dirs: usize,
+    pub prune_min_idle: Duration,
+}
+
+pub(crate) fn prepare_job(
+    dirs: &JobDirs<'_>,
+    request: &CompileRequest,
+    source_stem: &str,
+    source_ext: &str,
+    engine: EngineIdentity,
+) -> Result<PreparedJob, CompileError> {
+    let start = Instant::now();
+    let compile_id = request.compile_id;
+    let revision = request.revision;
+    let error = |message: String| CompileError {
+        compile_id,
+        revision,
+        diagnostics: Vec::new(),
+        message,
+        duration: start.elapsed(),
+    };
+
+    let build_path = dirs.build_root.path().join(format!("job_{}", compile_id.0));
+    std::fs::create_dir_all(&build_path).map_err(|err| {
+        error(format!(
+            "Failed to create {} build directory: {err}",
+            engine.label
+        ))
+    })?;
+    // One directory per compile with kept intermediates adds up over a
+    // session; age-guarded pruning leaves in-flight compiles alone.
+    crate::util::prune_numbered_dirs(
+        dirs.build_root.path(),
+        "job_",
+        dirs.keep_dirs,
+        dirs.prune_min_idle,
+    );
+
+    let (input_file, cwd, output_name) = if let Some(root_doc) = &request.root_document {
+        let file_stem = root_doc
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(source_stem);
+        let pdf_name = format!("{file_stem}.pdf");
+        let cwd = request
+            .project_root
+            .as_deref()
+            .unwrap_or(build_path.as_path());
+        (root_doc.clone(), cwd.to_path_buf(), pdf_name)
+    } else {
+        let input_file = build_path.join(format!("{source_stem}.{source_ext}"));
+        std::fs::write(&input_file, &request.source).map_err(|err| {
+            error(format!(
+                "Failed to write {} source to temporary file: {err}",
+                engine.label
+            ))
+        })?;
+        (input_file, build_path.clone(), format!("{source_stem}.pdf"))
+    };
+
+    Ok(PreparedJob {
+        output_pdf: build_path.join(output_name),
+        cwd,
+        input_file,
+        build_path,
+    })
+}
+
+/// Runs an engine's command under the shared cancel machinery, converting
+/// cancel/execute failures into that engine's shaped `CompileError` exactly
+/// once (this match previously existed twice — a third copy was forming in
+/// the renderer).
+pub(crate) fn run_compile_subprocess(
+    command: std::process::Command,
+    request: &CompileRequest,
+    start: Instant,
+    engine: EngineIdentity,
+) -> Result<std::process::Output, CompileError> {
+    let cancelled_message = "Compile cancelled by a newer edit".to_string();
+    let exec_error = |error: String| CompileError {
+        compile_id: request.compile_id,
+        revision: request.revision,
+        diagnostics: Vec::new(),
+        message: format!("Failed to execute {}: {error}", engine.label),
+        duration: start.elapsed(),
+    };
+    match run_with_cancel(command, request.cancel.as_ref()) {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(_)) => Err(CompileError {
+            compile_id: request.compile_id,
+            revision: request.revision,
+            diagnostics: Vec::new(),
+            message: cancelled_message,
+            duration: start.elapsed(),
+        }),
+        Err(error) => Err(exec_error(error.to_string())),
+    }
+}
+
+/// Turns a finished subprocess run into the result/error decision shared by
+/// both backends: successful status + no error-grade diagnostics + file on
+/// disk means output; anything else is a shaped failure.
+/// Static facts that differ per backend: display label and where its
+/// fallback diagnostics claim to come from.
+#[derive(Clone, Copy)]
+pub(crate) struct EngineIdentity {
+    pub label: &'static str,
+    pub diagnostic_source: DiagnosticSource,
+}
+
+/// What one subprocess run produced, before the shared success predicate.
+pub(crate) struct RunOutcome {
+    pub status: std::process::ExitStatus,
+    pub diagnostics: Vec<Diagnostic>,
+    pub raw_failure_message: Option<String>,
+}
+
+pub(crate) fn finalize_output(
+    request: &CompileRequest,
+    job: &PreparedJob,
+    start: Instant,
+    engine: EngineIdentity,
+    outcome: RunOutcome,
+) -> Result<CompileOutput, CompileError> {
+    let RunOutcome {
+        status,
+        diagnostics,
+        raw_failure_message,
+    } = outcome;
+
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == super::diagnostics::Severity::Error);
+
+    if status.success() && !has_errors && job.output_pdf.exists() {
+        let artifact: ArtifactBytes = std::fs::read(&job.output_pdf)
+            .map_err(|error| CompileError {
+                compile_id: request.compile_id,
+                revision: request.revision,
+                diagnostics: diagnostics.clone(),
+                message: format!("Failed to read {} PDF output: {error}", engine.label),
+                duration: start.elapsed(),
+            })?
+            .into();
+
+        return Ok(CompileOutput {
+            compile_id: request.compile_id,
+            revision: request.revision,
+            artifact,
+            diagnostics,
+            duration: start.elapsed(),
+        });
+    }
+
+    let message = diagnostics
+        .iter()
+        .filter(|d| d.severity == super::diagnostics::Severity::Error)
+        .map(|d| d.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let message = if message.is_empty() {
+        raw_failure_message.unwrap_or_else(|| format!("{} compilation failed", engine.label))
+    } else {
+        message
+    };
+
+    let diagnostics = if diagnostics.is_empty() {
+        vec![Diagnostic {
+            id: super::diagnostics::DiagnosticId(request.compile_id.0),
+            severity: super::diagnostics::Severity::Error,
+            source: engine.diagnostic_source,
+            file: request.root_document.clone(),
+            line: None,
+            message: message.clone(),
+        }]
+    } else {
+        diagnostics
+    };
+
+    Err(CompileError {
+        compile_id: request.compile_id,
+        revision: request.revision,
+        diagnostics,
+        message,
+        duration: start.elapsed(),
+    })
 }
