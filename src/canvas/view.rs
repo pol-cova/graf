@@ -268,6 +268,7 @@ impl CanvasView {
                     _ => {}
                 }
                 self.drag_start = Some((current_x, current_y));
+                self.document.invalidate_geometry_cache();
                 self.revision += 1;
                 cx.notify();
             }
@@ -293,7 +294,8 @@ impl Focusable for CanvasView {
 }
 
 impl Render for CanvasView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewport_size = window.viewport_size();
         div()
             .id("canvas-root")
             .key_context("Canvas")
@@ -307,7 +309,7 @@ impl Render for CanvasView {
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::handle_mouse_up))
             .child(self.render_toolbar(cx))
-            .child(self.render_viewport())
+            .child(self.render_viewport(viewport_size))
     }
 }
 
@@ -513,8 +515,18 @@ impl CanvasView {
             )
     }
 
-    fn render_viewport(&self) -> impl IntoElement {
+    fn render_viewport(&self, viewport_size: gpui::Size<gpui::Pixels>) -> impl IntoElement {
         let zoom = self.document.viewport.zoom;
+
+        // Cull to what the camera can show: without pan, the visible world
+        // window is the pane size divided by zoom, padded half a screen
+        // beyond so partially-offscreen elements still appear.
+        let half_extra = 0.5;
+        let visible_width = viewport_size.width.as_f32() / zoom * (1.0 + 2.0 * half_extra);
+        let visible_height = viewport_size.height.as_f32() / zoom * (1.0 + 2.0 * half_extra);
+        let is_visible = |(x, y, w, h): (f32, f32, f32, f32)| {
+            x + w >= 0.0 && y + h >= 0.0 && x <= visible_width && y <= visible_height
+        };
 
         let mut viewport = div()
             .id("canvas-viewport")
@@ -524,6 +536,33 @@ impl CanvasView {
             .overflow_hidden();
 
         for elem in &self.document.elements {
+            // Elements far outside the viewport contribute nothing to the
+            // frame; skipping them keeps drag cost proportional to what is
+            // visible rather than the whole scene.
+            let bounds = match &elem.kind {
+                ElementKind::Line {
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                }
+                | ElementKind::Arrow {
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                } => (
+                    start_x.min(*end_x),
+                    start_y.min(*end_y),
+                    (start_x - end_x).abs(),
+                    (start_y - end_y).abs(),
+                ),
+                _ => (elem.x, elem.y, elem.width, elem.height),
+            };
+            if !is_visible(bounds) {
+                continue;
+            }
+
             let is_selected = self.selected_element_id.as_deref() == Some(&elem.id);
             let left = px(elem.x * zoom);
             let top = px(elem.y * zoom);
