@@ -105,11 +105,17 @@ struct ChatResponseMessage {
 
 pub struct OpenAiCompatibleProvider {
     config: OpenAiConfig,
+    agent: ureq::Agent,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(config: OpenAiConfig) -> Self {
-        Self { config }
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_per_call(Some(Duration::from_secs(DEFAULT_AI_TIMEOUT_SECONDS)))
+                .build(),
+        );
+        Self { config, agent }
     }
 
     fn chat_request<'a>(&'a self, request: &'a AiRequest) -> ChatCompletionRequest<'a> {
@@ -145,17 +151,19 @@ impl AiProvider for OpenAiCompatibleProvider {
             "{}/chat/completions",
             self.config.base_url.trim_end_matches('/')
         );
-        let response = ureq::post(&url)
-            .set("Authorization", &format!("Bearer {api_key}"))
-            .timeout(Duration::from_secs(DEFAULT_AI_TIMEOUT_SECONDS))
+        let response = self
+            .agent
+            .post(&url)
+            .header("Authorization", &format!("Bearer {api_key}"))
             .send_json(self.chat_request(request))
             .map_err(|error| AiError {
                 message: format!("AI request failed: {error}"),
             })?;
 
-        let completion: ChatCompletionResponse = response.into_json().map_err(|error| AiError {
-            message: format!("Failed to parse AI response: {error}"),
-        })?;
+        let completion: ChatCompletionResponse =
+            response.into_body().read_json().map_err(|error| AiError {
+                message: format!("Failed to parse AI response: {error}"),
+            })?;
 
         let content = completion
             .choices
