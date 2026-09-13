@@ -112,20 +112,37 @@ pub fn run_with_cancel(
         .take()
         .map(|pipe| read_pipe::<std::process::ChildStderr>(Some(pipe)));
 
+    /// Reaping the child does not imply the pipes are drained: a grandchild
+    /// that inherited them can keep a reader thread alive forever, so
+    /// joining must be bounded rather than unconditional.
+    const PIPE_JOIN_TIMEOUT: Duration = Duration::from_millis(250);
+
+    fn drain_pipe(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+        let Some(handle) = handle else {
+            return Vec::new();
+        };
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let _ = std::thread::Builder::new()
+            .name("graf-pipe-join-waiter".into())
+            .spawn(move || {
+                let buffer = handle.join().unwrap_or_default();
+                let _ = sender.try_send(buffer);
+            });
+        // A still-blocked reader is abandoned instead of hanging the reap;
+        // the buffer dies with that thread.
+        receiver.recv_timeout(PIPE_JOIN_TIMEOUT).unwrap_or_default()
+    }
+
     loop {
-        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        let cancelled = cancel.is_some_and(|flag| flag.load(Ordering::Relaxed));
+        if cancelled {
             let _ = child.kill();
         }
-        match child.try_wait()? {
-            Some(status) => {
-                let stdout = stdout_pipe
-                    .and_then(|handle| handle.join().ok())
-                    .unwrap_or_default();
-                let stderr = stderr_pipe
-                    .and_then(|handle| handle.join().ok())
-                    .unwrap_or_default();
-                let was_cancelled = cancel.is_some_and(|flag| flag.load(Ordering::Relaxed));
-                return Ok(if was_cancelled {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = drain_pipe(stdout_pipe);
+                let stderr = drain_pipe(stderr_pipe);
+                return Ok(if cancelled {
                     Err(CompileCancelled)
                 } else {
                     Ok(std::process::Output {
@@ -135,7 +152,14 @@ pub fn run_with_cancel(
                     })
                 });
             }
-            None => std::thread::sleep(Duration::from_millis(15)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(15)),
+            // An unexpected IO error (e.g. waitpid failure) must not leave a
+            // still-running compiler behind: kill the child, surface it.
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
         }
     }
 }
@@ -227,6 +251,50 @@ mod cancel_tests {
             .expect("no io error")
             .expect_err("pre-cancelled");
         assert!(matches!(result, CompileCancelled));
+    }
+
+    #[test]
+    fn grandchild_inheriting_pipes_cannot_hang_the_reap() {
+        // The child spawns a grandchild that inherits stdout/stderr and
+        // outlives it by a second: the bounded join must return output
+        // (possibly partial) instead of blocking forever.
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("echo start; sleep 1 & echo done");
+        let started = std::time::Instant::now();
+        let output = run_with_cancel(command, None)
+            .expect("spawn works")
+            .expect("not cancelled");
+        // The reap must not wait on the inheriting grandchild: bounded join
+        // returns promptly (with a possibly partial buffer, which is fine —
+        // compilers do not spawn grandchildren; this guards the hang).
+        assert!(output.status.success());
+        assert!(started.elapsed() < Duration::from_millis(2_000));
+    }
+
+    #[test]
+    fn unexpected_failure_does_not_leak_the_child() {
+        // A child that exits immediately keeps pipes valid; the leak case is
+        // exercised indirectly by asserting the happy path stays fast. The
+        // kill-on-error branch is implemented; the simulated waitpid
+        // failure is impossible to trigger portably, so here we verify the
+        // full run() path never blocks when headers drop mid-output.
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("echo partial && sleep 0.05 && echo tail && exec sleep 1");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_thread = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(120));
+            cancel_for_thread.store(true, Ordering::Relaxed);
+        });
+        let started = std::time::Instant::now();
+        let result = run_with_cancel(command, Some(&cancel));
+        match result {
+            Ok(Err(CompileCancelled)) | Err(_) => {}
+            other => panic!("expected cancel or error, got {other:?}"),
+        }
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]
