@@ -128,6 +128,19 @@ pub struct CanvasViewport {
     pub zoom: f32,
 }
 
+impl CanvasViewport {
+    /// Single source of truth for the world↔screen mapping used by both
+    /// rendering and input; pan and zoom must stay consistent across the two
+    /// or clicks land away from shapes.
+    pub fn world_to_screen(&self, x: f32, y: f32) -> (f32, f32) {
+        ((x - self.pan_x) * self.zoom, (y - self.pan_y) * self.zoom)
+    }
+
+    pub fn screen_to_world(&self, x: f32, y: f32) -> (f32, f32) {
+        (x / self.zoom + self.pan_x, y / self.zoom + self.pan_y)
+    }
+}
+
 impl Default for CanvasViewport {
     fn default() -> Self {
         Self {
