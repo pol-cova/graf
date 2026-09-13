@@ -111,8 +111,22 @@ impl Workspace {
     }
 
     pub fn render_outline_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let text = self.editor.read(cx).text().to_string();
-        let items: Vec<OutlineItem> = parse_latex_outline(&text);
+        // The outline is parsed on demand, not every paint: cache it against
+        // the editor revision the same way the bib/label indexes work.
+        let revision = self.editor.read(cx).revision();
+        {
+            let mut cache = self.outline_cache.borrow_mut();
+            if cache.as_ref().map(|(cached_rev, _)| *cached_rev) != Some(revision) {
+                *cache = Some((revision, parse_latex_outline(self.editor.read(cx).text())));
+            }
+        }
+        let items = self
+            .outline_cache
+            .borrow()
+            .as_ref()
+            .map(|(_, items)| items.clone())
+            .unwrap_or_default();
+        let items: Vec<OutlineItem> = items;
 
         let mut list = div()
             .id("outline-list")

@@ -55,6 +55,30 @@ static WEASEL_WORDS: &[(&str, &str)] = &[
 
 static PASSIVE_BE_FORMS: &[&str] = &["is", "are", "was", "were", "been", "being", "be"];
 
+pub fn lint_academic_warnings_as_diagnostics(
+    text: &str,
+    is_typst: bool,
+) -> Vec<crate::compiler::diagnostics::Diagnostic> {
+    let warnings = lint_academic_text(text, is_typst);
+    warnings
+        .into_iter()
+        .map(|warning| crate::compiler::diagnostics::Diagnostic {
+            id: crate::compiler::diagnostics::DiagnosticId(
+                NEXT_LINT_DIAG_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            ),
+            severity: crate::compiler::diagnostics::Severity::Warning,
+            source: crate::compiler::diagnostics::DiagnosticSource::Parser,
+            file: None,
+            line: Some(warning.line),
+            message: warning.message,
+        })
+        .collect()
+}
+
+/// Lint diagnostics share one id sequence so none collide with compile
+/// diagnostics that allocate from their own counters.
+static NEXT_LINT_DIAG_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     let mut warnings = Vec::new();
 
@@ -65,56 +89,81 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
         // the folded text can never slice mid-character in the raw line.
         let lower_masked = masked.to_lowercase();
 
-        for &(phrase, replacement) in WORDY_PHRASES {
-            let mut search_from = 0;
-            while let Some(found_idx) = lower_masked[search_from..].find(phrase) {
-                let col = search_from + found_idx;
-                search_from = col + phrase.len();
-
-                if is_word_boundary(&lower_masked, col, phrase.len()) {
-                    warnings.push(StyleWarning {
-                        line: line_num,
-                        col: col + 1,
-                        length: phrase.len(),
-                        category: StyleCategory::Wordiness,
-                        matched_text: raw_line
-                            .get(col..col + phrase.len())
-                            .unwrap_or("")
-                            .to_string(),
-                        suggestion: Some(replacement.to_string()),
-                        message: format!("Consider replacing '{phrase}' with '{replacement}'"),
-                    });
-                }
-            }
-        }
-
-        for &(weasel, reason) in WEASEL_WORDS {
-            let mut search_from = 0;
-            while let Some(found_idx) = lower_masked[search_from..].find(weasel) {
-                let col = search_from + found_idx;
-                search_from = col + weasel.len();
-
-                if is_word_boundary(&lower_masked, col, weasel.len()) {
-                    warnings.push(StyleWarning {
-                        line: line_num,
-                        col: col + 1,
-                        length: weasel.len(),
-                        category: StyleCategory::WeaselWords,
-                        matched_text: raw_line
-                            .get(col..col + weasel.len())
-                            .unwrap_or("")
-                            .to_string(),
-                        suggestion: None,
-                        message: format!("Weak descriptor '{weasel}': {reason}"),
-                    });
-                }
-            }
-        }
+        for_each_match(
+            &lower_masked,
+            raw_line,
+            line_num,
+            phrase_rules(),
+            &mut warnings,
+        );
 
         check_passive_voice(raw_line, &lower_masked, line_num, &mut warnings);
     }
 
     warnings
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PhraseRule {
+    needle: &'static str,
+    category: StyleCategory,
+    suggestion: Option<&'static str>,
+    message: String,
+}
+
+/// One unified rule list: wordiness phrases (with a replacement suggestion)
+/// and weak descriptors (with a reason), built per lint from the static
+/// tables so the scan loop only walks a single list.
+fn phrase_rules() -> impl Iterator<Item = PhraseRule> {
+    let wordy = WORDY_PHRASES
+        .iter()
+        .map(|&(needle, replacement)| PhraseRule {
+            needle,
+            category: StyleCategory::Wordiness,
+            suggestion: Some(replacement),
+            message: format!("Consider replacing '{needle}' with '{replacement}'"),
+        });
+    let weasel = WEASEL_WORDS.iter().map(|&(needle, reason)| PhraseRule {
+        needle,
+        category: StyleCategory::WeaselWords,
+        suggestion: None,
+        message: format!("Weak descriptor '{needle}': {reason}"),
+    });
+    wordy.chain(weasel)
+}
+
+/// Advances through every occurrence of the needle with word-boundary
+/// filtering, growing the warnings set.
+fn for_each_match(
+    lower_masked: &str,
+    raw_line: &str,
+    line_num: usize,
+    rules: impl Iterator<Item = PhraseRule>,
+    warnings: &mut Vec<StyleWarning>,
+) {
+    for rule in rules {
+        let mut search_from = 0;
+        while let Some(found_idx) = lower_masked[search_from..].find(rule.needle) {
+            let col = search_from + found_idx;
+            search_from = col + rule.needle.len();
+
+            if !is_word_boundary(lower_masked, col, rule.needle.len()) {
+                continue;
+            }
+            warnings.push(StyleWarning {
+                line: line_num,
+                col: col + 1,
+                length: rule.needle.len(),
+                category: rule.category,
+                matched_text: raw_line
+                    .get(col..col + rule.needle.len())
+                    .unwrap_or("")
+                    .to_string(),
+                suggestion: rule.suggestion.map(str::to_string),
+                message: rule.message.clone(),
+            });
+        }
+    }
 }
 
 /// Replaces math, macro, and comment regions with spaces while preserving

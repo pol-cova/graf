@@ -185,6 +185,10 @@ pub struct Workspace {
     pub(crate) workspace_error: Option<String>,
     pub(crate) bib_index: crate::project::bibtex::BibtexIndex,
     pub(crate) label_index: crate::project::bibtex::LabelIndex,
+    /// Outline items keyed by editor revision; sidebar render (which is a
+    /// `&self` paint) must not parse the document every paint.
+    pub(crate) outline_cache:
+        std::cell::RefCell<Option<(u64, Vec<crate::project::outline::OutlineItem>)>>,
     pub(crate) completions: Vec<crate::editor::completion::CompletionItem>,
     pub(crate) completion_open: bool,
     pub(crate) completion_selected: usize,
@@ -202,11 +206,16 @@ impl Workspace {
         let initial_text = "\\documentclass{article}\n\\title{Untitled}\n\\author{}\n\n\\begin{document}\n\\maketitle\n\n\\section{Introduction}\nStart writing here.\n\n\\end{document}\n";
 
         let show_welcome = project_tree.root_document().is_none();
-        let initial_doc = if let Some(root_doc) = project_tree.root_document() {
-            Document::open(root_doc)
-                .unwrap_or_else(|_| Document::new_untitled("main.tex", initial_text))
+        let (initial_doc, open_error) = if let Some(root_doc) = project_tree.root_document() {
+            match Document::open(root_doc) {
+                Ok(doc) => (doc, None),
+                Err(error) => (
+                    Document::new_untitled("main.tex", initial_text),
+                    Some(format!("Could not open {}: {error}", root_doc.display())),
+                ),
+            }
         } else {
-            Document::new_untitled("main.tex", initial_text)
+            (Document::new_untitled("main.tex", initial_text), None)
         };
 
         let settings = GrafSettings::load_default();
@@ -307,9 +316,10 @@ impl Workspace {
             resizing_panel: None,
             workspace_menu_open: false,
             latest_diagnostics: Vec::new(),
-            workspace_error: None,
+            workspace_error: open_error,
             bib_index: crate::project::bibtex::BibtexIndex::new(),
             label_index: crate::project::bibtex::LabelIndex::default(),
+            outline_cache: std::cell::RefCell::new(None),
             completions: Vec::new(),
             completion_open: false,
             completion_selected: 0,
@@ -708,9 +718,11 @@ impl Workspace {
         let revision_at_start = self.editor.read(cx).revision();
 
         cx.spawn(async move |this, cx| {
-            let warnings = cx
+            let diagnostics = cx
                 .background_executor()
-                .spawn(async move { crate::project::linter::lint_academic_text(&text, is_typst) })
+                .spawn(async move {
+                    crate::project::linter::lint_academic_warnings_as_diagnostics(&text, is_typst)
+                })
                 .await;
 
             this.update(cx, |this, cx| {
@@ -722,25 +734,12 @@ impl Workspace {
                     return;
                 }
 
-                let mut diags = Vec::new();
-                for (i, w) in warnings.into_iter().enumerate() {
-                    diags.push(crate::compiler::diagnostics::Diagnostic {
-                        id: crate::compiler::diagnostics::DiagnosticId(1000 + i as u64),
-                        severity: crate::compiler::diagnostics::Severity::Warning,
-                        source: crate::compiler::diagnostics::DiagnosticSource::Parser,
-                        file: None,
-                        line: Some(w.line),
-                        message: w.message,
-                    });
-                }
-
-                if !diags.is_empty() {
-                    this.latest_diagnostics = diags.clone();
-                    this.diagnostics_drawer_open = true;
-                    this.editor.update(cx, |editor, cx| {
-                        editor.set_diagnostics(diags, cx);
-                    });
-                }
+                // A clean lint replaces what compile diagnostics left behind,
+                // instead of silently keeping stale entries on screen.
+                this.latest_diagnostics = diagnostics.clone();
+                this.editor.update(cx, |editor, cx| {
+                    editor.set_diagnostics(diagnostics, cx);
+                });
                 cx.notify();
             })
             .ok();

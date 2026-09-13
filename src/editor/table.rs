@@ -67,44 +67,24 @@ impl TableData {
     }
 
     pub fn from_tsv(tsv: &str) -> Self {
-        let mut rows = Vec::new();
-        let mut max_cols = 0;
-
-        for line in tsv.lines() {
-            let cols: Vec<String> = line.split('\t').map(|s| s.trim().to_string()).collect();
-            if !cols.is_empty() {
-                max_cols = max_cols.max(cols.len());
-                rows.push(cols);
-            }
-        }
-
-        if rows.is_empty() {
-            return Self::new(2, 2);
-        }
-
-        for row in &mut rows {
-            while row.len() < max_cols {
-                row.push(String::new());
-            }
-        }
-
-        let alignments = vec![TableAlignment::Left; max_cols];
-        Self {
-            rows,
-            alignments,
-            has_header: true,
-            has_booktabs: true,
-            caption: None,
-            label: None,
-        }
+        Self::from_delimited(tsv, '\t')
     }
 
     pub fn from_csv(csv: &str) -> Self {
+        Self::from_delimited(csv, ',')
+    }
+
+    /// One parse for both twins: split, trim, pad ragged rows, default the
+    /// empty input to a 2x2 blank grid.
+    fn from_delimited(input: &str, separator: char) -> Self {
         let mut rows = Vec::new();
         let mut max_cols = 0;
 
-        for line in csv.lines() {
-            let cols: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+        for line in input.lines() {
+            let cols: Vec<String> = line
+                .split(separator)
+                .map(|c| c.trim().to_string())
+                .collect();
             if !cols.is_empty() {
                 max_cols = max_cols.max(cols.len());
                 rows.push(cols);

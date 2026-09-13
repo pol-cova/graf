@@ -345,16 +345,16 @@ impl Element for EditorElement {
                         .text_system()
                         .shape_line(num_str.into(), font_size, &[run], None);
                 let gutter_x = px(gutter_width - 10.0) - shaped.width;
-                shaped
-                    .paint(
-                        point(bounds.left() + gutter_x, bounds.top() + px(y)),
-                        line_height_px,
-                        gpui::TextAlign::Left,
-                        None,
-                        window,
-                        cx,
-                    )
-                    .ok();
+                if let Err(error) = shaped.paint(
+                    point(bounds.left() + gutter_x, bounds.top() + px(y)),
+                    line_height_px,
+                    gpui::TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                ) {
+                    log::warn!("gutter number failed to paint: {error}");
+                }
             }
         }
 
@@ -362,18 +362,19 @@ impl Element for EditorElement {
             window.paint_quad(quad);
         }
 
-        for (i, line) in prepaint.line_layouts.iter().enumerate() {
+        for (i, layout) in prepaint.line_layouts.iter().enumerate() {
             let line_idx = prepaint.first_line + i;
             let y = line_idx as f32 * lh - scroll_offset;
-            line.paint(
+            if let Err(error) = layout.paint(
                 point(bounds.left() + gutter_offset, bounds.top() + px(y)),
                 line_height_px,
                 gpui::TextAlign::Left,
                 None,
                 window,
                 cx,
-            )
-            .ok();
+            ) {
+                log::warn!("line {line_idx} failed to paint: {error}");
+            }
         }
 
         if let Some(cursor) = prepaint.cursor_quad.take() {

@@ -132,7 +132,7 @@ pub struct EditorView {
     last_first_line: usize,
     last_bounds: Option<Bounds<Pixels>>,
     last_line_height: f32,
-    goal_x: Option<f32>,
+    goal_col: Option<usize>,
     diagnostics: Vec<crate::compiler::diagnostics::Diagnostic>,
     pub is_typst: bool,
     plain_text: bool,
@@ -179,7 +179,7 @@ impl EditorView {
             last_first_line: 0,
             last_bounds: None,
             last_line_height: 22.0,
-            goal_x: None,
+            goal_col: None,
             diagnostics: Vec::new(),
             is_typst: false,
             plain_text: false,
@@ -242,7 +242,7 @@ impl EditorView {
         self.selected_range = start..end;
         self.cursor = end;
         self.selection_reversed = false;
-        self.goal_x = None;
+        self.goal_col = None;
         self.ensure_cursor_visible();
         cx.notify();
     }
@@ -277,7 +277,7 @@ impl EditorView {
         self.cursor += move_delta;
         self.selected_range = self.cursor..self.cursor;
         self.buffer.end_transaction(self.cursor);
-        self.goal_x = None;
+        self.goal_col = None;
     }
 
     fn delete_range(&mut self, range: Range<usize>) {
@@ -289,14 +289,14 @@ impl EditorView {
         self.cursor = range.start;
         self.selected_range = self.cursor..self.cursor;
         self.buffer.end_transaction(self.cursor);
-        self.goal_x = None;
+        self.goal_col = None;
     }
 
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.cursor = offset.min(self.buffer.len());
         self.selected_range = self.cursor..self.cursor;
         self.selection_reversed = false;
-        self.goal_x = None;
+        self.goal_col = None;
         self.ensure_cursor_visible();
         cx.notify();
     }
@@ -424,8 +424,9 @@ impl EditorView {
         let current = self.cursor_offset();
         let (line, col) = self.line_col_for_offset(current);
 
-        let target_col = self.goal_x.map(|gx| gx as usize).unwrap_or(col);
-        let goal_x = self.goal_x.unwrap_or(col as f32);
+        // The "goal column" keeps vertical walks on the character column the
+        // user started from (dropped when any horizontal move happens).
+        let target_col = self.goal_col.unwrap_or(col);
 
         let new_line = if delta < 0 {
             line.saturating_sub((-delta) as usize)
@@ -440,7 +441,7 @@ impl EditorView {
         } else {
             self.move_to(new_offset, cx);
         }
-        self.goal_x = Some(goal_x);
+        self.goal_col = Some(target_col);
     }
 
     fn visible_lines(&self) -> usize {
@@ -570,7 +571,7 @@ impl EditorView {
         self.selection_reversed = false;
         self.marked_range = None;
         self.scroll_offset = 0.0;
-        self.goal_x = None;
+        self.goal_col = None;
         cx.notify();
     }
 
