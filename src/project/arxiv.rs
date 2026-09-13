@@ -4,8 +4,9 @@ pub struct ArxivPaper {
     pub title: String,
     pub authors: Vec<String>,
     pub summary: String,
-    pub year: u32,
-    pub primary_category: String,
+    pub year: Option<u32>,
+    /// Only set when the feed supplies it; never invented.
+    pub primary_category: Option<String>,
     pub pdf_url: String,
 }
 
@@ -37,12 +38,15 @@ impl ArxivPaper {
             .filter(|c| c.is_alphanumeric())
             .collect::<String>();
 
-        format!("{}{first_word}", self.year)
-            .chars()
-            .fold(first_author.to_string(), |mut acc, c| {
-                acc.push(c);
-                acc
-            })
+        format!(
+            "{}{first_word}",
+            self.year.map_or("".to_string(), |y| y.to_string())
+        )
+        .chars()
+        .fold(first_author.to_string(), |mut acc, c| {
+            acc.push(c);
+            acc
+        })
     }
 
     pub fn to_bibtex(&self) -> String {
@@ -56,14 +60,13 @@ impl ArxivPaper {
         out.push_str(&format!(
             "  journal = {{arXiv preprint arXiv:{clean_id}}},\n"
         ));
-        out.push_str(&format!("  year = {{{}}},\n", self.year));
+        if let Some(year) = self.year {
+            out.push_str(&format!("  year = {{{year}}},\n"));
+        }
         out.push_str(&format!("  eprint = {{{clean_id}}},\n"));
         out.push_str("  archivePrefix = {arXiv},\n");
-        if !self.primary_category.is_empty() {
-            out.push_str(&format!(
-                "  primaryClass = {{{}}},\n",
-                self.primary_category
-            ));
+        if let Some(category) = &self.primary_category {
+            out.push_str(&format!("  primaryClass = {{{category}}},\n"));
         }
         out.push_str("}\n");
         out
@@ -101,8 +104,7 @@ pub fn parse_arxiv_atom_feed(xml: &str) -> Vec<ArxivPaper> {
         let year = published
             .split('-')
             .next()
-            .and_then(|y| y.parse::<u32>().ok())
-            .unwrap_or(2024);
+            .and_then(|y| y.parse::<u32>().ok());
 
         let mut authors = Vec::new();
         for author_block in entry_xml.split("<author>") {
@@ -130,7 +132,8 @@ pub fn parse_arxiv_atom_feed(xml: &str) -> Vec<ArxivPaper> {
                 authors,
                 summary,
                 year,
-                primary_category: "cs.AI".to_string(),
+                primary_category: extract_xml_tag(entry_xml, "arxiv:primary_category")
+                    .map(str::to_string),
                 pdf_url,
             });
         }
@@ -178,7 +181,9 @@ mod tests {
         assert_eq!(paper.id, "1706.03762v7");
         assert_eq!(paper.title, "Attention Is All You Need");
         assert_eq!(paper.authors.len(), 2);
-        assert_eq!(paper.year, 2017);
+        assert_eq!(paper.year, Some(2017));
+        // No fabricated values: the category comes only from the feed.
+        assert!(paper.primary_category.is_none());
 
         let bibtex = paper.to_bibtex();
         assert!(bibtex.contains("@article{vaswani2017attention,"));

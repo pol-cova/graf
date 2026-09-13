@@ -274,7 +274,7 @@ impl EditorView {
         self.selected_range = 0..self.buffer.len();
         self.cursor = self.buffer.len();
         self.selection_reversed = false;
-        self.goal_x = None;
+        self.goal_col = None;
         cx.notify();
     }
 
@@ -373,7 +373,7 @@ impl EditorView {
         if let Some(cursor_pos) = self.buffer.undo() {
             self.cursor = cursor_pos;
             self.selected_range = self.cursor..self.cursor;
-            self.goal_x = None;
+            self.goal_col = None;
             self.ensure_cursor_visible();
             cx.notify();
         }
@@ -383,7 +383,7 @@ impl EditorView {
         if let Some(cursor_pos) = self.buffer.redo() {
             self.cursor = cursor_pos;
             self.selected_range = self.cursor..self.cursor;
-            self.goal_x = None;
+            self.goal_col = None;
             self.ensure_cursor_visible();
             cx.notify();
         }
@@ -472,7 +472,7 @@ impl EditorView {
         self.selected_range = range.clone();
         self.cursor = range.end;
         self.selection_reversed = false;
-        self.goal_x = None;
+        self.goal_col = None;
         cx.notify();
     }
 
@@ -589,7 +589,7 @@ impl EntityInputHandler for EditorView {
                 self.selected_range = self.cursor..self.cursor;
                 self.marked_range = None;
                 self.buffer.end_transaction(self.cursor);
-                self.goal_x = None;
+                self.goal_col = None;
                 self.ensure_cursor_visible();
                 cx.notify();
                 return;
@@ -607,7 +607,7 @@ impl EntityInputHandler for EditorView {
         self.selected_range = self.cursor..self.cursor;
         self.marked_range = None;
         self.buffer.end_transaction(self.cursor);
-        self.goal_x = None;
+        self.goal_col = None;
         self.ensure_cursor_visible();
         cx.notify();
     }
@@ -650,7 +650,7 @@ impl EntityInputHandler for EditorView {
             });
         self.cursor = self.selected_range.end;
         self.buffer.end_transaction(self.cursor);
-        self.goal_x = None;
+        self.goal_col = None;
         cx.notify();
     }
 

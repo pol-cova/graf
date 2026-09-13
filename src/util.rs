@@ -8,6 +8,17 @@ pub fn home_dir() -> Option<PathBuf> {
 pub struct TemporarySessionDir {
     path: PathBuf,
     _managed: Option<tempfile::TempDir>,
+    /// Set when we created `path` ourselves; removal happens on drop so a
+    /// fallback root is never left behind by a session.
+    self_created: bool,
+}
+
+impl Drop for TemporarySessionDir {
+    fn drop(&mut self) {
+        if self.self_created {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 }
 
 impl TemporarySessionDir {
@@ -16,16 +27,29 @@ impl TemporarySessionDir {
             Ok(dir) => Self {
                 path: dir.path().to_path_buf(),
                 _managed: Some(dir),
+                self_created: false,
             },
             Err(error) => {
-                let path = std::env::temp_dir().join(format!("{prefix}_{}", std::process::id()));
-                log::warn!(
-                    "failed to create managed temporary directory; using {}: {error}",
-                    path.display()
-                );
+                // Fallback roots must (a) actually exist downstream and
+                // (b) be unique within this process; both are cheap here.
+                let path = std::env::temp_dir().join(format!(
+                    "{prefix}_{}_{}",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.subsec_nanos())
+                        .unwrap_or(0)
+                ));
+                if let Err(create_error) = std::fs::create_dir_all(&path) {
+                    log::warn!(
+                        "failed to create fallback directory {}: {create_error} (original tempfile error: {error})",
+                        path.display()
+                    );
+                }
                 Self {
                     path,
                     _managed: None,
+                    self_created: true,
                 }
             }
         }
@@ -35,6 +59,7 @@ impl TemporarySessionDir {
         Self {
             path: path.into(),
             _managed: None,
+            self_created: false,
         }
     }
 
@@ -71,8 +96,13 @@ pub fn prune_numbered_dirs(dir: &Path, prefix: &str, keep: usize, min_idle: Dura
         if index >= newest_to_keep {
             break;
         }
+        // An empty run dir has no newest mtime on record; treat it as
+        // idle-eligible or empty runs accumulate forever.
         match newest_mtime(&path) {
             Some(modified) if now.duration_since(modified).unwrap_or_default() >= min_idle => {
+                let _ = std::fs::remove_dir_all(path);
+            }
+            None => {
                 let _ = std::fs::remove_dir_all(path);
             }
             _ => continue,

@@ -62,20 +62,15 @@ impl FileKind {
 pub struct QuickOpenEntry {
     /// Path relative to the project root, as displayed.
     pub relative: String,
+    /// Lowercased copy of `relative`, folded once at scan time.
+    relative_lower: String,
     pub path: PathBuf,
     pub kind: FileKind,
 }
 
 impl QuickOpenEntry {
-    /// Lowercased copy of `relative`, folded once at scan time.
     fn matches(&self, query_lower: &str) -> bool {
-        self.relative.to_lowercase().contains(query_lower)
-    }
-}
-
-impl From<&QuickOpenEntry> for QuickOpenEntry {
-    fn from(e: &QuickOpenEntry) -> Self {
-        e.clone()
+        self.relative_lower.contains(query_lower)
     }
 }
 
@@ -169,8 +164,10 @@ fn flatten_quick_open_entries(
                     .unwrap_or(path)
                     .display()
                     .to_string();
+                let relative_lower = relative.to_lowercase();
                 out.push(QuickOpenEntry {
                     relative,
+                    relative_lower,
                     path: path.clone(),
                     kind: *kind,
                 });

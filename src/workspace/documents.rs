@@ -153,31 +153,47 @@ impl Workspace {
 
         let svg = (self.active_view_kind == ActiveViewKind::Canvas)
             .then(|| self.canvas.read(cx).export_svg());
+        let document_path = self.documents[self.active_doc_idx]
+            .path()
+            .map(Path::to_path_buf);
+
         let result = self.documents[self.active_doc_idx]
             .save()
             .map_err(|error| error.to_string())
             .and_then(|_| {
-                if let Some(svg) = svg {
-                    let path = self.documents[self.active_doc_idx]
-                        .path()
-                        .ok_or_else(|| "saved document has no path".to_string())?
-                        .with_extension("svg");
-                    crate::project::atomic_write(&path, svg.as_bytes())
-                        .map_err(|error| error.to_string())?;
-                }
-                Ok(())
+                // The canvas SVG sidecar is part of the save transaction: a
+                // failed sidecar write fails the save explicitly instead of
+                // leaving half-synced files behind.
+                document_path
+                    .map(|path| (path, svg))
+                    .ok_or_else(|| "saved document has no path".to_string())
+                    .and_then(|(path, svg)| match svg {
+                        None => Ok(()),
+                        Some(svg) => {
+                            let sidecar = path.with_extension("svg");
+                            crate::project::atomic_write(&sidecar, svg.as_bytes())
+                                .map_err(|error| error.to_string())
+                        }
+                    })
             });
 
         match result {
             Ok(()) => {
-                self.workspace_error = None;
-                self.save_recovery_snapshot();
+                self.finish_successful_save(cx);
                 if self.settings.editor.auto_compile {
                     self.trigger_compile(cx);
                 }
             }
             Err(error) => self.workspace_error = Some(format!("Could not save file: {error}")),
         }
+        cx.notify();
+    }
+
+    /// One success path shared by save and save-as: clears any error kept
+    /// from earlier runs and refreshes the recovery journal.
+    pub(super) fn finish_successful_save(&mut self, cx: &mut Context<Self>) {
+        self.workspace_error = None;
+        self.save_recovery_snapshot();
         cx.notify();
     }
 
@@ -201,10 +217,7 @@ impl Workspace {
                         return;
                     };
                     match document.save_as(path) {
-                        Ok(()) => {
-                            this.workspace_error = None;
-                            this.save_recovery_snapshot();
-                        }
+                        Ok(()) => this.finish_successful_save(cx),
                         Err(error) => {
                             this.workspace_error = Some(format!("Could not save file: {error}"));
                         }
