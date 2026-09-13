@@ -1,12 +1,26 @@
 use super::*;
 
+/// Monotonic generation for AI ops; starting a new op cancels any in-flight
+/// older one by invalidating its result.
+pub(crate) static NEXT_AI_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
 impl Workspace {
     pub fn run_ai_operation(&mut self, op: AiOperationKind, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
-        let context = editor.text().to_string();
+        // Selection-first context: ops rewrite or explain what the user
+        // highlighted; without a selection the full document goes in — but
+        // always capped through the provider-boundary context builder.
+        let (context, is_selection) = match editor.selected_text() {
+            Some(selection) => (selection, true),
+            None => (editor.text().to_string(), false),
+        };
+        let context = crate::ai::operations::build_ai_context(is_selection, &context);
         let revision = editor.revision();
         let document_id = self.documents[self.active_doc_idx].id();
         let provider = self.ai_provider.clone();
+        let generation = NEXT_AI_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.ai_operation_generation = generation;
 
         cx.spawn(async move |this, cx| {
             let operation = op.clone();
@@ -19,6 +33,13 @@ impl Workspace {
                 .await;
 
             this.update(cx, |this, cx| {
+                // A newer AI op started while this one ran: its result is
+                // superseded, deliver nothing (the underlying request keeps
+                // draining until the provider times out).
+                if this.ai_operation_generation != generation {
+                    return;
+                }
+
                 let document_changed = this.documents[this.active_doc_idx].id() != document_id
                     || this.editor.read(cx).revision() != revision;
                 if !matches!(&op, AiOperationKind::GenerateDiagram { .. }) && document_changed {

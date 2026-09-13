@@ -1,6 +1,10 @@
 use crate::ai::provider::{AiProvider, AiRequest};
 use crate::canvas::scene::CanvasDocument;
 
+/// Upper bound on document text sent to a provider in one request. Without
+/// a cap, a 100KB chapter is shipped per op at typing-speed latency.
+const MAX_AI_CONTEXT_CHARS: usize = 12_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiOperationKind {
     RewriteAcademic,
@@ -69,6 +73,43 @@ pub fn execute_operation(
     Ok(response.text.trim().to_string())
 }
 
+/// Builds the request payload with the provider-boundary context cap:
+/// the selection when one exists, else the document's last
+/// `MAX_AI_CONTEXT_CHARS` characters, with an elision marker.
+pub fn build_ai_context(is_selection: bool, text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= MAX_AI_CONTEXT_CHARS {
+        return trimmed.to_string();
+    }
+    let truncated = last_chars(trimmed, MAX_AI_CONTEXT_CHARS);
+    if is_selection {
+        format!("[selection truncated]\n{truncated}")
+    } else {
+        format!("[document truncated to last {MAX_AI_CONTEXT_CHARS} characters]\n{truncated}")
+    }
+}
+
+/// Copies at most `max_chars` trailing characters of `text`, never cutting
+/// mid-character, starting on a line break when one is handy.
+fn last_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    // Byte offset where the last `max_chars` characters begin.
+    let start = text
+        .char_indices()
+        .nth_back(max_chars - 1)
+        .map(|(byte, _)| byte)
+        .unwrap_or(0);
+    let tail = &text[start..];
+    // The cut may split a line in half; skip to the next line break when the
+    // chopped-off fragment is short so the model sees whole lines.
+    match tail.find('\n') {
+        Some(breakpoint) if breakpoint < max_chars / 2 => tail[breakpoint + 1..].to_string(),
+        _ => tail.to_string(),
+    }
+}
+
 pub fn parse_canvas_response(response: &str) -> Result<CanvasDocument, String> {
     let cleaned = response
         .trim()
@@ -106,5 +147,33 @@ mod tests {
         let document = parse_canvas_response(&response).expect("valid canvas document");
 
         assert!(document.elements.is_empty());
+    }
+
+    #[test]
+    fn short_documents_pass_through_uncapped() {
+        let text = "\\section{Intro}\nA short note.\n";
+        assert_eq!(build_ai_context(false, text), text.trim());
+    }
+
+    #[test]
+    fn oversized_documents_are_truncated_to_the_cap() {
+        let capped_text = "q".repeat(MAX_AI_CONTEXT_CHARS + 200);
+        let context = build_ai_context(false, &capped_text);
+        assert!(context.starts_with(&format!(
+            "[document truncated to last {MAX_AI_CONTEXT_CHARS} characters]"
+        )));
+
+        let context_selection = build_ai_context(true, &"x".repeat(MAX_AI_CONTEXT_CHARS + 5));
+        assert!(context_selection.starts_with("[selection truncated]"));
+    }
+
+    #[test]
+    fn truncation_never_splits_characters() {
+        let japan = "日本語".repeat(MAX_AI_CONTEXT_CHARS);
+        let text = format!("{japan}XYZ");
+        let context = build_ai_context(false, &text);
+        // No replacement character can appear: the slice is char-aligned.
+        assert!(!context.contains('\u{FFFD}'));
+        assert!(context.ends_with("XYZ"));
     }
 }

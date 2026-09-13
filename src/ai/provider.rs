@@ -210,13 +210,19 @@ impl AcpConfig {
     }
 }
 
+/// Reuses one persistent ACP agent process for all operations instead of
+/// spawning a fresh child per op; reconnects if a request fails.
 pub struct AcpAiProvider {
     config: AcpConfig,
+    client: std::sync::Mutex<Option<crate::ai::acp::AcpClient>>,
 }
 
 impl AcpAiProvider {
     pub fn new(config: AcpConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            client: std::sync::Mutex::new(None),
+        }
     }
 }
 
@@ -229,14 +235,30 @@ impl AiProvider for AcpAiProvider {
         let cwd = std::env::current_dir().map_err(|error| AiError {
             message: format!("Failed to determine ACP working directory: {error}"),
         })?;
-        let mut client =
-            crate::ai::acp::AcpClient::connect(command, &self.config.args, self.config.timeout)
-                .map_err(|message| AiError { message })?;
-        let model = client.initialize().map_err(|message| AiError { message })?;
-        let text = client
-            .complete(&cwd, &request.system_prompt, &request.user_prompt)
-            .map_err(|message| AiError { message })?;
-        Ok(AiResponse { text, model })
+        let mut guard = self
+            .client
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_none() {
+            let mut client =
+                crate::ai::acp::AcpClient::connect(command, &self.config.args, self.config.timeout)
+                    .map_err(|message| AiError { message })?;
+            client.initialize().map_err(|message| AiError { message })?;
+            *guard = Some(client);
+        }
+        let client = guard.as_mut().expect("connected above");
+        match client.complete(&cwd, &request.system_prompt, &request.user_prompt) {
+            Ok(text) => Ok(AiResponse {
+                text,
+                model: "acp-agent".to_string(),
+            }),
+            // A failed op leaves the pooled agent's stream state unknown;
+            // drop it so the next op starts from a clean connect.
+            Err(message) => {
+                *guard = None;
+                Err(AiError { message })
+            }
+        }
     }
 }
 

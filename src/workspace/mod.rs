@@ -168,6 +168,8 @@ pub struct Workspace {
     /// Cancel flag for the in-flight compile; flipping it kills the running
     /// compiler subprocess (and rasterization) instead of waiting it out.
     pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Generation of the newest AI op; older in-flight results are dropped.
+    pub(crate) ai_operation_generation: u64,
     pub(crate) show_welcome: bool,
     pub(crate) sidebar_visible: bool,
     pub(crate) sidebar_tab: SidebarTab,
@@ -292,6 +294,7 @@ impl Workspace {
             compile_running: false,
             compile_pending: false,
             compile_cancel: None,
+            ai_operation_generation: 0,
             show_welcome,
             sidebar_visible: true,
             sidebar_tab: SidebarTab::Files,
