@@ -46,21 +46,23 @@ impl ZoteroItem {
     }
 
     pub fn to_bib_entry(&self) -> BibEntry {
-        BibEntry {
-            key: self.citekey.clone(),
-            entry_type: if self.publication.is_some() {
+        let title = Some(self.title.clone());
+        let author = if self.authors.is_empty() {
+            None
+        } else {
+            Some(self.authors.join(" and "))
+        };
+        BibEntry::new(
+            self.citekey.clone(),
+            if self.publication.is_some() {
                 "article".to_string()
             } else {
                 "misc".to_string()
             },
-            title: Some(self.title.clone()),
-            author: if self.authors.is_empty() {
-                None
-            } else {
-                Some(self.authors.join(" and "))
-            },
-            year: self.year.map(|y| y.to_string()),
-        }
+            title,
+            author,
+            self.year.map(|y| y.to_string()),
+        )
     }
 }
 

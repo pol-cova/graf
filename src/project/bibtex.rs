@@ -5,9 +5,33 @@ pub struct BibEntry {
     pub title: Option<String>,
     pub author: Option<String>,
     pub year: Option<String>,
+    /// Lowercased search keys computed once at parse time, so per-keystroke
+    /// search never re-folds every candidate.
+    pub key_lower: String,
+    pub title_lower: Option<String>,
+    pub author_lower: Option<String>,
 }
 
 impl BibEntry {
+    pub fn new(
+        key: String,
+        entry_type: String,
+        title: Option<String>,
+        author: Option<String>,
+        year: Option<String>,
+    ) -> Self {
+        BibEntry {
+            key_lower: key.to_lowercase(),
+            title_lower: title.as_ref().map(|t| t.to_lowercase()),
+            author_lower: author.as_ref().map(|a| a.to_lowercase()),
+            key,
+            entry_type,
+            title,
+            author,
+            year,
+        }
+    }
+
     pub fn display_summary(&self) -> String {
         let title = self.title.as_deref().unwrap_or("Untitled");
         let author = self.author.as_deref().unwrap_or("Unknown author");
@@ -52,13 +76,13 @@ impl BibtexIndex {
         self.entries
             .iter()
             .filter(|e| {
-                e.key.to_lowercase().contains(&query_lower)
-                    || e.title
+                e.key_lower.contains(&query_lower)
+                    || e.title_lower
                         .as_ref()
-                        .is_some_and(|t| t.to_lowercase().contains(&query_lower))
-                    || e.author
+                        .is_some_and(|t| t.contains(&query_lower))
+                    || e.author_lower
                         .as_ref()
-                        .is_some_and(|a| a.to_lowercase().contains(&query_lower))
+                        .is_some_and(|a| a.contains(&query_lower))
             })
             .collect()
     }
@@ -105,13 +129,7 @@ pub fn parse_bibtex_entries(content: &str) -> Vec<BibEntry> {
         }
 
         if !key.is_empty() {
-            entries.push(BibEntry {
-                key,
-                entry_type,
-                title,
-                author,
-                year,
-            });
+            entries.push(BibEntry::new(key, entry_type, title, author, year));
         }
     }
 
@@ -137,11 +155,14 @@ fn parse_field_line(line: &str) -> Option<(String, String)> {
 #[derive(Debug, Clone, Default)]
 pub struct LabelIndex {
     pub labels: Vec<String>,
+    /// Parallel lowercase copy of `labels`, folded once at load.
+    pub labels_lower: Vec<String>,
 }
 
 impl LabelIndex {
     pub fn parse_and_load(&mut self, content: &str) {
         self.labels = parse_latex_labels(content);
+        self.labels_lower = self.labels.iter().map(|l| l.to_lowercase()).collect();
     }
 
     pub fn search(&self, query: &str) -> Vec<&str> {
@@ -151,8 +172,9 @@ impl LabelIndex {
         let query_lower = query.to_lowercase();
         self.labels
             .iter()
-            .filter(|l| l.to_lowercase().contains(&query_lower))
-            .map(String::as_str)
+            .zip(&self.labels_lower)
+            .filter(|(_, lower)| lower.contains(&query_lower))
+            .map(|(label, _)| label.as_str())
             .collect()
     }
 }

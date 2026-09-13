@@ -61,6 +61,8 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     for (line_idx, raw_line) in text.lines().enumerate() {
         let line_num = line_idx + 1;
         let masked = mask_math_and_macros(raw_line, is_typst);
+        // Both hold the same byte length as `raw_line`, so offsets found in
+        // the folded text can never slice mid-character in the raw line.
         let lower_masked = masked.to_lowercase();
 
         for &(phrase, replacement) in WORDY_PHRASES {
@@ -75,7 +77,10 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
                         col: col + 1,
                         length: phrase.len(),
                         category: StyleCategory::Wordiness,
-                        matched_text: raw_line[col..col + phrase.len()].to_string(),
+                        matched_text: raw_line
+                            .get(col..col + phrase.len())
+                            .unwrap_or("")
+                            .to_string(),
                         suggestion: Some(replacement.to_string()),
                         message: format!("Consider replacing '{phrase}' with '{replacement}'"),
                     });
@@ -95,7 +100,10 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
                         col: col + 1,
                         length: weasel.len(),
                         category: StyleCategory::WeaselWords,
-                        matched_text: raw_line[col..col + weasel.len()].to_string(),
+                        matched_text: raw_line
+                            .get(col..col + weasel.len())
+                            .unwrap_or("")
+                            .to_string(),
                         suggestion: None,
                         message: format!("Weak descriptor '{weasel}': {reason}"),
                     });
@@ -109,53 +117,52 @@ pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     warnings
 }
 
+/// Replaces math, macro, and comment regions with spaces while preserving
+/// the byte length of the input, keeping all byte offsets valid in both the
+/// masked and folded text.
 fn mask_math_and_macros(line: &str, is_typst: bool) -> String {
-    let mut out: Vec<char> = line.chars().collect();
-    let len = out.len();
-    let mut i = 0;
+    let mut masked = line.as_bytes().to_vec();
+    let len = masked.len();
 
     if is_typst {
         if let Some(pos) = line.find("//") {
-            for c in out.iter_mut().skip(pos) {
-                *c = ' ';
-            }
+            masked[pos..].fill(b' ');
         }
     } else if let Some(pos) = line.find('%')
         && (pos == 0 || line.as_bytes().get(pos - 1) != Some(&b'\\'))
     {
-        for c in out.iter_mut().skip(pos) {
-            *c = ' ';
-        }
+        masked[pos..].fill(b' ');
     }
 
+    let mut i = 0;
     while i < len {
-        if out[i] == '$' {
-            out[i] = ' ';
+        if masked[i] == b'$' {
+            masked[i] = b' ';
             i += 1;
-            while i < len && out[i] != '$' {
-                out[i] = ' ';
+            while i < len && masked[i] != b'$' {
+                masked[i] = b' ';
                 i += 1;
             }
-            if i < len && out[i] == '$' {
-                out[i] = ' ';
+            if i < len {
+                masked[i] = b' ';
                 i += 1;
             }
             continue;
         }
 
-        if !is_typst && out[i] == '\\' {
+        if !is_typst && masked[i] == b'\\' {
             let start = i;
-            while i < len && out[i].is_alphabetic() {
-                out[i] = ' ';
+            while i < len && masked[i].is_ascii_alphabetic() {
+                masked[i] = b' ';
                 i += 1;
             }
-            if i < len && out[i] == '{' {
-                while i < len && out[i] != '}' {
-                    out[i] = ' ';
+            if i < len && masked[i] == b'{' {
+                while i < len && masked[i] != b'}' {
+                    masked[i] = b' ';
                     i += 1;
                 }
-                if i < len && out[i] == '}' {
-                    out[i] = ' ';
+                if i < len {
+                    masked[i] = b' ';
                     i += 1;
                 }
             }
@@ -168,7 +175,12 @@ fn mask_math_and_macros(line: &str, is_typst: bool) -> String {
         i += 1;
     }
 
-    out.into_iter().collect()
+    // Every masked range covered whole characters, so the byte content is
+    // valid UTF-8; conversions can only fail if masking logic is wrong.
+    String::from_utf8(masked)
+        .map_err(|_| ())
+        .ok()
+        .unwrap_or_else(|| line.to_string())
 }
 
 fn is_word_boundary(line: &str, start: usize, len: usize) -> bool {
@@ -279,5 +291,48 @@ mod tests {
         let text = "Formula $x = \\text{very clear}$ is good. % in order to ignore this";
         let warnings = lint_academic_text(text, false);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn unicode_lines_never_panic_and_phrase_cols_stay_valid() {
+        // Multi-byte characters, a math mask, and a phrase after them: the
+        // old char-array masking changed byte lengths and `raw_line[col..]`
+        // than sliced mid-character.
+        let text = "İstanbul was shown clearly. Zusammenfassung due zum „Sehr“";
+        let warnings = lint_academic_text(text, false);
+        for warning in &warnings {
+            assert_eq!(
+                text.lines().nth(warning.line - 1),
+                Some(text.lines().nth(warning.line - 1).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn math_masking_preserves_byte_lengths() {
+        let line = "café $日本 very clear$ end";
+        let masked = mask_math_and_macros(line, false);
+        assert_eq!(masked.len(), line.len());
+        // Masked region holds spaces; surrounding text is untouched.
+        assert!(masked.starts_with("café"));
+        assert!(masked.ends_with(" end"));
+        assert!(!masked.contains("very"));
+    }
+
+    #[test]
+    fn phrase_after_multibyte_characters_gets_correct_offset() {
+        // "日本語" is 9 bytes before "clearly"; byte offsets must flow
+        // through masking unchanged.
+        let line = "日本語 clearly visible";
+        let warnings = lint_academic_text(line, true);
+        assert!(warnings.iter().any(|w| w.matched_text == "clearly"));
+        let clearly = warnings
+            .iter()
+            .find(|w| w.matched_text == "clearly")
+            .unwrap();
+        assert_eq!(
+            &line[clearly.col - 1..clearly.col - 1 + clearly.length],
+            "clearly"
+        );
     }
 }
