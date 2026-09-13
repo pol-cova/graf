@@ -52,6 +52,23 @@ pub struct CanvasView {
     is_dragging: bool,
     drag_start: Option<(f32, f32)>,
     revision: u64,
+    /// Monotonic element-id source; a count-derived id collides after any
+    /// deletion and makes selection/removal hit the wrong element.
+    next_element_counter: ElementIdAllocator,
+}
+
+/// Never repeats: `elem-{n+1}` from a plain counter is safe where a
+/// `elements.len()+1` scheme is not.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct ElementIdAllocator {
+    next: u64,
+}
+
+impl ElementIdAllocator {
+    fn allocate(&mut self) -> String {
+        self.next += 1;
+        format!("elem-{}", self.next)
+    }
 }
 
 impl CanvasView {
@@ -65,6 +82,7 @@ impl CanvasView {
             is_dragging: false,
             drag_start: None,
             revision: 0,
+            next_element_counter: ElementIdAllocator::default(),
         }
     }
 
@@ -100,8 +118,8 @@ impl CanvasView {
         self.revision
     }
 
-    fn next_element_id(&self) -> String {
-        format!("elem-{}", self.document.elements.len() + 1)
+    fn next_element_id(&mut self) -> String {
+        self.next_element_counter.allocate()
     }
 
     pub fn set_tool(&mut self, tool: CanvasTool, cx: &mut Context<Self>) {
@@ -163,8 +181,12 @@ impl CanvasView {
             return;
         }
 
-        let x = event.position.x.as_f32();
-        let y = event.position.y.as_f32();
+        // Input and rendering must share one coordinate mapping or shapes
+        // appear away from the click at any zoom other than 1.
+        let (x, y) = self
+            .document
+            .viewport
+            .screen_to_world(event.position.x.as_f32(), event.position.y.as_f32());
 
         self.is_dragging = true;
         self.drag_start = Some((x, y));
@@ -237,8 +259,13 @@ impl CanvasView {
         let current_y = event.position.y.as_f32();
 
         if let Some((start_x, start_y)) = self.drag_start {
-            let dx = current_x - start_x;
-            let dy = current_y - start_y;
+            // Deltas are measured in screen space; convert to world units so
+            // a drag moves the shape exactly as far as the cursor went.
+            let (world_x, world_y) = self.document.viewport.screen_to_world(current_x, current_y);
+            let (world_start_x, world_start_y) =
+                self.document.viewport.screen_to_world(start_x, start_y);
+            let dx = world_x - world_start_x;
+            let dy = world_y - world_start_y;
 
             if let Some(elem) = self
                 .selected_element_id
@@ -324,7 +351,14 @@ impl CanvasView {
             CanvasTool::Text,
         ];
 
+        // Toolbar clicks must not bubble into the canvas root handler, or a
+        // tool/zoom/undo button press also spawns a shape or starts a drag
+        // at the button position.
         div()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, _, cx| cx.stop_propagation()),
+            )
             .flex()
             .flex_none()
             .items_center()
@@ -516,16 +550,21 @@ impl CanvasView {
     }
 
     fn render_viewport(&self, viewport_size: gpui::Size<gpui::Pixels>) -> impl IntoElement {
-        let zoom = self.document.viewport.zoom;
-
-        // Cull to what the camera can show: without pan, the visible world
-        // window is the pane size divided by zoom, padded half a screen
-        // beyond so partially-offscreen elements still appear.
+        // Cull to what the camera can show: the visible world window is the
+        // pane rect mapped through the shared transform, padded half a
+        // screen beyond so partially-offscreen elements still appear.
         let half_extra = 0.5;
-        let visible_width = viewport_size.width.as_f32() / zoom * (1.0 + 2.0 * half_extra);
-        let visible_height = viewport_size.height.as_f32() / zoom * (1.0 + 2.0 * half_extra);
+        let world_width = viewport_size.width.as_f32() * (1.0 + 2.0 * half_extra);
+        let world_height = viewport_size.height.as_f32() * (1.0 + 2.0 * half_extra);
+        let (world_origin_x, world_origin_y) = self
+            .document
+            .viewport
+            .screen_to_world(-world_width * half_extra, -world_height * half_extra);
         let is_visible = |(x, y, w, h): (f32, f32, f32, f32)| {
-            x + w >= 0.0 && y + h >= 0.0 && x <= visible_width && y <= visible_height
+            x + w >= world_origin_x
+                && y + h >= world_origin_y
+                && x <= world_origin_x + world_width
+                && y <= world_origin_y + world_height
         };
 
         let mut viewport = div()
@@ -534,6 +573,7 @@ impl CanvasView {
             .flex_1()
             .size_full()
             .overflow_hidden();
+        let zoom = self.document.viewport.zoom;
 
         for elem in &self.document.elements {
             // Elements far outside the viewport contribute nothing to the
@@ -564,8 +604,9 @@ impl CanvasView {
             }
 
             let is_selected = self.selected_element_id.as_deref() == Some(&elem.id);
-            let left = px(elem.x * zoom);
-            let top = px(elem.y * zoom);
+            let (screen_left, screen_top) = self.document.viewport.world_to_screen(elem.x, elem.y);
+            let left = px(screen_left);
+            let top = px(screen_top);
             let width = px(elem.width * zoom);
             let height = px(elem.height * zoom);
 
@@ -614,8 +655,12 @@ impl CanvasView {
                     end_x,
                     end_y,
                 } => {
-                    let min_x = start_x.min(*end_x) * zoom;
-                    let min_y = start_y.min(*end_y) * zoom;
+                    let (min_screen_x, min_screen_y) = self
+                        .document
+                        .viewport
+                        .world_to_screen(start_x.min(*end_x), start_y.min(*end_y));
+                    let min_x = min_screen_x;
+                    let min_y = min_screen_y;
                     let w = ((end_x - start_x).abs() * zoom).max(4.0);
                     let h = ((end_y - start_y).abs() * zoom).max(4.0);
 
@@ -656,6 +701,40 @@ impl CanvasView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::scene::CanvasViewport;
+
+    #[test]
+    fn element_ids_never_collide_after_deletion() {
+        let mut ids = ElementIdAllocator::default();
+        let first = ids.allocate();
+        let second = ids.allocate();
+        assert_ne!(first, second);
+
+        // The old behavior derived ids from element count and would repeat
+        // the second id after deleting the first: a monotonic counter cannot.
+        let third = ids.allocate();
+        assert_eq!(third, "elem-3");
+        assert_ne!(third, second);
+    }
+
+    #[test]
+    fn viewport_transform_roundtrip_matches_screen_to_world() {
+        // The two directions must invert each other at any zoom/pan pair.
+        for zoom in [0.5, 1.0, 2.0] {
+            let mut viewport = CanvasViewport {
+                zoom,
+                ..Default::default()
+            };
+            for (px, py) in [(0.0, 0.0), (64.0, -12.0)] {
+                viewport.pan_x = px;
+                viewport.pan_y = py;
+                let (sx, sy) = viewport.world_to_screen(100.0, 40.0);
+                let (wx, wy) = viewport.screen_to_world(sx, sy);
+                assert!((wx - 100.0).abs() < 1e-4);
+                assert!((wy - 40.0).abs() < 1e-4);
+            }
+        }
+    }
 
     #[test]
     fn test_canvas_tool_names() {
