@@ -172,7 +172,6 @@ impl CompilerController {
 mod tests {
     use super::*;
     use crate::compiler::diagnostics::{DiagnosticSource, Severity};
-    use crate::compiler::engine::ArtifactKind;
     use std::sync::Arc;
 
     #[test]
@@ -193,7 +192,6 @@ mod tests {
                 compile_id: CompileId(1),
                 revision: 7,
                 artifact: Arc::from(&b"pdf"[..]),
-                artifact_kind: ArtifactKind::Pdf,
                 diagnostics: vec![],
                 duration: Duration::from_millis(1),
             })
@@ -251,7 +249,6 @@ mod tests {
             compile_id: CompileId(10),
             revision: 1,
             artifact: Arc::from(&b"%PDF-1.5 test content"[..]),
-            artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(45),
         };
@@ -279,7 +276,6 @@ mod tests {
             compile_id: CompileId(1),
             revision: 7,
             artifact: Arc::from(&b"old document"[..]),
-            artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(1),
         });
@@ -313,7 +309,6 @@ mod tests {
             compile_id: CompileId(1),
             revision: 1,
             artifact: Arc::from(&b"stale pdf"[..]),
-            artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(20),
         };

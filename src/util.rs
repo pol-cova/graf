@@ -55,6 +55,8 @@ impl TemporarySessionDir {
         }
     }
 
+    /// Test-only: injects an existing path instead of allocating one.
+    #[cfg(test)]
     pub fn from_path(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
