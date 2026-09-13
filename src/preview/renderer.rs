@@ -28,13 +28,31 @@ pub trait PdfRenderer: Send + Sync {
         pdf_bytes: &[u8],
         cancel: Option<&Arc<AtomicBool>>,
     ) -> Result<Vec<RenderedPage>, String>;
+
+    /// A user-facing note about degraded rendering from the most recent
+    /// `render_document`, if any (e.g. the `sips` single-page fallback).
+    /// `None` once a subsequent render goes through the full pipeline.
+    fn render_notice(&self) -> Option<String> {
+        None
+    }
 }
 
 const RENDER_RUNS_TO_KEEP: usize = 2;
 const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
+/// How many distinct PDFs stay rasterized between compiles. One entry costs a
+/// page-images directory on disk; 4 covers the docs a user bounces between.
+const RASTER_CACHE_CAPACITY: usize = 4;
+
+type RasterCache = std::collections::VecDeque<(u64, Arc<Vec<RenderedPage>>)>;
+
 pub struct NativePdfRenderer {
     cache_dir: crate::util::TemporarySessionDir,
+    /// (content hash, pages) ordered least- to most-recently used. Identical
+    /// PDF bytes skip re-rasterization entirely.
+    raster_cache: std::sync::Mutex<RasterCache>,
+    /// Set when the last completed render degraded to the `sips` fallback.
+    used_fallback: AtomicBool,
 }
 
 impl Default for NativePdfRenderer {
@@ -47,9 +65,53 @@ impl NativePdfRenderer {
     pub fn new() -> Self {
         Self {
             cache_dir: crate::util::TemporarySessionDir::new("graf_pdf"),
+            raster_cache: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            used_fallback: AtomicBool::new(false),
         }
     }
 
+    fn cache_hit(&self, hash: u64) -> Option<Arc<Vec<RenderedPage>>> {
+        let mut cache = self
+            .raster_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let position = cache.iter().position(|(key, _)| *key == hash)?;
+        cache.rotate_left(position);
+        let entry = cache.pop_front()?;
+        // A pruned or reclaimed directory would leave the preview pointing
+        // at missing images; re-rasterize in that case.
+        if entry.1.first().is_some_and(|page| page.image_path.exists()) {
+            cache.push_front(entry.clone());
+            Some(entry.1)
+        } else {
+            None
+        }
+    }
+
+    fn cache_insert(&self, hash: u64, pages: Arc<Vec<RenderedPage>>) {
+        let mut cache = self
+            .raster_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(position) = cache.iter().position(|(key, _)| *key == hash) {
+            cache.remove(position);
+        }
+        cache.push_front((hash, pages));
+        while cache.len() > RASTER_CACHE_CAPACITY {
+            cache.pop_back();
+        }
+    }
+}
+
+fn hash_pdf_bytes(pdf_bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    pdf_bytes.len().hash(&mut hasher);
+    pdf_bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+impl NativePdfRenderer {
     fn rasterize_with_pdftoppm(
         &self,
         pdf_file: &Path,
@@ -126,18 +188,28 @@ impl PdfRenderer for NativePdfRenderer {
         pdf_bytes: &[u8],
         cancel: Option<&Arc<AtomicBool>>,
     ) -> Result<Vec<RenderedPage>, String> {
-        // Each render gets a fresh directory, so the cache would grow by a
-        // full PDF and page images on every compile. Age-guarded pruning
-        // leaves in-flight renders alone.
-        prune_numbered_dirs(
-            self.cache_dir.path(),
-            "render_",
-            RENDER_RUNS_TO_KEEP,
-            PRUNE_MIN_IDLE,
-        );
         if pdf_bytes.is_empty() || !pdf_bytes.starts_with(b"%PDF-") {
             return Err("Invalid or empty PDF data".to_string());
         }
+
+        let hash = hash_pdf_bytes(pdf_bytes);
+        if let Some(cached) = self.cache_hit(hash) {
+            return Ok((*cached).clone());
+        }
+
+        // Each render gets a fresh directory, so the cache would grow by a
+        // full PDF and page images on every compile. Age-guarded pruning
+        // leaves in-flight renders and cache-referenced directories (within
+        // the keep window) alone.
+        prune_numbered_dirs(
+            self.cache_dir.path(),
+            "render_",
+            RENDER_RUNS_TO_KEEP.max(RASTER_CACHE_CAPACITY),
+            PRUNE_MIN_IDLE,
+        );
+
+        self.used_fallback
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         let run_dir = self.cache_dir.path().join(format!("render_{render_id}"));
         fs::create_dir_all(&run_dir)
@@ -146,9 +218,13 @@ impl PdfRenderer for NativePdfRenderer {
         let pdf_file = run_dir.join("document.pdf");
         fs::write(&pdf_file, pdf_bytes).map_err(|error| format!("Failed to write PDF: {error}"))?;
 
-        let failure = self
-            .rasterize_with_pdftoppm(&pdf_file, &run_dir, cancel)
-            .or_else(|| self.rasterize_with_sips(&pdf_file, cancel));
+        let failure = if pdftoppm_available() {
+            self.rasterize_with_pdftoppm(&pdf_file, &run_dir, cancel)
+        } else {
+            self.used_fallback
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.rasterize_with_sips(&pdf_file, cancel)
+        };
 
         if let Some(message) = failure {
             return Err(message);
@@ -176,8 +252,36 @@ impl PdfRenderer for NativePdfRenderer {
             })
             .collect::<Result<Vec<_>, String>>()?;
 
+        self.cache_insert(hash, Arc::new(pages.clone()));
         Ok(pages)
     }
+
+    fn render_notice(&self) -> Option<String> {
+        if self
+            .used_fallback
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            Some(
+                "Install poppler (pdftoppm) for a multipage preview. \
+                 Falling back to one page via sips."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+}
+
+fn pdftoppm_available() -> bool {
+    // Command::output reports Ok even for a nonzero exit, which is enough:
+    // only a missing binary results in Err. Cache nothing; poppler may be
+    // installed while the app runs.
+    Command::new("pdftoppm")
+        .arg("-v")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok()
 }
 
 fn page_numbers_in(run_dir: &Path) -> Result<Vec<u32>, String> {
@@ -308,5 +412,83 @@ Page three.
         std::fs::write(&path, b"definitely not a png").expect("write file");
 
         assert!(png_dimensions(&path).is_err());
+    }
+
+    #[test]
+    fn identical_pdf_is_rasterized_once() {
+        let engine = TectonicEngine::new();
+        let request = CompileRequest::simple(
+            r#"\documentclass{article}\begin{document}Raster Cache\end{document}"#,
+            1,
+        );
+        let compile_output = engine.compile(request).expect("compile must succeed");
+        let bytes = compile_output.artifact;
+
+        let renderer = NativePdfRenderer::new();
+        let first = renderer
+            .render_document(1, &bytes, None)
+            .expect("first render");
+        // Different render id, same bytes: must hit the cache and return the
+        // same page images.
+        let second = renderer
+            .render_document(2, &bytes, None)
+            .expect("cached render");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cache_evicts_beyond_capacity() {
+        let engine = TectonicEngine::new();
+        let request = CompileRequest::simple(
+            r#"\documentclass{article}\begin{document}Evict\end{document}"#,
+            1,
+        );
+        let compile_output = engine.compile(request).expect("compile must succeed");
+        let bytes = compile_output.artifact;
+
+        let renderer = NativePdfRenderer::new();
+        renderer.render_document(1, &bytes, None).expect("render");
+        // Push RASTER_CACHE_CAPACITY + 1 distinct PDFs through; the original
+        // entry must fall out. Padding byte suffixes keep hashes distinct...
+        // but PDF validity requires the header only, so vary the tail.
+        for id in 0..RASTER_CACHE_CAPACITY + 1 {
+            let mut variant = Vec::with_capacity(bytes.len() + 1);
+            variant.extend_from_slice(&bytes);
+            variant.push(id as u8);
+            renderer
+                .render_document(100 + id as u64, &variant, None)
+                .expect("render variant");
+        }
+
+        let mut cache = renderer
+            .raster_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(cache.make_contiguous().len(), RASTER_CACHE_CAPACITY);
+    }
+
+    #[test]
+    fn cache_hit_validates_images_exist() {
+        let engine = TectonicEngine::new();
+        let request = CompileRequest::simple(
+            r#"\documentclass{article}\begin{document}Missing Files\end{document}"#,
+            1,
+        );
+        let compile_output = engine.compile(request).expect("compile must succeed");
+        let bytes = compile_output.artifact;
+
+        let renderer = NativePdfRenderer::new();
+        renderer.render_document(1, &bytes, None).expect("render");
+        // Simulate the cache dir being reclaimed under us.
+        let run = renderer.cache_dir.path().join("render_1");
+        let _ = std::fs::remove_dir_all(&run);
+        let result = renderer.render_document(2, &bytes, None);
+        assert!(result.is_ok(), "re-render after eviction must succeed");
+    }
+
+    #[test]
+    fn hash_distinguishes_prefix_lengths() {
+        assert_ne!(hash_pdf_bytes(b"%PDF-x"), hash_pdf_bytes(b"%PDF-"));
+        assert_eq!(hash_pdf_bytes(b"same"), hash_pdf_bytes(b"same"));
     }
 }

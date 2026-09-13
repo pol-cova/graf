@@ -133,6 +133,21 @@ impl Workspace {
                         return;
                     }
 
+                    // A cancel triggered between the accept check and now
+                    // means a newer edit arrived; abort the raster too.
+                    let render_cancelled = this
+                        .update(cx, |this, _| {
+                            this.compile_cancel
+                                .as_ref()
+                                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
+                        })
+                        .unwrap_or(true);
+                    if render_cancelled {
+                        this.update(cx, |this, cx| this.finish_compile(cx))
+                            .ok();
+                        return;
+                    }
+
                     let (output, render_result) = cx
                         .background_executor()
                         .spawn(async move {
@@ -172,8 +187,9 @@ impl Workspace {
                         });
 
                         if let Ok(pages) = render_result {
+                            let notice = this.pdf_renderer.render_notice();
                             this.preview.update(cx, |preview, cx| {
-                                preview.set_rendered_pages(pages, cx);
+                                preview.set_rendered_pages(pages, notice, cx);
                             });
                         }
                         this.finish_compile(cx);
