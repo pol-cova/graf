@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -53,11 +54,15 @@ impl CompileRequest {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Shared, immutable compiled artifact bytes. `Arc` lets the PDF travel from
+/// the compiler through rendering without any byte-copying clones.
+pub type ArtifactBytes = Arc<[u8]>;
+
+#[derive(Debug)]
 pub struct CompileOutput {
     pub compile_id: CompileId,
     pub revision: u64,
-    pub artifact: Vec<u8>,
+    pub artifact: ArtifactBytes,
     pub artifact_kind: ArtifactKind,
     pub diagnostics: Vec<Diagnostic>,
     pub duration: Duration,

@@ -173,6 +173,7 @@ mod tests {
     use super::*;
     use crate::compiler::diagnostics::{DiagnosticSource, Severity};
     use crate::compiler::engine::ArtifactKind;
+    use std::sync::Arc;
 
     #[test]
     fn test_initial_state() {
@@ -191,7 +192,7 @@ mod tests {
             .handle_output(&CompileOutput {
                 compile_id: CompileId(1),
                 revision: 7,
-                artifact: b"pdf".to_vec(),
+                artifact: Arc::from(&b"pdf"[..]),
                 artifact_kind: ArtifactKind::Pdf,
                 diagnostics: vec![],
                 duration: Duration::from_millis(1),
@@ -249,7 +250,7 @@ mod tests {
         let output = CompileOutput {
             compile_id: CompileId(10),
             revision: 1,
-            artifact: b"%PDF-1.5 test content".to_vec(),
+            artifact: Arc::from(&b"%PDF-1.5 test content"[..]),
             artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(45),
@@ -277,7 +278,7 @@ mod tests {
         let result = controller.handle_output(&CompileOutput {
             compile_id: CompileId(1),
             revision: 7,
-            artifact: b"old document".to_vec(),
+            artifact: Arc::from(&b"old document"[..]),
             artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(1),
@@ -311,7 +312,7 @@ mod tests {
         let output_rev1 = CompileOutput {
             compile_id: CompileId(1),
             revision: 1,
-            artifact: b"stale pdf".to_vec(),
+            artifact: Arc::from(&b"stale pdf"[..]),
             artifact_kind: ArtifactKind::Pdf,
             diagnostics: vec![],
             duration: Duration::from_millis(20),

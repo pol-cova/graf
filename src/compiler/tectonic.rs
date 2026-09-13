@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
@@ -171,13 +172,15 @@ impl DocumentEngine for TectonicEngine {
         let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 
         if output.status.success() && !has_errors && output_pdf.exists() {
-            let artifact = fs::read(&output_pdf).map_err(|err| CompileError {
-                compile_id,
-                revision,
-                diagnostics: diagnostics.clone(),
-                message: format!("Failed to read compiled PDF output: {err}"),
-                duration,
-            })?;
+            let artifact: Arc<[u8]> = fs::read(&output_pdf)
+                .map_err(|err| CompileError {
+                    compile_id,
+                    revision,
+                    diagnostics: diagnostics.clone(),
+                    message: format!("Failed to read compiled PDF output: {err}"),
+                    duration,
+                })?
+                .into();
 
             Ok(CompileOutput {
                 compile_id,
