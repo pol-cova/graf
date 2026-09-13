@@ -2,3 +2,7 @@
 .docs/
 docs/
 *.trace/
+/vendor/
+/.graf/
+/output/
+/tmp/

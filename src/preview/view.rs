@@ -1,4 +1,6 @@
-use gpui::{Context, IntoElement, Render, Window, div, img, prelude::*, px};
+use gpui::{
+    Context, ImgResourceLoader, IntoElement, Render, Resource, Window, div, img, prelude::*, px,
+};
 
 use super::renderer::RenderedPage;
 use crate::ui::icons::{Icon, icon};
@@ -30,6 +32,7 @@ impl PreviewView {
     }
 
     pub fn set_rendered_pages(&mut self, pages: Vec<RenderedPage>, cx: &mut Context<Self>) {
+        self.release_page_assets(cx);
         self.pages = pages;
         self.is_retained_stale = false;
         self.is_rendering = false;
@@ -45,6 +48,7 @@ impl PreviewView {
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.release_page_assets(cx);
         self.pages.clear();
         self.is_retained_stale = false;
         self.is_rendering = false;
@@ -55,6 +59,15 @@ impl PreviewView {
     pub fn set_rendering(&mut self, cx: &mut Context<Self>) {
         self.is_rendering = true;
         cx.notify();
+    }
+
+    /// GPUI retains every decoded image in its asset cache for the life of the
+    /// app, and each compile writes new page paths. Drop the assets of pages
+    /// this preview is replacing, or every render stays in memory forever.
+    fn release_page_assets(&self, cx: &mut Context<Self>) {
+        for page in &self.pages {
+            cx.remove_asset::<ImgResourceLoader>(&Resource::Path(page.image_path.clone().into()));
+        }
     }
 
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {

@@ -22,6 +22,18 @@ mkdir -p "${RESOURCES_DIR}"
 cp "target/release/graf" "${MACOS_DIR}/graf"
 chmod +x "${MACOS_DIR}/graf"
 
+COMPILERS_BIN="vendor/compilers/bin"
+if [[ ! -x "${COMPILERS_BIN}/tectonic" || ! -x "${COMPILERS_BIN}/typst" ]]; then
+    echo "Fetching bundled compiler backends..."
+    bash scripts/fetch_compilers.sh
+fi
+
+echo "Copying bundled compiler backends..."
+mkdir -p "${RESOURCES_DIR}/bin"
+cp "${COMPILERS_BIN}/tectonic" "${COMPILERS_BIN}/typst" "${RESOURCES_DIR}/bin/"
+chmod +x "${RESOURCES_DIR}/bin/tectonic" "${RESOURCES_DIR}/bin/typst"
+cp -R "bundle/licenses" "${RESOURCES_DIR}/bin/LICENSES"
+
 cp "bundle/Info.plist" "${CONTENTS_DIR}/Info.plist"
 cp "bundle/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${VERSION}" "${CONTENTS_DIR}/Info.plist"

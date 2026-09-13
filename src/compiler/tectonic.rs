@@ -1,14 +1,29 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use log::{info, warn};
 
 use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
 use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
+use super::resolve::{EngineSource, ResolvedEngine, resolve};
+
+const TECTONIC_COMMON_PATHS: &[&str] = &[
+    "/opt/homebrew/bin/tectonic",
+    "/usr/local/bin/tectonic",
+    "/usr/bin/tectonic",
+];
+
+const WARM_UP_SOURCE: &str =
+    "\\documentclass{article}\n\\begin{document}\nWarm-up.\n\\end{document}\n";
+
+const KEEP_JOB_DIRS: usize = 2;
+const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
 pub struct TectonicEngine {
-    executable: PathBuf,
-    build_dir: PathBuf,
+    resolved: Option<ResolvedEngine>,
+    build_dir: crate::util::TemporarySessionDir,
 }
 
 impl Default for TectonicEngine {
@@ -19,29 +34,70 @@ impl Default for TectonicEngine {
 
 impl TectonicEngine {
     pub fn new() -> Self {
-        let executable = which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic"));
-        let build_dir = std::env::temp_dir().join("graf_tectonic_session");
+        let resolved = resolve("tectonic", "GRAF_TECTONIC_PATH", TECTONIC_COMMON_PATHS);
+        match &resolved {
+            Some(engine) => info!(
+                "tectonic: {} engine at {}",
+                engine.source,
+                engine.path.display()
+            ),
+            None => info!("tectonic: no engine found"),
+        }
+        let build_dir = crate::util::TemporarySessionDir::new("graf_tectonic");
         Self {
-            executable,
+            resolved,
             build_dir,
         }
     }
 
     pub fn with_paths(executable: impl Into<PathBuf>, build_dir: impl Into<PathBuf>) -> Self {
         Self {
-            executable: executable.into(),
-            build_dir: build_dir.into(),
+            resolved: Some(ResolvedEngine {
+                path: executable.into(),
+                source: EngineSource::System,
+            }),
+            build_dir: crate::util::TemporarySessionDir::from_path(build_dir.into()),
         }
     }
 }
 
 impl DocumentEngine for TectonicEngine {
+    fn warm_up(&self) {
+        let Some(engine) = &self.resolved else {
+            info!("tectonic warm-up skipped: no engine found");
+            return;
+        };
+        let request = CompileRequest::simple(WARM_UP_SOURCE, 0);
+        match self.compile(request) {
+            Ok(_) => info!("tectonic warm-up finished ({})", engine.source),
+            Err(error) => warn!("tectonic warm-up failed: {}", error.message),
+        }
+    }
+
     fn compile(&self, request: CompileRequest) -> Result<CompileOutput, CompileError> {
         let start = Instant::now();
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let build_path = self.build_dir.join(format!("job_{}", compile_id.0));
+        let Some(engine) = &self.resolved else {
+            let message = "Tectonic is not installed or configured".to_string();
+            return Err(CompileError {
+                compile_id,
+                revision,
+                diagnostics: vec![Diagnostic::new(
+                    1,
+                    Severity::Error,
+                    DiagnosticSource::Tectonic,
+                    request.root_document.clone(),
+                    None,
+                    message.clone(),
+                )],
+                message,
+                duration: start.elapsed(),
+            });
+        };
+
+        let build_path = self.build_dir.path().join(format!("job_{}", compile_id.0));
         fs::create_dir_all(&build_path).map_err(|err| CompileError {
             compile_id,
             revision,
@@ -49,6 +105,14 @@ impl DocumentEngine for TectonicEngine {
             message: format!("Failed to create build directory: {err}"),
             duration: start.elapsed(),
         })?;
+        // One directory per compile with kept intermediates adds up over a
+        // session. Age-guarded pruning leaves in-flight compiles alone.
+        crate::util::prune_numbered_dirs(
+            self.build_dir.path(),
+            "job_",
+            KEEP_JOB_DIRS,
+            PRUNE_MIN_IDLE,
+        );
 
         let (input_file, cwd, output_pdf_name) = if let Some(root_doc) = &request.root_document {
             let file_stem = root_doc
@@ -72,20 +136,31 @@ impl DocumentEngine for TectonicEngine {
 
         let output_pdf = build_path.join(output_pdf_name);
 
-        let output = Command::new(&self.executable)
+        let mut command = Command::new(&engine.path);
+        command
             .arg("--keep-intermediates")
             .arg("-o")
             .arg(&build_path)
             .arg(&input_file)
-            .current_dir(cwd)
-            .output()
-            .map_err(|err| CompileError {
-                compile_id,
-                revision,
-                diagnostics: Vec::new(),
-                message: format!("Failed to execute tectonic: {err}"),
-                duration: start.elapsed(),
-            })?;
+            .current_dir(cwd);
+        // Tectonic resolves \includegraphics and \input relative to the input
+        // file's directory. Also search the project root so assets referenced
+        // from nested documents resolve.
+        if let Some(root) = request.project_root.as_deref() {
+            command
+                .arg("-Z")
+                .arg(format!("search-path={}", root.display()));
+        }
+        if let Some(cache_dir) = support_cache_dir() {
+            command.env("TECTONIC_CACHE_DIR", cache_dir);
+        }
+        let output = command.output().map_err(|err| CompileError {
+            compile_id,
+            revision,
+            diagnostics: Vec::new(),
+            message: format!("Failed to execute tectonic: {err}"),
+            duration: start.elapsed(),
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -155,15 +230,22 @@ impl DocumentEngine for TectonicEngine {
     }
 }
 
-fn which_tectonic() -> Option<PathBuf> {
-    [
-        "/opt/homebrew/bin/tectonic",
-        "/usr/local/bin/tectonic",
-        "/usr/bin/tectonic",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .find(|p| p.exists())
+/// Tectonic downloads TeX support files on demand into a cache directory. Its
+/// macOS default, ~/Library/Caches/Tectonic, reads as disposable, and a wiped
+/// cache forces a full re-download on the next compile. Keep the cache in
+/// Application Support instead. An explicit TECTONIC_CACHE_DIR wins.
+fn support_cache_dir() -> Option<PathBuf> {
+    support_cache_dir_with(
+        std::env::var_os("TECTONIC_CACHE_DIR").is_some(),
+        crate::util::home_dir().as_deref(),
+    )
+}
+
+fn support_cache_dir_with(user_override: bool, home: Option<&Path>) -> Option<PathBuf> {
+    if user_override {
+        return None;
+    }
+    Some(PathBuf::from(home?).join("Library/Application Support/graf/compilers/tectonic-cache"))
 }
 
 pub fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
@@ -220,14 +302,51 @@ pub fn parse_tectonic_diagnostics(log: &str) -> Vec<Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::engine::test_assets;
+    use std::path::Path;
+
+    fn local_tectonic() -> Option<PathBuf> {
+        resolve("tectonic", "GRAF_TECTONIC_PATH", TECTONIC_COMMON_PATHS).map(|engine| engine.path)
+    }
+
+    #[test]
+    fn support_cache_dir_lands_in_application_support() {
+        let dir = support_cache_dir_with(false, Some(Path::new("/Users/someone"))).unwrap();
+        assert_eq!(
+            dir,
+            PathBuf::from(
+                "/Users/someone/Library/Application Support/graf/compilers/tectonic-cache"
+            )
+        );
+        assert!(support_cache_dir_with(true, Some(Path::new("/Users/someone"))).is_none());
+        assert!(support_cache_dir_with(false, None).is_none());
+    }
+
+    #[test]
+    fn reports_when_tectonic_is_unavailable() {
+        let directory = tempfile::tempdir().unwrap();
+        let engine = TectonicEngine {
+            resolved: None,
+            build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
+        };
+        let request = CompileRequest::simple("\\documentclass{article}", 1);
+        let compile_id = request.compile_id;
+
+        let error = engine.compile(request).unwrap_err();
+
+        assert_eq!(error.compile_id, compile_id);
+        assert_eq!(error.message, "Tectonic is not installed or configured");
+        assert_eq!(error.diagnostics.len(), 1);
+    }
 
     #[test]
     fn test_tectonic_compile_valid_latex() {
         let temp = tempfile::tempdir().unwrap();
-        let engine = TectonicEngine::with_paths(
-            which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic")),
-            temp.path(),
-        );
+        let Some(executable) = local_tectonic() else {
+            eprintln!("tectonic not installed; skipping");
+            return;
+        };
+        let engine = TectonicEngine::with_paths(executable, temp.path());
         let source = r#"\documentclass{article}
 \begin{document}
 Hello from Tectonic Engine Test.
@@ -251,10 +370,11 @@ Hello from Tectonic Engine Test.
     #[test]
     fn test_tectonic_compile_invalid_latex() {
         let temp = tempfile::tempdir().unwrap();
-        let engine = TectonicEngine::with_paths(
-            which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic")),
-            temp.path(),
-        );
+        let Some(executable) = local_tectonic() else {
+            eprintln!("tectonic not installed; skipping");
+            return;
+        };
+        let engine = TectonicEngine::with_paths(executable, temp.path());
         let source = r#"\documentclass{article}
 \begin{document}
 \nonexistentcommandhere
@@ -275,6 +395,48 @@ Hello from Tectonic Engine Test.
             .iter()
             .any(|d| d.severity == Severity::Error);
         assert!(has_error_diag);
+    }
+
+    #[test]
+    fn test_tectonic_compile_with_image() {
+        // Skip rather than fail on machines without tectonic; CI installs it.
+        let Some(executable) = local_tectonic() else {
+            eprintln!("tectonic not installed; skipping image test");
+            return;
+        };
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir_all(project.path().join("chapters")).unwrap();
+        fs::create_dir_all(project.path().join("assets")).unwrap();
+        fs::write(
+            project.path().join("assets/img.png"),
+            test_assets::ONE_BY_ONE_PNG,
+        )
+        .unwrap();
+        let main_tex = project.path().join("chapters/main.tex");
+        fs::write(
+            &main_tex,
+            r#"\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+Image: \includegraphics{assets/img.png}
+\end{document}
+"#,
+        )
+        .unwrap();
+
+        let temp_build = tempfile::tempdir().unwrap();
+        let engine = TectonicEngine::with_paths(executable, temp_build.path());
+        let request = CompileRequest::with_project(
+            fs::read_to_string(&main_tex).unwrap(),
+            1,
+            Some(project.path().to_path_buf()),
+            Some(main_tex),
+        );
+
+        let output = engine
+            .compile(request)
+            .expect("compile with project asset should succeed");
+        assert!(output.artifact.starts_with(b"%PDF-"));
     }
 
     #[test]
@@ -301,10 +463,11 @@ Hello from Tectonic Engine Test.
         )
         .unwrap();
 
-        let engine = TectonicEngine::with_paths(
-            which_tectonic().unwrap_or_else(|| PathBuf::from("tectonic")),
-            temp_build.path(),
-        );
+        let Some(executable) = local_tectonic() else {
+            eprintln!("tectonic not installed; skipping");
+            return;
+        };
+        let engine = TectonicEngine::with_paths(executable, temp_build.path());
 
         let request = CompileRequest::with_project(
             fs::read_to_string(&main_tex).unwrap(),

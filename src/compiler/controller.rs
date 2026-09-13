@@ -117,15 +117,19 @@ impl CompilerController {
         self.state = CompileState::Compiling { id, revision };
     }
 
+    pub fn accepts_result(&self, id: CompileId, revision: u64) -> bool {
+        revision >= self.current_revision
+            && matches!(
+                self.state,
+                CompileState::Compiling {
+                    id: active_id,
+                    revision: active_revision,
+                } if active_id == id && active_revision == revision
+            )
+    }
+
     fn reject_if_stale(&mut self, id: CompileId, revision: u64) -> Result<(), StaleResult> {
-        let is_active_compile = matches!(
-            self.state,
-            CompileState::Compiling {
-                id: active_id,
-                revision: active_revision,
-            } if active_id == id && active_revision == revision
-        );
-        if revision < self.current_revision || !is_active_compile {
+        if !self.accepts_result(id, revision) {
             if let CompileState::Compiling { id: active_id, .. } = self.state
                 && active_id == id
             {
@@ -140,7 +144,7 @@ impl CompilerController {
         }
     }
 
-    pub fn handle_output(&mut self, output: CompileOutput) -> Result<(), StaleResult> {
+    pub fn handle_output(&mut self, output: &CompileOutput) -> Result<(), StaleResult> {
         self.reject_if_stale(output.compile_id, output.revision)?;
 
         self.state = CompileState::Success {
@@ -184,7 +188,7 @@ mod tests {
         controller.on_source_edited(7);
         controller.begin_compile(CompileId(1), 7);
         controller
-            .handle_output(CompileOutput {
+            .handle_output(&CompileOutput {
                 compile_id: CompileId(1),
                 revision: 7,
                 artifact: b"pdf".to_vec(),
@@ -207,6 +211,16 @@ mod tests {
         controller.begin_compile(CompileId(1), 4);
 
         assert_eq!(controller.current_revision(), 4);
+    }
+
+    #[test]
+    fn result_is_current_only_for_active_revision() {
+        let mut controller = CompilerController::new();
+        controller.begin_compile(CompileId(4), 7);
+        assert!(controller.accepts_result(CompileId(4), 7));
+
+        controller.on_source_edited(8);
+        assert!(!controller.accepts_result(CompileId(4), 7));
     }
 
     #[test]
@@ -241,7 +255,7 @@ mod tests {
             duration: Duration::from_millis(45),
         };
 
-        let res = controller.handle_output(output);
+        let res = controller.handle_output(&output);
         assert!(res.is_ok());
         assert_eq!(
             controller.state(),
@@ -260,7 +274,7 @@ mod tests {
         controller.reset();
         controller.begin_compile(CompileId(2), 0);
 
-        let result = controller.handle_output(CompileOutput {
+        let result = controller.handle_output(&CompileOutput {
             compile_id: CompileId(1),
             revision: 7,
             artifact: b"old document".to_vec(),
@@ -303,7 +317,7 @@ mod tests {
             duration: Duration::from_millis(20),
         };
 
-        let res = controller.handle_output(output_rev1);
+        let res = controller.handle_output(&output_rev1);
         assert_eq!(
             res,
             Err(StaleResult {

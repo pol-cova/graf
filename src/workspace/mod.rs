@@ -162,6 +162,8 @@ pub struct Workspace {
     pub(crate) settings: GrafSettings,
     pub(crate) controller: CompilerController,
     pub(crate) compile_task: Option<Task<()>>,
+    pub(crate) compile_running: bool,
+    pub(crate) compile_pending: bool,
     pub(crate) show_welcome: bool,
     pub(crate) sidebar_visible: bool,
     pub(crate) sidebar_tab: SidebarTab,
@@ -229,6 +231,13 @@ impl Workspace {
         let preview = cx.new(|_cx| PreviewView::new());
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
+
+        // Prime the Tectonic support-file cache in the background so the
+        // first user compile is not the one waiting on downloads.
+        let warm_up_engine = tectonic_compiler.clone();
+        cx.background_executor()
+            .spawn(async move { warm_up_engine.warm_up() })
+            .detach();
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
         let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_provider(&settings.ai);
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
@@ -276,6 +285,8 @@ impl Workspace {
             settings,
             controller,
             compile_task: None,
+            compile_running: false,
+            compile_pending: false,
             show_welcome,
             sidebar_visible: true,
             sidebar_tab: SidebarTab::Files,

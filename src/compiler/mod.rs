@@ -5,6 +5,8 @@ pub mod diagnostics;
 #[allow(dead_code)]
 pub mod engine;
 #[allow(dead_code)]
+pub mod resolve;
+#[allow(dead_code)]
 pub mod tectonic;
 #[allow(dead_code)]
 pub mod typst;

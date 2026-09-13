@@ -7,7 +7,6 @@ pub struct DiagnosticId(pub u64);
 pub enum Severity {
     Error,
     Warning,
-    Information,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +14,6 @@ pub enum DiagnosticSource {
     Tectonic,
     Typst,
     Parser,
-    Ai,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

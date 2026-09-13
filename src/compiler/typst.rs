@@ -4,14 +4,24 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use log::info;
+
 use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
 use super::engine::{ArtifactKind, CompileError, CompileOutput, CompileRequest, DocumentEngine};
+use super::resolve::{ResolvedEngine, resolve};
+
+const TYPST_COMMON_PATHS: &[&str] = &[
+    "/opt/homebrew/bin/typst",
+    "/usr/local/bin/typst",
+    "/usr/bin/typst",
+    "~/.cargo/bin/typst",
+];
 
 static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct TypstEngine {
-    executable: Option<PathBuf>,
-    build_dir: PathBuf,
+    resolved: Option<ResolvedEngine>,
+    build_dir: crate::util::TemporarySessionDir,
 }
 
 impl Default for TypstEngine {
@@ -22,10 +32,18 @@ impl Default for TypstEngine {
 
 impl TypstEngine {
     pub fn new() -> Self {
-        let executable = which_typst();
-        let build_dir = std::env::temp_dir().join("graf_typst_session");
+        let resolved = resolve("typst", "GRAF_TYPST_PATH", TYPST_COMMON_PATHS);
+        match &resolved {
+            Some(engine) => info!(
+                "typst: {} engine at {}",
+                engine.source,
+                engine.path.display()
+            ),
+            None => info!("typst: no engine found"),
+        }
+        let build_dir = crate::util::TemporarySessionDir::new("graf_typst");
         Self {
-            executable,
+            resolved,
             build_dir,
         }
     }
@@ -37,7 +55,25 @@ impl DocumentEngine for TypstEngine {
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let build_path = self.build_dir.join(format!("job_{}", compile_id.0));
+        let Some(engine) = &self.resolved else {
+            let message = "Typst is not installed or configured".to_string();
+            return Err(CompileError {
+                compile_id,
+                revision,
+                diagnostics: vec![Diagnostic {
+                    id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
+                    severity: Severity::Error,
+                    source: DiagnosticSource::Typst,
+                    message: message.clone(),
+                    file: request.root_document.clone(),
+                    line: None,
+                }],
+                message,
+                duration: start.elapsed(),
+            });
+        };
+
+        let build_path = self.build_dir.path().join(format!("job_{}", compile_id.0));
         fs::create_dir_all(&build_path).map_err(|err| CompileError {
             compile_id,
             revision,
@@ -68,39 +104,27 @@ impl DocumentEngine for TypstEngine {
 
         let output_pdf = build_path.join(&output_pdf_name);
 
-        let Some(executable) = &self.executable else {
-            let message = "Typst is not installed or configured".to_string();
-            return Err(CompileError {
-                compile_id,
-                revision,
-                diagnostics: vec![Diagnostic {
-                    id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
-                    severity: Severity::Error,
-                    source: DiagnosticSource::Typst,
-                    message: message.clone(),
-                    file: request.root_document,
-                    line: None,
-                }],
-                message,
-                duration: start.elapsed(),
-            });
-        };
-
-        let output = Command::new(executable)
+        let mut command = Command::new(&engine.path);
+        command
             .arg("compile")
             .arg(&input_file)
             .arg(&output_pdf)
             .arg("--diagnostic-format")
             .arg("short")
-            .current_dir(cwd)
-            .output()
-            .map_err(|error| CompileError {
-                compile_id,
-                revision,
-                diagnostics: Vec::new(),
-                message: format!("Failed to execute Typst: {error}"),
-                duration: start.elapsed(),
-            })?;
+            .current_dir(cwd);
+        // Typst resolves image paths relative to the input file and refuses to
+        // read outside its project root. Widening the root to the project lets
+        // documents in subfolders reference project-level assets.
+        if let Some(root) = request.project_root.as_deref() {
+            command.arg("--root").arg(root);
+        }
+        let output = command.output().map_err(|error| CompileError {
+            compile_id,
+            revision,
+            diagnostics: Vec::new(),
+            message: format!("Failed to execute Typst: {error}"),
+            duration: start.elapsed(),
+        })?;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -137,52 +161,6 @@ impl DocumentEngine for TypstEngine {
             duration: start.elapsed(),
         })
     }
-}
-
-pub fn which_typst() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("GRAF_TYPST_PATH") {
-        let p = PathBuf::from(path);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-
-    if let Ok(output) = Command::new("which").arg("typst").output()
-        && output.status.success()
-    {
-        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path_str.is_empty() {
-            let p = PathBuf::from(path_str);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-
-    let common_paths = [
-        "/opt/homebrew/bin/typst",
-        "/usr/local/bin/typst",
-        "/usr/bin/typst",
-        "~/.cargo/bin/typst",
-    ];
-
-    for path in common_paths {
-        let expanded = if let Some(stripped) = path.strip_prefix("~/") {
-            if let Ok(home) = std::env::var("HOME") {
-                PathBuf::from(home).join(stripped)
-            } else {
-                PathBuf::from(path)
-            }
-        } else {
-            PathBuf::from(path)
-        };
-
-        if expanded.is_file() {
-            return Some(expanded);
-        }
-    }
-
-    None
 }
 
 pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
@@ -233,6 +211,8 @@ pub fn parse_typst_diagnostics(output: &str) -> Vec<Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::resolve::EngineSource;
+
     use std::path::Path;
 
     #[test]
@@ -255,11 +235,52 @@ warning: variable 'x' is never used
     }
 
     #[test]
+    fn test_typst_compile_with_image() {
+        // Skip rather than fail on machines without typst; CI does not install it.
+        let Some(executable) =
+            resolve("typst", "GRAF_TYPST_PATH", TYPST_COMMON_PATHS).map(|engine| engine.path)
+        else {
+            eprintln!("typst not installed; skipping image test");
+            return;
+        };
+        let project = tempfile::tempdir().unwrap();
+        fs::create_dir_all(project.path().join("chapters")).unwrap();
+        fs::create_dir_all(project.path().join("assets")).unwrap();
+        fs::write(
+            project.path().join("assets/img.png"),
+            crate::compiler::engine::test_assets::ONE_BY_ONE_PNG,
+        )
+        .unwrap();
+        let main_typ = project.path().join("chapters/main.typ");
+        fs::write(&main_typ, "#image(\"../assets/img.png\")\n").unwrap();
+
+        let temp_build = tempfile::tempdir().unwrap();
+        let engine = TypstEngine {
+            resolved: Some(ResolvedEngine {
+                path: executable,
+                source: EngineSource::System,
+            }),
+            build_dir: crate::util::TemporarySessionDir::from_path(temp_build.path()),
+        };
+        let request = CompileRequest::with_project(
+            fs::read_to_string(&main_typ).unwrap(),
+            1,
+            Some(project.path().to_path_buf()),
+            Some(main_typ),
+        );
+
+        let output = engine
+            .compile(request)
+            .expect("compile with project asset should succeed");
+        assert!(output.artifact.starts_with(b"%PDF-"));
+    }
+
+    #[test]
     fn reports_when_typst_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
         let engine = TypstEngine {
-            executable: None,
-            build_dir: directory.path().to_path_buf(),
+            resolved: None,
+            build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
         };
         let request = CompileRequest::simple("= Document", 1);
         let compile_id = request.compile_id;
