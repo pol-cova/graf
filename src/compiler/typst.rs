@@ -1,15 +1,18 @@
-use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use log::info;
 
 use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
 use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
 use super::resolve::{ResolvedEngine, resolve};
+
+/// Intermediates retention, in line with the tectonic backend; both keep the
+/// newest two job dirs when idle for at least a minute.
+const KEEP_JOB_DIRS: usize = 2;
+const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
 const TYPST_COMMON_PATHS: &[&str] = &[
     "/opt/homebrew/bin/typst",
@@ -73,110 +76,63 @@ impl DocumentEngine for TypstEngine {
                 duration: start.elapsed(),
             });
         };
+        let request = &request;
 
-        let build_path = self.build_dir.path().join(format!("job_{}", compile_id.0));
-        fs::create_dir_all(&build_path).map_err(|err| CompileError {
-            compile_id,
-            revision,
-            diagnostics: Vec::new(),
-            message: format!("Failed to create Typst build directory: {err}"),
-            duration: start.elapsed(),
-        })?;
-
-        let (input_file, cwd, output_pdf_name) = if let Some(root_doc) = &request.root_document {
-            let file_stem = root_doc
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("main");
-            let pdf_name = format!("{file_stem}.pdf");
-            let cwd = request.project_root.as_deref().unwrap_or(&build_path);
-            (root_doc.clone(), cwd, pdf_name)
-        } else {
-            let input_file = build_path.join("document.typ");
-            fs::write(&input_file, &request.source).map_err(|err| CompileError {
-                compile_id,
-                revision,
-                diagnostics: Vec::new(),
-                message: format!("Failed to write Typst source: {err}"),
-                duration: start.elapsed(),
-            })?;
-            (input_file, build_path.as_path(), "document.pdf".to_string())
+        let identity = super::engine::EngineIdentity {
+            label: "Typst",
+            diagnostic_source: DiagnosticSource::Typst,
         };
-
-        let output_pdf = build_path.join(&output_pdf_name);
+        let job = super::engine::prepare_job(
+            &super::engine::JobDirs {
+                build_root: &self.build_dir,
+                keep_dirs: KEEP_JOB_DIRS,
+                prune_min_idle: PRUNE_MIN_IDLE,
+            },
+            request,
+            "document",
+            "typ",
+            identity,
+        )?;
 
         let mut command = Command::new(&engine.path);
         command
             .arg("compile")
-            .arg(&input_file)
-            .arg(&output_pdf)
+            .arg(&job.input_file)
+            .arg(&job.output_pdf)
             .arg("--diagnostic-format")
             .arg("short")
-            .current_dir(cwd);
+            .current_dir(&job.cwd);
         // Typst resolves image paths relative to the input file and refuses to
         // read outside its project root. Widening the root to the project lets
         // documents in subfolders reference project-level assets.
         if let Some(root) = request.project_root.as_deref() {
             command.arg("--root").arg(root);
         }
-        let result = super::engine::run_with_cancel(command, request.cancel.as_ref());
-        let output = match result {
-            Ok(Ok(output)) => output,
-            Ok(Err(_)) => {
-                return Err(CompileError {
-                    compile_id,
-                    revision,
-                    diagnostics: Vec::new(),
-                    message: "Compile cancelled by a newer edit".to_string(),
-                    duration: start.elapsed(),
-                });
-            }
-            Err(err) => {
-                return Err(CompileError {
-                    compile_id,
-                    revision,
-                    diagnostics: Vec::new(),
-                    message: format!("Failed to execute Typst: {err}"),
-                    duration: start.elapsed(),
-                });
-            }
-        };
+
+        let output = super::engine::run_compile_subprocess(command, request, start, identity)?;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let diagnostics = parse_typst_diagnostics_from_streams(stderr.lines(), stdout.lines());
 
-        if !output.status.success() || !output_pdf.exists() {
-            return Err(CompileError {
-                compile_id,
-                revision,
+        // Same success predicate as tectonic (a previously divergent rule:
+        // typst used to accept error-grade diagnostics whenever the file
+        // existed); one shared finalize_output keeps both engines aligned.
+        super::engine::finalize_output(
+            request,
+            &job,
+            start,
+            identity,
+            super::engine::RunOutcome {
+                status: output.status,
                 diagnostics,
-                message: if stderr.trim().is_empty() {
-                    "Typst compilation failed".to_string()
+                raw_failure_message: if stderr.trim().is_empty() {
+                    None
                 } else {
-                    stderr.trim().to_string()
+                    Some(stderr.trim().to_string())
                 },
-                duration: start.elapsed(),
-            });
-        }
-
-        let artifact: Arc<[u8]> = fs::read(&output_pdf)
-            .map_err(|error| CompileError {
-                compile_id,
-                revision,
-                diagnostics: diagnostics.clone(),
-                message: format!("Failed to read Typst PDF output: {error}"),
-                duration: start.elapsed(),
-            })?
-            .into();
-
-        Ok(CompileOutput {
-            compile_id,
-            revision,
-            artifact,
-            diagnostics,
-            duration: start.elapsed(),
-        })
+            },
+        )
     }
 }
 
@@ -244,6 +200,7 @@ pub fn parse_typst_diagnostics_from_streams<'a>(
 mod tests {
     use super::*;
     use crate::compiler::resolve::EngineSource;
+    use std::fs;
 
     use std::path::Path;
 

@@ -1,7 +1,5 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
@@ -99,56 +97,34 @@ impl DocumentEngine for TectonicEngine {
                 duration: start.elapsed(),
             });
         };
-
-        let build_path = self.build_dir.path().join(format!("job_{}", compile_id.0));
-        fs::create_dir_all(&build_path).map_err(|err| CompileError {
-            compile_id,
-            revision,
-            diagnostics: Vec::new(),
-            message: format!("Failed to create build directory: {err}"),
-            duration: start.elapsed(),
-        })?;
-        // One directory per compile with kept intermediates adds up over a
-        // session. Age-guarded pruning leaves in-flight compiles alone.
-        crate::util::prune_numbered_dirs(
-            self.build_dir.path(),
-            "job_",
-            KEEP_JOB_DIRS,
-            PRUNE_MIN_IDLE,
-        );
-
-        let (input_file, cwd, output_pdf_name) = if let Some(root_doc) = &request.root_document {
-            let file_stem = root_doc
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("input");
-            let pdf_name = format!("{file_stem}.pdf");
-            let cwd = request.project_root.as_deref().unwrap_or(&build_path);
-            (root_doc.clone(), cwd, pdf_name)
-        } else {
-            let input_file = build_path.join("input.tex");
-            fs::write(&input_file, &request.source).map_err(|err| CompileError {
-                compile_id,
-                revision,
-                diagnostics: Vec::new(),
-                message: format!("Failed to write source to temporary file: {err}"),
-                duration: start.elapsed(),
-            })?;
-            (input_file, build_path.as_path(), "input.pdf".to_string())
+        let request = &request;
+        let identity = super::engine::EngineIdentity {
+            label: "tectonic",
+            diagnostic_source: DiagnosticSource::Tectonic,
         };
 
-        let output_pdf = build_path.join(output_pdf_name);
+        let job = super::engine::prepare_job(
+            &super::engine::JobDirs {
+                build_root: &self.build_dir,
+                keep_dirs: KEEP_JOB_DIRS,
+                prune_min_idle: PRUNE_MIN_IDLE,
+            },
+            request,
+            "input",
+            "tex",
+            identity,
+        )?;
 
         let mut command = Command::new(&engine.path);
         command
             .arg("--keep-intermediates")
             .arg("-o")
-            .arg(&build_path)
-            .arg(&input_file)
-            .current_dir(cwd);
-        // Tectonic resolves \includegraphics and \input relative to the input
-        // file's directory. Also search the project root so assets referenced
-        // from nested documents resolve.
+            .arg(&job.build_path)
+            .arg(&job.input_file)
+            .current_dir(&job.cwd);
+        // Tectonic resolves \includegraphics and \input relative to the
+        // input file's directory. Also search the project root so assets
+        // referenced from nested documents resolve.
         if let Some(root) = request.project_root.as_deref() {
             command
                 .arg("-Z")
@@ -157,94 +133,28 @@ impl DocumentEngine for TectonicEngine {
         if let Some(cache_dir) = support_cache_dir() {
             command.env("TECTONIC_CACHE_DIR", cache_dir);
         }
-        let result = super::engine::run_with_cancel(command, request.cancel.as_ref());
-        let output = match result {
-            Ok(Ok(output)) => output,
-            Ok(Err(_)) => {
-                return Err(CompileError {
-                    compile_id,
-                    revision,
-                    diagnostics: Vec::new(),
-                    message: "Compile cancelled by a newer edit".to_string(),
-                    duration: start.elapsed(),
-                });
-            }
-            Err(err) => {
-                return Err(CompileError {
-                    compile_id,
-                    revision,
-                    diagnostics: Vec::new(),
-                    message: format!("Failed to execute tectonic: {err}"),
-                    duration: start.elapsed(),
-                });
-            }
-        };
+
+        let output = super::engine::run_compile_subprocess(command, request, start, identity)?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-
-        let duration = start.elapsed();
         let diagnostics = parse_tectonic_diagnostics_from_streams(stdout.lines(), stderr.lines());
-        let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
 
-        if output.status.success() && !has_errors && output_pdf.exists() {
-            let artifact: Arc<[u8]> = fs::read(&output_pdf)
-                .map_err(|err| CompileError {
-                    compile_id,
-                    revision,
-                    diagnostics: diagnostics.clone(),
-                    message: format!("Failed to read compiled PDF output: {err}"),
-                    duration,
-                })?
-                .into();
-
-            Ok(CompileOutput {
-                compile_id,
-                revision,
-                artifact,
+        super::engine::finalize_output(
+            request,
+            &job,
+            start,
+            identity,
+            super::engine::RunOutcome {
+                status: output.status,
                 diagnostics,
-                duration,
-            })
-        } else {
-            let error_msg = diagnostics
-                .iter()
-                .filter(|d| d.severity == Severity::Error)
-                .map(|d| d.message.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let error_msg = if error_msg.is_empty() {
-                let trimmed = stderr.trim();
-                if trimmed.is_empty() {
-                    "Compilation failed with no error output".to_string()
+                raw_failure_message: if stderr.trim().is_empty() {
+                    Some("Compilation failed with no error output".to_string())
                 } else {
-                    trimmed.to_string()
-                }
-            } else {
-                error_msg
-            };
-
-            let fallback_diagnostics = if diagnostics.is_empty() {
-                vec![Diagnostic::new(
-                    1,
-                    Severity::Error,
-                    DiagnosticSource::Tectonic,
-                    request.root_document,
-                    None,
-                    error_msg.clone(),
-                )]
-            } else {
-                diagnostics
-            };
-
-            Err(CompileError {
-                compile_id,
-                revision,
-                diagnostics: fallback_diagnostics,
-                message: error_msg,
-                duration,
-            })
-        }
+                    Some(stderr.trim().to_string())
+                },
+            },
+        )
     }
 }
 
@@ -340,6 +250,7 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
 mod tests {
     use super::*;
     use crate::compiler::engine::test_assets;
+    use std::fs;
     use std::path::Path;
 
     fn local_tectonic() -> Option<PathBuf> {
