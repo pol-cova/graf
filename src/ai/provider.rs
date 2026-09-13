@@ -160,6 +160,17 @@ impl AiProvider for OpenAiCompatibleProvider {
                 message: format!("AI request failed: {error}"),
             })?;
 
+        // Non-2xx responses carry the API's actual failure reason (bad key,
+        // quota, model unavailable); the status code alone is useless.
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.into_body().read_to_string().unwrap_or_default();
+            let detail = truncate_body_head(body.trim());
+            return Err(AiError {
+                message: format!("AI request failed with HTTP {status}: {detail}"),
+            });
+        }
+
         let completion: ChatCompletionResponse =
             response.into_body().read_json().map_err(|error| AiError {
                 message: format!("Failed to parse AI response: {error}"),
@@ -270,6 +281,20 @@ impl AiProvider for DisabledAiProvider {
             message: "AI is disabled in settings".to_string(),
         })
     }
+}
+
+/// Keeps at most `max` bytes of an error body without splitting a
+/// multi-byte character.
+fn truncate_body_head(body: &str) -> &str {
+    const MAX_BODY_HEAD: usize = 800;
+    if body.len() <= MAX_BODY_HEAD {
+        return body;
+    }
+    let mut end = MAX_BODY_HEAD;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    &body[..end]
 }
 
 pub fn create_provider(settings: &AiSettings) -> Arc<dyn AiProvider> {
