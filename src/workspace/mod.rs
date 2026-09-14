@@ -1,21 +1,27 @@
 mod actions;
 mod commands;
 mod compilation;
+mod completions;
 mod diagnostics;
 mod documents;
 mod editor_panel;
+mod exports;
 mod find_bar;
+mod layout;
+mod lint;
 mod modals;
+mod new_documents;
 mod render;
-mod state;
-pub(crate) use state::next_draft_title;
-pub(crate) use state::unique_title;
-pub(crate) use state::{DraftKind, active_index_after_close};
+mod settings;
 mod sidebar;
+mod state;
 mod status_bar;
 mod templates;
 mod top_bar;
 mod welcome;
+pub(crate) use state::next_draft_title;
+pub(crate) use state::unique_title;
+pub(crate) use state::{DraftKind, active_index_after_close};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +34,7 @@ use gpui::{
 };
 
 use self::commands::CommandId;
+use self::layout::{DIAGNOSTICS_HEIGHT_RANGE, PREVIEW_WIDTH_RANGE, SIDEBAR_WIDTH_RANGE};
 use crate::canvas::view::CanvasView;
 use crate::compiler::EngineKind;
 use crate::compiler::controller::CompilerController;
@@ -43,9 +50,35 @@ use crate::project::document::Document;
 use crate::project::settings::GrafSettings;
 use crate::project::tree::ProjectTree;
 
-const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 160.0..=420.0;
-const PREVIEW_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 320.0..=800.0;
-const DIAGNOSTICS_HEIGHT_RANGE: std::ops::RangeInclusive<f32> = 100.0..=500.0;
+/// Panel geometry and per-panel view toggles; layout.rs owns the resize
+/// math, render submodules read the values.
+pub(crate) struct LayoutState {
+    pub(crate) sidebar_visible: bool,
+    pub(crate) sidebar_tab: SidebarTab,
+    pub(crate) preview_visible: bool,
+    pub(crate) diagnostics_drawer_open: bool,
+    pub(crate) diagnostics_filter: DiagnosticsFilter,
+    pub(crate) sidebar_width: f32,
+    pub(crate) preview_width: f32,
+    pub(crate) diagnostics_height: f32,
+    pub(crate) resizing_panel: Option<ResizingPanel>,
+}
+
+/// Compile lifecycle: debounced task, generations and cancellation so stale
+/// timers and subprocess results never leak into the UI; compilation.rs
+/// owns every mutation.
+pub(crate) struct CompileState {
+    pub(crate) task: Option<Task<()>>,
+    pub(crate) running: bool,
+    pub(crate) pending: bool,
+    /// Bumped on every edit that schedules a compile; the debounce timer's
+    /// captured generation must match to fire, so stale timers cannot
+    /// trigger compiles.
+    pub(crate) generation: u64,
+    /// Cancel flag for the in-flight compile; flipping it kills the running
+    /// compiler subprocess (and rasterization) instead of waiting it out.
+    pub(crate) cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
 
 actions!(
     workspace,
@@ -173,26 +206,10 @@ pub struct Workspace {
     pub(crate) pdf_renderer: Arc<dyn PdfRenderer>,
     pub(crate) settings: GrafSettings,
     pub(crate) controller: CompilerController,
-    pub(crate) compile_task: Option<Task<()>>,
-    pub(crate) compile_running: bool,
-    pub(crate) compile_pending: bool,
-    /// Bumped on every edit that schedules a compile; the debounce timer's
-    /// captured generation must match to fire, so stale timers cannot
-    /// trigger compiles.
-    pub(crate) debounce_generation: u64,
-    /// Cancel flag for the in-flight compile; flipping it kills the running
-    /// compiler subprocess (and rasterization) instead of waiting it out.
-    pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub(crate) compile: CompileState,
     pub(crate) show_welcome: bool,
-    pub(crate) sidebar_visible: bool,
-    pub(crate) sidebar_tab: SidebarTab,
-    pub(crate) preview_visible: bool,
-    pub(crate) diagnostics_drawer_open: bool,
-    pub(crate) diagnostics_filter: DiagnosticsFilter,
-    pub(crate) sidebar_width: f32,
-    pub(crate) preview_width: f32,
-    pub(crate) diagnostics_height: f32,
-    pub(crate) resizing_panel: Option<ResizingPanel>,
+    /// Panel visibility, sizes and resize progress; see `LayoutState`.
+    pub(crate) layout: LayoutState,
     pub(crate) workspace_menu_open: bool,
     pub(crate) latest_diagnostics: Vec<Diagnostic>,
     pub(crate) workspace_error: Option<String>,
@@ -325,21 +342,25 @@ impl Workspace {
             pdf_renderer,
             settings,
             controller,
-            compile_task: None,
-            compile_running: false,
-            compile_pending: false,
-            debounce_generation: 0,
-            compile_cancel: None,
+            compile: CompileState {
+                task: None,
+                running: false,
+                pending: false,
+                generation: 0,
+                cancel: None,
+            },
             show_welcome,
-            sidebar_visible: true,
-            sidebar_tab: SidebarTab::Files,
-            preview_visible: true,
-            diagnostics_drawer_open: false,
-            diagnostics_filter: DiagnosticsFilter::All,
-            sidebar_width,
-            preview_width,
-            diagnostics_height,
-            resizing_panel: None,
+            layout: LayoutState {
+                sidebar_visible: true,
+                sidebar_tab: SidebarTab::Files,
+                preview_visible: true,
+                diagnostics_drawer_open: false,
+                diagnostics_filter: DiagnosticsFilter::All,
+                sidebar_width,
+                preview_width,
+                diagnostics_height,
+                resizing_panel: None,
+            },
             workspace_menu_open: false,
             latest_diagnostics: Vec::new(),
             workspace_error: open_error,
@@ -399,154 +420,8 @@ impl Workspace {
             .is_some_and(|document| document.kind().is_compilable())
     }
 
-    pub fn trigger_autocomplete(&mut self, cx: &mut Context<Self>) {
-        if self.active_document_kind() != Some(crate::project::document::DocumentKind::Latex) {
-            self.completions.clear();
-            self.completion_open = false;
-            self.editor
-                .update(cx, |editor, _| editor.set_completion_active(false));
-            cx.notify();
-            return;
-        }
-
-        let (text, cursor) = {
-            let ed = self.editor.read(cx);
-            (ed.text().to_string(), ed.cursor_offset())
-        };
-        self.completions = crate::editor::completion::compute_completions(
-            &text,
-            cursor,
-            &self.project_state.bib_index,
-            &self.project_state.label_index,
-        );
-        self.completions.truncate(8);
-        self.completion_open = !self.completions.is_empty();
-        self.completion_selected = 0;
-        self.editor.update(cx, |editor, _| {
-            editor.set_completion_active(self.completion_open);
-        });
-        cx.notify();
-    }
-
-    pub fn apply_completion(
-        &mut self,
-        item: &crate::editor::completion::CompletionItem,
-        cx: &mut Context<Self>,
-    ) {
-        let insert = item.insert_text.clone();
-        self.editor.update(cx, |ed, cx| {
-            ed.insert_snippet(&insert, cx);
-        });
-        self.completion_open = false;
-        self.editor
-            .update(cx, |editor, _| editor.set_completion_active(false));
-        cx.notify();
-    }
-
-    fn on_editor_event(&mut self, event: EditorEvent, cx: &mut Context<Self>) {
-        match event {
-            EditorEvent::NextCompletion => {
-                if !self.completions.is_empty() {
-                    self.completion_selected =
-                        (self.completion_selected + 1) % self.completions.len();
-                }
-            }
-            EditorEvent::PreviousCompletion => {
-                if !self.completions.is_empty() {
-                    self.completion_selected = self
-                        .completion_selected
-                        .checked_sub(1)
-                        .unwrap_or(self.completions.len() - 1);
-                }
-            }
-            EditorEvent::AcceptCompletion => {
-                if let Some(item) = self.completions.get(self.completion_selected).cloned() {
-                    self.apply_completion(&item, cx);
-                    return;
-                }
-            }
-            EditorEvent::FindReferences => {
-                self.find_all_references(cx);
-                return;
-            }
-        }
-        cx.notify();
-    }
-
-    fn find_all_references(&mut self, cx: &mut Context<Self>) {
-        let Some(reference) = self.editor.read(cx).reference_at_cursor() else {
-            return;
-        };
-        let content = self.editor.read(cx).text().to_string();
-        self.find_state.set_query(reference.clone(), &content);
-        self.find_bar_open = true;
-        self.prompt_target = state::PromptTarget::Find;
-        self.prompt_editor
-            .update(cx, |input, cx| input.set_input_text(reference, cx));
-        if let Some(matched) = self.find_state.next_match().cloned() {
-            self.editor
-                .update(cx, |editor, cx| editor.select_range(matched, cx));
-        }
-        cx.notify();
-    }
-
     pub fn editor_focus_handle(&self, cx: &Context<Self>) -> FocusHandle {
         self.editor.read(cx).focus_handle(cx)
-    }
-
-    fn persist_settings(&self) {
-        let Some(path) = GrafSettings::default_path() else {
-            return;
-        };
-        if let Err(error) = self.settings.save_to_path(&path) {
-            warn!("failed to save settings to {}: {error}", path.display());
-        }
-    }
-
-    fn apply_editor_settings(&mut self, cx: &mut Context<Self>) {
-        let editor = &self.settings.editor;
-        self.editor.update(cx, |view, cx| {
-            view.set_preferences(editor.font_size, editor.tab_size, editor.line_numbers, cx);
-        });
-        self.controller
-            .set_debounce_duration(std::time::Duration::from_millis(editor.compile_debounce_ms));
-        self.persist_settings();
-        cx.notify();
-    }
-
-    pub fn adjust_editor_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
-        self.settings.editor.font_size =
-            (self.settings.editor.font_size + delta).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
-        self.apply_editor_settings(cx);
-    }
-
-    pub fn cycle_tab_size(&mut self, cx: &mut Context<Self>) {
-        self.settings.editor.tab_size = match self.settings.editor.tab_size {
-            1 | 2 => 4,
-            3..=7 => MAX_TAB_SIZE,
-            _ => 2,
-        };
-        self.apply_editor_settings(cx);
-    }
-
-    pub fn toggle_line_numbers_setting(&mut self, cx: &mut Context<Self>) {
-        self.settings.editor.line_numbers = !self.settings.editor.line_numbers;
-        self.apply_editor_settings(cx);
-    }
-
-    pub fn toggle_auto_compile_setting(&mut self, cx: &mut Context<Self>) {
-        self.settings.editor.auto_compile = !self.settings.editor.auto_compile;
-        self.apply_editor_settings(cx);
-    }
-
-    pub fn cycle_compile_debounce(&mut self, cx: &mut Context<Self>) {
-        self.settings.editor.compile_debounce_ms = match self.settings.editor.compile_debounce_ms {
-            0..=150 => 300,
-            151..=300 => 500,
-            301..=500 => 750,
-            _ => 150,
-        };
-        self.apply_editor_settings(cx);
     }
 
     pub fn toggle_workspace_menu(&mut self, cx: &mut Context<Self>) {
@@ -566,68 +441,17 @@ impl Workspace {
     }
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_visible = !self.sidebar_visible;
+        self.layout.sidebar_visible = !self.layout.sidebar_visible;
         cx.notify();
     }
 
     pub fn toggle_preview(&mut self, cx: &mut Context<Self>) {
-        self.preview_visible = !self.preview_visible;
+        self.layout.preview_visible = !self.layout.preview_visible;
         cx.notify();
-    }
-
-    pub fn begin_panel_resize(&mut self, panel: ResizingPanel, cx: &mut Context<Self>) {
-        self.resizing_panel = Some(panel);
-        cx.notify();
-    }
-
-    fn resize_panel(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.dragging() {
-            return;
-        }
-
-        match self.resizing_panel {
-            Some(ResizingPanel::Sidebar) => {
-                self.sidebar_width = event
-                    .position
-                    .x
-                    .as_f32()
-                    .clamp(*SIDEBAR_WIDTH_RANGE.start(), *SIDEBAR_WIDTH_RANGE.end());
-            }
-            Some(ResizingPanel::Preview) => {
-                self.preview_width = (window.viewport_size().width - event.position.x)
-                    .as_f32()
-                    .clamp(*PREVIEW_WIDTH_RANGE.start(), *PREVIEW_WIDTH_RANGE.end());
-            }
-            Some(ResizingPanel::Diagnostics) => {
-                self.diagnostics_height = (window.viewport_size().height - event.position.y)
-                    .as_f32()
-                    .clamp(
-                        *DIAGNOSTICS_HEIGHT_RANGE.start(),
-                        *DIAGNOSTICS_HEIGHT_RANGE.end(),
-                    );
-            }
-            None => return,
-        }
-        cx.notify();
-    }
-
-    fn finish_panel_resize(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.resizing_panel.take().is_some() {
-            self.settings.layout.sidebar_width = self.sidebar_width;
-            self.settings.layout.preview_width = self.preview_width;
-            self.settings.layout.diagnostics_height = self.diagnostics_height;
-            self.persist_settings();
-            cx.notify();
-        }
     }
 
     pub fn toggle_diagnostics(&mut self, cx: &mut Context<Self>) {
-        self.diagnostics_drawer_open = !self.diagnostics_drawer_open;
+        self.layout.diagnostics_drawer_open = !self.layout.diagnostics_drawer_open;
         cx.notify();
     }
 
@@ -659,138 +483,6 @@ impl Workspace {
 
     pub fn open_about(&mut self, cx: &mut Context<Self>) {
         self.active_modal = ActiveModal::About;
-        cx.notify();
-    }
-
-    pub fn new_typst_document(&mut self, cx: &mut Context<Self>) {
-        let initial_typst = crate::project::templates::DEFAULT_TYPST_STARTER;
-        let titles: Vec<String> = self
-            .documents
-            .iter()
-            .map(|document| document.title().to_string())
-            .collect();
-        let doc_name = next_draft_title(DraftKind::Typst, &titles);
-        self.documents
-            .push(Document::new_untitled(&doc_name, initial_typst));
-        self.activate_document(self.documents.len() - 1, cx);
-    }
-
-    pub fn new_canvas_diagram(&mut self, cx: &mut Context<Self>) {
-        let default_canvas_json = match self.canvas.read(cx).save_to_json() {
-            Ok(json) => json,
-            Err(error) => {
-                self.workspace_error = Some(format!("Could not create diagram: {error}"));
-                cx.notify();
-                return;
-            }
-        };
-        let titles: Vec<String> = self
-            .documents
-            .iter()
-            .map(|document| document.title().to_string())
-            .collect();
-        let doc_name = next_draft_title(DraftKind::Diagram, &titles);
-        let doc = Document::new_untitled(&doc_name, default_canvas_json);
-        let new_diagram_id = doc.id();
-        self.documents.push(doc);
-        self.active_doc_idx = self.documents.len() - 1;
-        self.active_view_kind = ActiveViewKind::Canvas;
-        // The scene the canvas currently displays is the new document's
-        // starting content, and the undo trail held in the view now belongs
-        // to that new document.
-        self.history_store.retitle(new_diagram_id);
-        cx.notify();
-    }
-
-    pub fn insert_table_template(&mut self, cx: &mut Context<Self>) {
-        let is_typst =
-            self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
-        let table = crate::editor::table::TableData::sample();
-
-        let table_code = if is_typst {
-            table.to_typst()
-        } else {
-            table.to_latex()
-        };
-
-        self.editor.update(cx, |editor, cx| {
-            editor.insert_snippet(&table_code, cx);
-        });
-        self.sync_active_doc_from_editor(cx);
-        self.trigger_compile(cx);
-    }
-
-    /// Export commands must not run while a text document is on screen: the
-    /// shared canvas holds the last-loaded .graf scene, and exporting that
-    /// would silently copy another file's diagram to the clipboard.
-    fn assert_canvas_export_target(&mut self) -> bool {
-        if self.active_view_kind != ActiveViewKind::Canvas {
-            self.workspace_error =
-                Some("Canvas export requires an active .graf document".to_string());
-            return false;
-        }
-        true
-    }
-
-    pub fn export_canvas_to_tikz(&mut self, cx: &mut Context<Self>) {
-        if !self.assert_canvas_export_target() {
-            return;
-        }
-        let doc = self.canvas.read(cx).document();
-        let tikz_code = crate::canvas::tikz::export_to_tikz(doc);
-        cx.write_to_clipboard(gpui::ClipboardItem::new_string(tikz_code));
-    }
-
-    pub fn export_canvas_to_svg(&mut self, cx: &mut Context<Self>) {
-        if !self.assert_canvas_export_target() {
-            return;
-        }
-        let doc = self.canvas.read(cx).document();
-        let svg_code = crate::canvas::svg::export_to_svg(doc);
-        cx.write_to_clipboard(gpui::ClipboardItem::new_string(svg_code));
-    }
-
-    pub fn lint_academic_style(&mut self, cx: &mut Context<Self>) {
-        let is_typst =
-            self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
-        let text = self.editor.read(cx).text().to_string();
-        let revision_at_start = self.editor.read(cx).revision();
-
-        cx.spawn(async move |this, cx| {
-            let diagnostics = cx
-                .background_executor()
-                .spawn(async move {
-                    crate::project::linter::lint_academic_warnings_as_diagnostics(&text, is_typst)
-                })
-                .await;
-
-            this.update(cx, |this, cx| {
-                // A newer revision means the lint describes text the user has
-                // already changed; drop it rather than mislabel lines.
-                let revision_now = this.editor.read(cx).revision();
-                if revision_now != revision_at_start {
-                    cx.notify();
-                    return;
-                }
-
-                // A clean lint replaces what compile diagnostics left behind,
-                // instead of silently keeping stale entries on screen.
-                this.latest_diagnostics = diagnostics.clone();
-                this.editor.update(cx, |editor, cx| {
-                    editor.set_diagnostics(diagnostics, cx);
-                });
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
-    pub fn sync_zotero_library(&mut self, cx: &mut Context<Self>) {
-        let zotero_lib = crate::project::zotero::ZoteroLibrary::scan_local_storage();
-        for item in zotero_lib.items {
-            self.project_state.bib_index.add_entry(item.to_bib_entry());
-        }
         cx.notify();
     }
 

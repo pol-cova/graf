@@ -12,7 +12,7 @@ impl Workspace {
             .flex()
             .flex_none()
             .flex_col()
-            .h(px(self.diagnostics_height))
+            .h(px(self.layout.diagnostics_height))
             .bg(theme::BG_BAR)
             .border_t_1()
             .border_color(theme::BORDER)
@@ -65,15 +65,17 @@ impl Workspace {
                                 .cursor_pointer()
                                 .text_xs()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(if self.diagnostics_filter == DiagnosticsFilter::All {
-                                    theme::TEXT
-                                } else {
-                                    theme::TEXT_MUTED
-                                })
+                                .text_color(
+                                    if self.layout.diagnostics_filter == DiagnosticsFilter::All {
+                                        theme::TEXT
+                                    } else {
+                                        theme::TEXT_MUTED
+                                    },
+                                )
                                 .on_mouse_down(
                                     gpui::MouseButton::Left,
                                     cx.listener(|this, _, _, cx| {
-                                        this.diagnostics_filter = DiagnosticsFilter::All;
+                                        this.layout.diagnostics_filter = DiagnosticsFilter::All;
                                         cx.notify();
                                     }),
                                 )
@@ -85,7 +87,7 @@ impl Workspace {
                                 .text_xs()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(
-                                    if self.diagnostics_filter == DiagnosticsFilter::Errors {
+                                    if self.layout.diagnostics_filter == DiagnosticsFilter::Errors {
                                         theme::ACCENT_RED
                                     } else {
                                         theme::TEXT_MUTED
@@ -94,7 +96,7 @@ impl Workspace {
                                 .on_mouse_down(
                                     gpui::MouseButton::Left,
                                     cx.listener(|this, _, _, cx| {
-                                        this.diagnostics_filter = DiagnosticsFilter::Errors;
+                                        this.layout.diagnostics_filter = DiagnosticsFilter::Errors;
                                         cx.notify();
                                     }),
                                 )
@@ -106,7 +108,8 @@ impl Workspace {
                                 .text_xs()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(
-                                    if self.diagnostics_filter == DiagnosticsFilter::Warnings {
+                                    if self.layout.diagnostics_filter == DiagnosticsFilter::Warnings
+                                    {
                                         theme::ACCENT_ORANGE
                                     } else {
                                         theme::TEXT_MUTED
@@ -115,7 +118,8 @@ impl Workspace {
                                 .on_mouse_down(
                                     gpui::MouseButton::Left,
                                     cx.listener(|this, _, _, cx| {
-                                        this.diagnostics_filter = DiagnosticsFilter::Warnings;
+                                        this.layout.diagnostics_filter =
+                                            DiagnosticsFilter::Warnings;
                                         cx.notify();
                                     }),
                                 )
@@ -142,7 +146,7 @@ impl Workspace {
         let filtered_diags: Vec<&Diagnostic> = self
             .latest_diagnostics
             .iter()
-            .filter(|d| match self.diagnostics_filter {
+            .filter(|d| match self.layout.diagnostics_filter {
                 DiagnosticsFilter::All => true,
                 DiagnosticsFilter::Errors => d.severity == Severity::Error,
                 DiagnosticsFilter::Warnings => d.severity == Severity::Warning,
