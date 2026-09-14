@@ -112,3 +112,14 @@ pub fn all_commands() -> &'static [CommandPaletteItem] {
         },
     ]
 }
+
+/// Substring filter shared by the palette view and Enter-picking so the
+/// visible list and the accepted result can never disagree. `query` is
+/// expected lowercase.
+pub fn filter_commands(query_lower: &str) -> impl Iterator<Item = &'static CommandPaletteItem> {
+    all_commands().iter().filter(move |item| {
+        query_lower.is_empty()
+            || item.title.to_lowercase().contains(query_lower)
+            || item.category.to_lowercase().contains(query_lower)
+    })
+}

@@ -6,7 +6,10 @@ mod documents;
 mod editor_panel;
 mod find_bar;
 mod modals;
+mod state;
 pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
+pub(crate) use state::next_draft_title;
+pub(crate) use state::{DraftKind, active_index_after_close};
 mod sidebar;
 mod status_bar;
 mod top_bar;
@@ -639,7 +642,12 @@ impl Workspace {
 
     pub fn new_typst_document(&mut self, cx: &mut Context<Self>) {
         let initial_typst = "= Untitled\n\nStart writing here.\n";
-        let doc_name = format!("document-{}.typ", self.documents.len() + 1);
+        let titles: Vec<String> = self
+            .documents
+            .iter()
+            .map(|document| document.title().to_string())
+            .collect();
+        let doc_name = next_draft_title(DraftKind::Typst, &titles);
         self.documents
             .push(Document::new_untitled(&doc_name, initial_typst));
         self.activate_document(self.documents.len() - 1, cx);
@@ -666,7 +674,12 @@ impl Workspace {
                 return;
             }
         };
-        let doc_name = format!("diagram-{}.graf", self.documents.len() + 1);
+        let titles: Vec<String> = self
+            .documents
+            .iter()
+            .map(|document| document.title().to_string())
+            .collect();
+        let doc_name = next_draft_title(DraftKind::Diagram, &titles);
         let doc = Document::new_untitled(&doc_name, default_canvas_json);
         self.documents.push(doc);
         self.active_doc_idx = self.documents.len() - 1;
@@ -831,10 +844,7 @@ impl Workspace {
                 }
                 ActiveModal::CommandPalette(_) => {
                     let query = query.to_lowercase();
-                    if let Some(command) = commands::all_commands().iter().find(|command| {
-                        command.title.to_lowercase().contains(&query)
-                            || command.category.to_lowercase().contains(&query)
-                    }) {
+                    if let Some(command) = commands::filter_commands(&query).next() {
                         self.active_modal = ActiveModal::None;
                         self.dispatch_command_action(command.id, cx);
                     }

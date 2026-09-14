@@ -1,5 +1,11 @@
 use super::*;
 
+/// A delivered AI result is superseded when a newer op started before it
+/// finished; the workspace keeps the newest generation it issued.
+fn ai_result_superseded(delivered_generation: u64, newest_generation: u64) -> bool {
+    delivered_generation != newest_generation
+}
+
 /// Monotonic generation for AI ops; starting a new op cancels any in-flight
 /// older one by invalidating its result.
 pub(crate) static NEXT_AI_GENERATION: std::sync::atomic::AtomicU64 =
@@ -36,7 +42,7 @@ impl Workspace {
                 // A newer AI op started while this one ran: its result is
                 // superseded, deliver nothing (the underlying request keeps
                 // draining until the provider times out).
-                if this.ai_operation_generation != generation {
+                if ai_result_superseded(generation, this.ai_operation_generation) {
                     return;
                 }
 
@@ -91,5 +97,17 @@ impl Workspace {
             .ok();
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_newest_generation_delivers() {
+        assert!(!ai_result_superseded(3, 3));
+        assert!(ai_result_superseded(2, 3));
+        assert!(ai_result_superseded(3, 4));
     }
 }
