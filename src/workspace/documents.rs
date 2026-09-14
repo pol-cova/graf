@@ -126,13 +126,10 @@ impl Workspace {
             return;
         }
         let closed_active_document = idx == self.active_doc_idx;
+        let len_before = self.documents.len();
         self.documents.remove(idx);
 
-        if idx < self.active_doc_idx {
-            self.active_doc_idx -= 1;
-        } else if self.active_doc_idx >= self.documents.len() {
-            self.active_doc_idx = self.documents.len() - 1;
-        }
+        self.active_doc_idx = active_index_after_close(self.active_doc_idx, idx, len_before);
 
         if closed_active_document {
             self.activate_document(self.active_doc_idx, cx);

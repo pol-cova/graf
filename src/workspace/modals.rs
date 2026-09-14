@@ -1,4 +1,4 @@
-use super::commands::all_commands;
+use super::commands::filter_commands;
 use super::{ActiveModal, SettingsTab, Workspace};
 use gpui::{
     ClipboardItem, Context, Focusable, IntoElement, ParentElement, Role, Styled, div, prelude::*,
@@ -853,7 +853,6 @@ impl Workspace {
         } else if is_cmd_palette {
             let filter = self.prompt_editor.read(cx).text().to_lowercase();
 
-            let commands = all_commands();
             let mut list = div()
                 .id("cmd-palette-list")
                 .flex()
@@ -861,14 +860,7 @@ impl Workspace {
                 .py_1()
                 .overflow_scroll();
 
-            for item in commands {
-                if !filter.is_empty()
-                    && !item.title.to_lowercase().contains(&filter)
-                    && !item.category.to_lowercase().contains(&filter)
-                {
-                    continue;
-                }
-
+            for item in filter_commands(&filter) {
                 let id = item.id;
                 let name = item.title;
                 let shortcut = item.shortcut;
