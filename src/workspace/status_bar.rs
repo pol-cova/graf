@@ -20,14 +20,10 @@ impl Workspace {
         };
 
         let (line, col) = self.editor.read(cx).cursor_line_col();
-        let title = self.documents[self.active_doc_idx].title();
-        let is_typst = title.ends_with(".typ");
-        let language = if is_typst {
-            "Typst"
-        } else if title.ends_with(".tex") {
-            "LaTeX"
-        } else {
-            "Plain Text"
+        let language = match self.active_document_kind() {
+            Some(crate::project::document::DocumentKind::Typst) => "Typst",
+            Some(crate::project::document::DocumentKind::Latex) => "LaTeX",
+            _ => "Plain Text",
         };
 
         div()
@@ -78,6 +74,8 @@ impl Workspace {
                         String::new()
                     } else {
                         let text = self.editor.read(cx).text();
+                        let is_typst = self.active_document_kind()
+                            == Some(crate::project::document::DocumentKind::Typst);
                         let stats = crate::project::stats::DocumentStats::compute(text, is_typst);
                         format!("{} words", stats.word_count)
                     })

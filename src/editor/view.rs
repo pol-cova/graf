@@ -151,15 +151,17 @@ pub struct EditorView {
 impl EventEmitter<EditorEvent> for EditorView {}
 
 impl EditorView {
-    pub fn set_is_typst(&mut self, is_typst: bool, cx: &mut Context<Self>) {
-        if self.is_typst != is_typst {
+    /// One setter for the language/styling configuration the renderer keys
+    /// off, replacing the pair of boolean setters that could disagree.
+    pub fn set_kind(
+        &mut self,
+        kind: crate::project::document::DocumentKind,
+        cx: &mut Context<Self>,
+    ) {
+        let is_typst = kind == crate::project::document::DocumentKind::Typst;
+        let plain_text = matches!(kind, crate::project::document::DocumentKind::PlainText);
+        if self.is_typst != is_typst || self.plain_text != plain_text {
             self.is_typst = is_typst;
-            cx.notify();
-        }
-    }
-
-    pub fn set_plain_text(&mut self, plain_text: bool, cx: &mut Context<Self>) {
-        if self.plain_text != plain_text {
             self.plain_text = plain_text;
             cx.notify();
         }

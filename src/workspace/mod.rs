@@ -25,6 +25,7 @@ use gpui::{
     MouseUpEvent, PathPromptOptions, Render, Task, Window, actions, div, prelude::*,
 };
 
+use self::commands::CommandId;
 use crate::ai::diff::DiffReview;
 use crate::ai::operations::{AiOperationKind, execute_operation, parse_canvas_response};
 use crate::ai::provider::AiProvider;
@@ -223,13 +224,11 @@ impl Workspace {
 
         let settings = GrafSettings::load_default();
         let editor_settings = settings.editor.clone();
-        let is_typst = initial_doc.title().ends_with(".typ");
-        let is_plain_text = !is_typst && !initial_doc.title().ends_with(".tex");
+        let initial_kind = initial_doc.kind();
         let initial_content = initial_doc.buffer().content().to_string();
         let editor = cx.new(|cx| {
             let mut editor = EditorView::with_text(cx, initial_content);
-            editor.is_typst = is_typst;
-            editor.set_plain_text(is_plain_text, cx);
+            editor.set_kind(initial_kind, cx);
             editor.set_preferences(
                 editor_settings.font_size,
                 editor_settings.tab_size,
@@ -240,7 +239,7 @@ impl Workspace {
         });
         let prompt_editor = cx.new(|cx| {
             let mut editor = EditorView::with_text(cx, "");
-            editor.set_plain_text(true, cx);
+            editor.set_kind(crate::project::document::DocumentKind::PlainText, cx);
             editor.set_single_line(true);
             editor.set_preferences(13.0, 2, false, cx);
             editor
@@ -353,27 +352,26 @@ impl Workspace {
     }
 
     pub fn active_engine(&self) -> EngineKind {
-        if let Some(doc) = self.documents.get(self.active_doc_idx)
-            && doc.title().ends_with(".typ")
-        {
-            return EngineKind::Typst;
-        }
-        EngineKind::Latex
+        self.documents
+            .get(self.active_doc_idx)
+            .and_then(|document| document.kind().as_engine())
+            .unwrap_or(EngineKind::Latex)
+    }
+
+    pub(super) fn active_document_kind(&self) -> Option<crate::project::document::DocumentKind> {
+        self.documents
+            .get(self.active_doc_idx)
+            .map(|document| document.kind())
     }
 
     pub fn active_document_is_compilable(&self) -> bool {
         self.documents
             .get(self.active_doc_idx)
-            .is_some_and(|document| {
-                document.title().ends_with(".tex") || document.title().ends_with(".typ")
-            })
+            .is_some_and(|document| document.kind().is_compilable())
     }
 
     pub fn trigger_autocomplete(&mut self, cx: &mut Context<Self>) {
-        if !self.documents[self.active_doc_idx]
-            .title()
-            .ends_with(".tex")
-        {
+        if self.active_document_kind() != Some(crate::project::document::DocumentKind::Latex) {
             self.completions.clear();
             self.completion_open = false;
             self.editor
@@ -688,9 +686,8 @@ impl Workspace {
     }
 
     pub fn insert_table_template(&mut self, cx: &mut Context<Self>) {
-        let is_typst = self.documents[self.active_doc_idx]
-            .title()
-            .ends_with(".typ");
+        let is_typst =
+            self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
         let mut table = crate::editor::table::TableData::new(3, 3);
         table.rows[0] = vec![
             "Column 1".to_string(),
@@ -724,9 +721,8 @@ impl Workspace {
     }
 
     pub fn lint_academic_style(&mut self, cx: &mut Context<Self>) {
-        let is_typst = self.documents[self.active_doc_idx]
-            .title()
-            .ends_with(".typ");
+        let is_typst =
+            self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
         let text = self.editor.read(cx).text().to_string();
         let revision_at_start = self.editor.read(cx).revision();
 
@@ -858,34 +854,28 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn dispatch_command_action(&mut self, id: u32, cx: &mut Context<Self>) {
+    pub fn dispatch_command_action(&mut self, id: commands::CommandId, cx: &mut Context<Self>) {
         match id {
-            1 => self.trigger_compile(cx),
-            2 => self.save_active_document(cx),
-            3 => self.toggle_find(cx),
-            4 => self.toggle_sidebar(cx),
-            5 => self.toggle_preview(cx),
-            6 => self.toggle_diagnostics(cx),
-            7 => {
+            CommandId::Compile => self.trigger_compile(cx),
+            CommandId::Save => self.save_active_document(cx),
+            CommandId::FindInFile => self.toggle_find(cx),
+            CommandId::ToggleProject => self.toggle_sidebar(cx),
+            CommandId::TogglePreview => self.toggle_preview(cx),
+            CommandId::ToggleProblems => self.toggle_diagnostics(cx),
+            CommandId::CloseTab => {
                 let active = self.active_doc_idx;
                 self.close_tab(active, cx);
             }
-            8 => self.new_canvas_diagram(cx),
-            9 => self.open_ai_assist(cx),
-            10 => self.open_settings(SettingsTab::Editor, cx),
-            11 => self.new_typst_document(cx),
-            12 => self.open_about(cx),
-            13 => {
-                self.save_recovery_snapshot();
-                self.open_settings(SettingsTab::Build, cx);
-            }
-            14 => self.insert_table_template(cx),
-            15 => self.export_canvas_to_tikz(cx),
-            16 => self.export_canvas_to_svg(cx),
-            17 => self.lint_academic_style(cx),
-            18 => self.sync_zotero_library(cx),
-            21 => self.scan_plugins(cx),
-            _ => {}
+            CommandId::NewVectorDiagram => self.new_canvas_diagram(cx),
+            CommandId::OpenSettings => self.open_settings(SettingsTab::Editor, cx),
+            CommandId::NewTypstDocument => self.new_typst_document(cx),
+            CommandId::AboutGraf => self.open_about(cx),
+            CommandId::InsertTable => self.insert_table_template(cx),
+            CommandId::ExportTikz => self.export_canvas_to_tikz(cx),
+            CommandId::ExportSvg => self.export_canvas_to_svg(cx),
+            CommandId::CheckWritingStyle => self.lint_academic_style(cx),
+            CommandId::SyncZotero => self.sync_zotero_library(cx),
+            CommandId::ReloadPlugins => self.scan_plugins(cx),
         }
     }
 
