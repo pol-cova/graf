@@ -6,6 +6,14 @@ impl Workspace {
             return;
         }
 
+        // If the shared canvas was showing a scene, its undo history belongs
+        // to the document that owns that scene; park it before the view is
+        // pointed at another document.
+        if self.active_view_kind == ActiveViewKind::Canvas {
+            let history = self.canvas.update(cx, |canvas, _cx| canvas.take_history());
+            self.history_store.settle(history);
+        }
+
         self.active_doc_idx = idx;
         self.show_welcome = false;
         self.compile_task = None;
@@ -18,14 +26,18 @@ impl Workspace {
 
         let document = &self.documents[idx];
         let kind = document.kind();
+        let document_id = document.id();
         let content = document.buffer().content().to_string();
 
         if kind.is_canvas() {
             self.active_view_kind = ActiveViewKind::Canvas;
-            if let Err(error) = self
-                .canvas
-                .update(cx, |canvas, cx| canvas.load_from_json(&content, cx))
-            {
+            // The document owns its undo trail: re-attach whatever history
+            // was settled aside when this tab was last left.
+            let history = self.history_store.activate(document_id);
+            let loaded = self.canvas.update(cx, |canvas, cx| {
+                canvas.load_from_json(&content, history, cx)
+            });
+            if let Err(error) = loaded {
                 self.workspace_error = Some(error);
             }
         } else {
@@ -123,6 +135,10 @@ impl Workspace {
         }
         let closed_active_document = idx == self.active_doc_idx;
         let len_before = self.documents.len();
+        if self.documents[idx].kind().is_canvas() {
+            // Undo history left stashed for a closed tab must go with it.
+            self.history_store.drop_document(self.documents[idx].id());
+        }
         self.documents.remove(idx);
 
         self.active_doc_idx = active_index_after_close(self.active_doc_idx, idx, len_before);

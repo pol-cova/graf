@@ -193,6 +193,9 @@ pub struct Workspace {
     pub(crate) prompt_target: state::PromptTarget,
     pub(crate) active_modal: ActiveModal,
     pub(crate) pending_recovery: Option<crate::project::recovery::RecoveryJournal>,
+    /// Undo history for `.graf` documents, owned per document so the shared
+    /// `CanvasView` keeps each document's trail across tab switches.
+    pub(crate) history_store: state::CanvasHistoryStore,
 }
 
 impl Workspace {
@@ -320,6 +323,7 @@ impl Workspace {
             prompt_target: state::PromptTarget::Idle,
             active_modal: ActiveModal::None,
             pending_recovery: None,
+            history_store: state::CanvasHistoryStore::default(),
         };
 
         let recovery_dir = workspace
@@ -659,9 +663,14 @@ impl Workspace {
             .collect();
         let doc_name = next_draft_title(DraftKind::Diagram, &titles);
         let doc = Document::new_untitled(&doc_name, default_canvas_json);
+        let new_diagram_id = doc.id();
         self.documents.push(doc);
         self.active_doc_idx = self.documents.len() - 1;
         self.active_view_kind = ActiveViewKind::Canvas;
+        // The scene the canvas currently displays is the new document's
+        // starting content, and the undo trail held in the view now belongs
+        // to that new document.
+        self.history_store.retitle(new_diagram_id);
         cx.notify();
     }
 

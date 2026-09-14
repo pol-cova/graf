@@ -51,6 +51,12 @@ pub struct CanvasView {
     selected_element_id: Option<String>,
     is_dragging: bool,
     drag_start: Option<(f32, f32)>,
+    /// Scene as of pointer-down, captured when a Select press lands on an
+    /// element. The first mouse-move that actually shifts the element
+    /// commits it to the history once, so a plain click never pads the
+    /// undo stack and undo after a drag reverts the drag instead of
+    /// wiping the element.
+    pending_drag_snapshot: Option<CanvasDocument>,
     revision: u64,
     /// Monotonic element-id source; a count-derived id collides after any
     /// deletion and makes selection/removal hit the wrong element.
@@ -81,23 +87,29 @@ impl CanvasView {
             selected_element_id: None,
             is_dragging: false,
             drag_start: None,
+            pending_drag_snapshot: None,
             revision: 0,
             next_element_counter: ElementIdAllocator::default(),
         }
     }
 
-    pub fn load_from_json(&mut self, json: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        match CanvasDocument::from_json(json) {
-            Ok(doc) => {
-                self.document = doc;
-                self.history = CanvasHistory::new();
-                self.selected_element_id = None;
-                self.revision += 1;
-                cx.notify();
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to parse .graf: {e}")),
-        }
+    /// Loads `json` as the displayed scene. Undo history is supplied by the
+    /// caller (document-owned, so it survives tab round-trips) rather than
+    /// being reset here.
+    pub fn load_from_json(
+        &mut self,
+        json: &str,
+        history: CanvasHistory,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let doc =
+            CanvasDocument::from_json(json).map_err(|e| format!("Failed to parse .graf: {e}"))?;
+        self.document = doc;
+        self.history = history;
+        self.selected_element_id = None;
+        self.revision += 1;
+        cx.notify();
+        Ok(())
     }
 
     pub fn save_to_json(&self) -> Result<String, String> {
@@ -116,6 +128,12 @@ impl CanvasView {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Hands the view's undo history back to the workspace when the display
+    /// switches away from this scene; the history follows the document.
+    pub(crate) fn take_history(&mut self) -> CanvasHistory {
+        std::mem::take(&mut self.history)
     }
 
     fn next_element_id(&mut self) -> String {
@@ -190,11 +208,17 @@ impl CanvasView {
 
         self.is_dragging = true;
         self.drag_start = Some((x, y));
+        self.pending_drag_snapshot = None;
 
         match self.active_tool {
             CanvasTool::Select => {
                 let hit = self.document.find_element_at(x, y).map(|e| e.id.clone());
+                // The element may be dragged next; remember the pre-drag
+                // scene so the first actual movement can commit an undo
+                // entry. Clicks without a move never push one.
+                let will_drag = hit.is_some();
                 self.selected_element_id = hit;
+                self.pending_drag_snapshot = will_drag.then(|| self.document.clone());
             }
             CanvasTool::Rectangle => {
                 self.history.push_snapshot(self.document.clone());
@@ -267,6 +291,18 @@ impl CanvasView {
             let dx = world_x - world_start_x;
             let dy = world_y - world_start_y;
 
+            // Zero deltas happen on hover-style moves after pointer-down;
+            // they move nothing and must not touch revision or history.
+            if dx == 0.0 && dy == 0.0 {
+                return;
+            }
+
+            commit_drag_snapshot(
+                &mut self.pending_drag_snapshot,
+                &mut self.history,
+                self.selected_element_id.is_some(),
+            );
+
             if let Some(elem) = self
                 .selected_element_id
                 .as_ref()
@@ -310,6 +346,7 @@ impl CanvasView {
     ) {
         self.is_dragging = false;
         self.drag_start = None;
+        self.pending_drag_snapshot = None;
         cx.notify();
     }
 }
@@ -727,6 +764,19 @@ struct StrokeSpec {
 const STROKE_WIDTH_PX: f32 = 3.0;
 const ARROWHEAD_LENGTH_PX: f32 = 12.0;
 
+/// Commits the pending pre-drag snapshot on the first frame that moves the
+/// element, so drags become undoable as one step while plain clicks do not
+/// pad the undo stack.
+fn commit_drag_snapshot(
+    pending: &mut Option<CanvasDocument>,
+    history: &mut CanvasHistory,
+    moved: bool,
+) {
+    if moved && let Some(snapshot) = pending.take() {
+        history.push_snapshot(snapshot);
+    }
+}
+
 fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) {
     let (sx, sy) = viewport.world_to_screen(spec.start.0, spec.start.1);
     let (ex, ey) = viewport.world_to_screen(spec.end.0, spec.end.1);
@@ -769,6 +819,53 @@ fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) 
 mod tests {
     use super::*;
     use crate::canvas::scene::CanvasViewport;
+
+    #[test]
+    fn one_undo_entry_per_drag_not_per_frame() {
+        let mut history = CanvasHistory::new();
+        let mut pending = Some(CanvasDocument::new());
+
+        commit_drag_snapshot(&mut pending, &mut history, true);
+        assert!(history.can_undo());
+        assert!(pending.is_none());
+
+        // Subsequent drag frames keep the single snapshot; no per-frame churn.
+        commit_drag_snapshot(&mut pending, &mut history, true);
+        assert_eq!(history.undo_len(), 1);
+    }
+
+    #[test]
+    fn click_without_movement_pushes_no_undo_entry() {
+        let mut history = CanvasHistory::new();
+        let mut pending = Some(CanvasDocument::new());
+
+        // A click that never moves the element commits nothing...
+        commit_drag_snapshot(&mut pending, &mut history, false);
+        assert!(!history.can_undo());
+        assert!(pending.is_some());
+    }
+
+    #[test]
+    fn drag_can_be_reverted_instead_of_deleting_the_element() {
+        // Regression for the data-loss path: before the pending snapshot,
+        // undo after a drag popped the pre-creation entry and deleted the
+        // element entirely.
+        let mut pre_drag = CanvasDocument::new();
+        pre_drag.add_element(CanvasElement::new_rectangle(
+            "r1", 0.0, 0.0, 50.0, 50.0, 0.0,
+        ));
+
+        let mut dragged = pre_drag.clone();
+        dragged.elements[0].x = 30.0;
+
+        let mut history = CanvasHistory::new();
+        let mut pending = Some(pre_drag);
+        commit_drag_snapshot(&mut pending, &mut history, true);
+
+        let restored = history.undo(dragged).unwrap();
+        assert_eq!(restored.elements.len(), 1);
+        assert_eq!(restored.elements[0].x, 0.0);
+    }
 
     #[test]
     fn element_ids_never_collide_after_deletion() {
