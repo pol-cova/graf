@@ -6,3 +6,6 @@ docs/
 /.graf/
 /output/
 /tmp/
+
+# Triage knowledge base (local, per the triage skill)
+.out-of-scope/
