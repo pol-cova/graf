@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use crate::compiler::engine::run_with_cancel;
+use crate::compiler::engine::{SubprocessResult, run_with_cancel};
 use crate::util::prune_numbered_dirs;
 
 const PREVIEW_RASTER_WIDTH: &str = "1224";
@@ -126,15 +126,13 @@ fn hash_pdf_bytes(pdf_bytes: &[u8]) -> u64 {
 /// unlike a bare `.ok()?` — a spawn error (missing binary, exec failure)
 /// must also be a message rather than a silent pass-through.
 fn rasterization_failure(
-    result: std::io::Result<
-        Result<std::process::Output, crate::compiler::engine::CompileCancelled>,
-    >,
+    result: crate::compiler::engine::SubprocessResult,
     tool: &'static str,
 ) -> Option<String> {
     match result {
-        Err(error) => Some(format!("{tool} could not start: {error}")),
-        Ok(Err(_)) => Some(format!("{tool} rasterization cancelled")),
-        Ok(Ok(output)) => {
+        SubprocessResult::SpawnError(error) => Some(format!("{tool} could not start: {error}")),
+        SubprocessResult::Cancelled => Some(format!("{tool} rasterization cancelled")),
+        SubprocessResult::Output(output) => {
             if output.status.success() {
                 None
             } else {
@@ -563,9 +561,9 @@ Page three.
 
     #[test]
     fn spawn_errors_are_failures_not_silent_success() {
-        // A missing binary (Err from run_with_cancel) used to satisfy the
-        // old `.ok()?` and continued as if nothing failed.
-        let spawn_error = std::io::Result::Err(std::io::Error::other("not found"));
+        // A missing binary (SpawnError from run_with_cancel) used to satisfy
+        // the old `.ok()?` and continued as if nothing failed.
+        let spawn_error = SubprocessResult::SpawnError(std::io::Error::other("not found"));
         let message = rasterization_failure(spawn_error, "pdftoppm").expect("failure");
         assert!(message.contains("could not start"), "{message}");
     }
@@ -591,5 +589,44 @@ Page three.
         let failed =
             rasterization_failure(run_with_cancel(command, None), "sips").expect("failure");
         assert!(failed.contains("oops"), "{failed}");
+    }
+
+    #[test]
+    fn cache_insert_evicts_beyond_capacity_in_lru_order() {
+        // Hermetic: fixtures only, no tectonic or rasterization needed.
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::write(directory.path().join("page-1.png"), b"png").expect("page image");
+        let renderer = NativePdfRenderer::new();
+        let pages = Arc::new(sample_pages(directory.path()));
+
+        for id in 0..RASTER_CACHE_CAPACITY as u64 {
+            renderer.cache_insert(100 + id, pages.clone(), false);
+        }
+        // Touching the oldest entry makes it most-recently used again.
+        assert!(renderer.cache_hit(100).is_some());
+        renderer.cache_insert(200, pages.clone(), false);
+
+        let mut cache = renderer
+            .raster_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(cache.make_contiguous().len(), RASTER_CACHE_CAPACITY);
+        // The now-least-recent entry (101) was evicted, not the touched 100.
+        assert!(!cache.iter().any(|(key, _, _)| *key == 101));
+        assert!(cache.iter().any(|(key, _, _)| *key == 100));
+        assert_eq!(cache.front().map(|(key, _, _)| *key), Some(200));
+    }
+
+    #[test]
+    fn cache_hit_rejects_entries_whose_page_images_are_gone() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::write(directory.path().join("page-1.png"), b"png").expect("page image");
+        let renderer = NativePdfRenderer::new();
+        let hash = hash_pdf_bytes(b"%PDF-gone");
+        renderer.cache_insert(hash, Arc::new(sample_pages(directory.path())), false);
+        assert!(renderer.cache_hit(hash).is_some());
+
+        std::fs::remove_file(directory.path().join("page-1.png")).expect("remove");
+        assert!(renderer.cache_hit(hash).is_none());
     }
 }

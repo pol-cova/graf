@@ -40,34 +40,54 @@ impl PreviewView {
         cx: &mut Context<Self>,
     ) {
         self.release_page_assets(cx);
-        self.pages = pages;
-        self.is_retained_stale = false;
-        self.is_rendering = false;
-        self.last_error_summary = None;
-        self.render_notice = notice;
+        self.adopt_rendered_pages(pages, notice);
         cx.notify();
     }
 
     pub fn set_compile_failed(&mut self, error_msg: Option<String>, cx: &mut Context<Self>) {
-        self.is_retained_stale = true;
-        self.is_rendering = false;
-        self.last_error_summary = error_msg;
+        self.retain_stale(error_msg);
         cx.notify();
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.release_page_assets(cx);
+        self.reset_state();
+        cx.notify();
+    }
+
+    pub fn set_rendering(&mut self, cx: &mut Context<Self>) {
+        self.begin_rendering();
+        cx.notify();
+    }
+
+    /// A fresh render replaces everything: stale markers and the previous
+    /// error summary are gone once valid pages exist.
+    fn adopt_rendered_pages(&mut self, pages: Vec<RenderedPage>, notice: Option<String>) {
+        self.pages = pages;
+        self.is_retained_stale = false;
+        self.is_rendering = false;
+        self.last_error_summary = None;
+        self.render_notice = notice;
+    }
+
+    /// A failed compile keeps the last valid pages on screen (the
+    /// preserve-last-valid-preview invariant) and flags them as stale.
+    fn retain_stale(&mut self, error_msg: Option<String>) {
+        self.is_retained_stale = true;
+        self.is_rendering = false;
+        self.last_error_summary = error_msg;
+    }
+
+    fn begin_rendering(&mut self) {
+        self.is_rendering = true;
+    }
+
+    fn reset_state(&mut self) {
         self.pages.clear();
         self.is_retained_stale = false;
         self.is_rendering = false;
         self.last_error_summary = None;
         self.render_notice = None;
-        cx.notify();
-    }
-
-    pub fn set_rendering(&mut self, cx: &mut Context<Self>) {
-        self.is_rendering = true;
-        cx.notify();
     }
 
     /// GPUI retains every decoded image in its asset cache for the life of the
@@ -80,18 +100,22 @@ impl PreviewView {
     }
 
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
-        self.scale = (self.scale + 0.1).min(3.0);
+        self.zoom_by(0.1);
         cx.notify();
     }
 
     pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
-        self.scale = (self.scale - 0.1).max(0.4);
+        self.zoom_by(-0.1);
         cx.notify();
     }
 
     pub fn reset_zoom(&mut self, cx: &mut Context<Self>) {
         self.scale = 1.0;
         cx.notify();
+    }
+
+    fn zoom_by(&mut self, delta: f32) {
+        self.scale = (self.scale + delta).clamp(0.4, 3.0);
     }
 }
 
@@ -339,6 +363,16 @@ impl PreviewView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn sample_page(index: usize) -> RenderedPage {
+        RenderedPage {
+            page_index: index,
+            width: 100,
+            height: 140,
+            image_path: PathBuf::from(format!("/tmp/graf-test/page-{index}.png")),
+        }
+    }
 
     #[test]
     fn test_preview_view_initial_state() {
@@ -346,5 +380,82 @@ mod tests {
         assert_eq!(view.scale, 1.0);
         assert!(view.pages.is_empty());
         assert!(!view.is_retained_stale);
+    }
+
+    #[test]
+    fn compile_failure_retains_the_last_valid_preview() {
+        let mut view = PreviewView::new();
+        view.adopt_rendered_pages(vec![sample_page(0)], None);
+
+        view.retain_stale(Some("undefined control sequence".to_string()));
+
+        // The preserve-last-valid-preview invariant: pages stay on screen,
+        // flagged stale, with the error summary for the banner.
+        assert!(view.is_retained_stale);
+        assert_eq!(view.pages.len(), 1);
+        assert!(!view.is_rendering);
+        assert_eq!(
+            view.last_error_summary.as_deref(),
+            Some("undefined control sequence")
+        );
+    }
+
+    #[test]
+    fn a_fresh_render_clears_stale_state_and_errors() {
+        let mut view = PreviewView::new();
+        view.retain_stale(Some("boom".to_string()));
+        view.begin_rendering();
+        assert!(view.is_rendering);
+        assert!(view.is_retained_stale);
+
+        view.adopt_rendered_pages(vec![sample_page(0)], Some("sips fallback".to_string()));
+
+        assert!(!view.is_retained_stale);
+        assert!(!view.is_rendering);
+        assert!(view.last_error_summary.is_none());
+        assert_eq!(view.render_notice.as_deref(), Some("sips fallback"));
+    }
+
+    #[test]
+    fn rendering_flag_clears_on_either_outcome() {
+        let mut view = PreviewView::new();
+        view.begin_rendering();
+
+        view.retain_stale(None);
+        assert!(!view.is_rendering);
+
+        view.begin_rendering();
+        view.adopt_rendered_pages(vec![sample_page(0)], None);
+        assert!(!view.is_rendering);
+    }
+
+    #[test]
+    fn reset_state_clears_everything() {
+        let mut view = PreviewView::new();
+        view.adopt_rendered_pages(vec![sample_page(0)], Some("notice".to_string()));
+        view.retain_stale(Some("err".to_string()));
+
+        view.reset_state();
+
+        assert!(view.pages.is_empty());
+        assert!(!view.is_retained_stale);
+        assert!(!view.is_rendering);
+        assert!(view.last_error_summary.is_none());
+        assert!(view.render_notice.is_none());
+    }
+
+    #[test]
+    fn zoom_stays_within_bounds() {
+        let mut view = PreviewView::new();
+        for _ in 0..40 {
+            view.zoom_by(0.1);
+        }
+        assert!((view.scale - 3.0).abs() < 1e-4);
+        for _ in 0..40 {
+            view.zoom_by(-0.1);
+        }
+        assert!((view.scale - 0.4).abs() < 1e-4);
+        view.scale = 1.0;
+        assert_eq!(view.scale, 1.0);
     }
 }
