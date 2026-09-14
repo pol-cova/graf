@@ -17,34 +17,6 @@ pub struct ZoteroItem {
 }
 
 impl ZoteroItem {
-    pub fn to_bibtex(&self) -> String {
-        let entry_type = if self.publication.is_some() {
-            "article"
-        } else {
-            "misc"
-        };
-        let authors_str = self.authors.join(" and ");
-        let mut out = format!("@{entry_type}{{{},\n", self.citekey);
-        out.push_str(&format!("  title = {{{}}},\n", self.title));
-        if !authors_str.is_empty() {
-            out.push_str(&format!("  author = {{{authors_str}}},\n"));
-        }
-        if let Some(year) = self.year {
-            out.push_str(&format!("  year = {{{year}}},\n"));
-        }
-        if let Some(pub_name) = &self.publication {
-            out.push_str(&format!("  journal = {{{pub_name}}},\n"));
-        }
-        if let Some(doi) = &self.doi {
-            out.push_str(&format!("  doi = {{{doi}}},\n"));
-        }
-        if let Some(url) = &self.url {
-            out.push_str(&format!("  url = {{{url}}},\n"));
-        }
-        out.push_str("}\n");
-        out
-    }
-
     pub fn to_bib_entry(&self) -> BibEntry {
         let title = Some(self.title.clone());
         let author = if self.authors.is_empty() {
@@ -128,18 +100,6 @@ impl ZoteroLibrary {
             });
         }
     }
-
-    pub fn search(&self, query: &str) -> Vec<&ZoteroItem> {
-        let q = query.to_lowercase();
-        self.items
-            .iter()
-            .filter(|item| {
-                item.citekey.to_lowercase().contains(&q)
-                    || item.title.to_lowercase().contains(&q)
-                    || item.authors.iter().any(|a| a.to_lowercase().contains(&q))
-            })
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -147,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_zotero_item_to_bibtex_and_entry() {
+    fn test_zotero_item_to_bib_entry() {
         let item = ZoteroItem {
             key: "item1".to_string(),
             citekey: "vaswani2017attention".to_string(),
@@ -161,36 +121,35 @@ mod tests {
             pdf_path: None,
         };
 
-        let bibtex = item.to_bibtex();
-        assert!(bibtex.starts_with("@article{vaswani2017attention,"));
-        assert!(bibtex.contains("title = {Attention Is All You Need},"));
-        assert!(bibtex.contains("author = {Ashish Vaswani and Noam Shazeer},"));
-        assert!(bibtex.contains("journal = {NeurIPS},"));
-        assert!(bibtex.contains("year = {2017},"));
-
         let entry = item.to_bib_entry();
         assert_eq!(entry.key, "vaswani2017attention");
         assert_eq!(entry.title.as_deref(), Some("Attention Is All You Need"));
+        assert_eq!(entry.entry_type, "article");
+        assert_eq!(
+            entry.author.as_deref(),
+            Some("Ashish Vaswani and Noam Shazeer")
+        );
+        assert_eq!(entry.year.as_deref(), Some("2017"));
     }
 
     #[test]
-    fn test_zotero_library_search() {
-        let mut lib = ZoteroLibrary::new();
-        lib.items.push(ZoteroItem {
-            key: "1".to_string(),
-            citekey: "lecun2015deep".to_string(),
-            title: "Deep Learning".to_string(),
-            authors: vec!["Yann LeCun".to_string(), "Yoshua Bengio".to_string()],
-            year: Some(2015),
-            publication: Some("Nature".to_string()),
+    fn test_zotero_item_to_bib_entry_without_publication() {
+        let item = ZoteroItem {
+            key: "item1".to_string(),
+            citekey: "thesis2026".to_string(),
+            title: "A Thesis".to_string(),
+            authors: vec![],
+            year: None,
+            publication: None,
             abstract_note: None,
             doi: None,
             url: None,
             pdf_path: None,
-        });
+        };
 
-        assert_eq!(lib.search("deep").len(), 1);
-        assert_eq!(lib.search("bengio").len(), 1);
-        assert_eq!(lib.search("transformer").len(), 0);
+        let entry = item.to_bib_entry();
+        assert_eq!(entry.entry_type, "misc");
+        assert_eq!(entry.author, None);
+        assert_eq!(entry.year, None);
     }
 }
