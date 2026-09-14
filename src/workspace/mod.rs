@@ -188,6 +188,8 @@ pub struct Workspace {
     pub(crate) completion_selected: usize,
     pub(crate) find_state: FindState,
     pub(crate) find_bar_open: bool,
+    /// Personas routed through the shared prompt editor.
+    pub(crate) prompt_target: state::PromptTarget,
     pub(crate) active_modal: ActiveModal,
     pub(crate) pending_recovery: Option<crate::project::recovery::RecoveryJournal>,
 }
@@ -314,6 +316,7 @@ impl Workspace {
             completion_selected: 0,
             find_state: FindState::new(),
             find_bar_open: false,
+            prompt_target: state::PromptTarget::Idle,
             active_modal: ActiveModal::None,
             pending_recovery: None,
         };
@@ -438,6 +441,7 @@ impl Workspace {
         let content = self.editor.read(cx).text().to_string();
         self.find_state.set_query(reference.clone(), &content);
         self.find_bar_open = true;
+        self.prompt_target = state::PromptTarget::Find;
         self.prompt_editor
             .update(cx, |input, cx| input.set_input_text(reference, cx));
         if let Some(matched) = self.find_state.next_match().cloned() {
@@ -590,6 +594,11 @@ impl Workspace {
 
     pub fn toggle_find(&mut self, cx: &mut Context<Self>) {
         self.find_bar_open = !self.find_bar_open;
+        self.prompt_target = if self.find_bar_open {
+            state::PromptTarget::Find
+        } else {
+            state::PromptTarget::Idle
+        };
         if self.find_bar_open {
             let query = self
                 .editor
@@ -738,6 +747,7 @@ impl Workspace {
         self.prompt_editor
             .update(cx, |input, cx| input.set_input_text("", cx));
         self.active_modal = ActiveModal::QuickOpen(String::new());
+        self.prompt_target = state::PromptTarget::QuickOpen;
         cx.notify();
     }
 
@@ -745,6 +755,7 @@ impl Workspace {
         self.prompt_editor
             .update(cx, |input, cx| input.set_input_text("", cx));
         self.active_modal = ActiveModal::CommandPalette(String::new());
+        self.prompt_target = state::PromptTarget::Palette;
         cx.notify();
     }
 
@@ -757,8 +768,10 @@ impl Workspace {
             self.completion_open = false;
             self.editor
                 .update(cx, |editor, _| editor.set_completion_active(false));
-        } else if self.find_bar_open {
+        }
+        if self.find_bar_open {
             self.find_bar_open = false;
+            self.prompt_target = state::PromptTarget::Idle;
         }
         cx.notify();
     }
@@ -776,21 +789,21 @@ impl Workspace {
         let submitted = raw_query.contains('\n');
         let query = raw_query.replace('\n', "");
 
-        if self.find_bar_open {
+        if self.prompt_target == state::PromptTarget::Find {
             let content = self.editor.read(cx).text().to_string();
             self.find_state.set_query(query.clone(), &content);
         }
 
         if submitted {
-            if self.find_bar_open
+            if self.prompt_target == state::PromptTarget::Find
                 && let Some(matched) = self.find_state.next_match().cloned()
             {
                 self.editor
                     .update(cx, |editor, cx| editor.select_range(matched, cx));
             }
 
-            match self.active_modal.clone() {
-                ActiveModal::QuickOpen(_) => {
+            match self.prompt_target {
+                state::PromptTarget::QuickOpen => {
                     let query = query.to_lowercase();
                     if let Some(path) = self
                         .project_tree
@@ -799,17 +812,19 @@ impl Workspace {
                         .map(|entry| entry.path.clone())
                     {
                         self.active_modal = ActiveModal::None;
+                        self.prompt_target = state::PromptTarget::Idle;
                         self.open_file(path, cx);
                     }
                 }
-                ActiveModal::CommandPalette(_) => {
+                state::PromptTarget::Palette => {
                     let query = query.to_lowercase();
                     if let Some(command) = commands::filter_commands(&query).next() {
                         self.active_modal = ActiveModal::None;
+                        self.prompt_target = state::PromptTarget::Idle;
                         self.dispatch_command_action(command.id, cx);
                     }
                 }
-                _ => {}
+                state::PromptTarget::Find | state::PromptTarget::Idle => {}
             }
             self.prompt_editor
                 .update(cx, |input, cx| input.set_input_text(query, cx));
