@@ -6,11 +6,6 @@ fn ai_result_superseded(delivered_generation: u64, newest_generation: u64) -> bo
     delivered_generation != newest_generation
 }
 
-/// Monotonic generation for AI ops; starting a new op cancels any in-flight
-/// older one by invalidating its result.
-pub(crate) static NEXT_AI_GENERATION: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
-
 impl Workspace {
     pub fn run_ai_operation(&mut self, op: AiOperationKind, cx: &mut Context<Self>) {
         let editor = self.editor.read(cx);
@@ -25,8 +20,9 @@ impl Workspace {
         let revision = editor.revision();
         let document_id = self.documents[self.active_doc_idx].id();
         let provider = self.ai_provider.clone();
-        let generation = NEXT_AI_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.ai_operation_generation = generation;
+        // Per-workspace counter: no app-global generation state.
+        self.ai_operation_generation += 1;
+        let generation = self.ai_operation_generation;
 
         cx.spawn(async move |this, cx| {
             let operation = op.clone();

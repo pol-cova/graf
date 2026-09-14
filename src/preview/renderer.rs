@@ -194,6 +194,10 @@ impl PdfRenderer for NativePdfRenderer {
 
         let hash = hash_pdf_bytes(pdf_bytes);
         if let Some(cached) = self.cache_hit(hash) {
+            // The cache hit means the full pipeline produced these pages;
+            // any fallback notice from an earlier sips render must go.
+            self.used_fallback
+                .store(false, std::sync::atomic::Ordering::Relaxed);
             return Ok((*cached).clone());
         }
 
@@ -274,14 +278,28 @@ impl PdfRenderer for NativePdfRenderer {
 
 fn pdftoppm_available() -> bool {
     // Command::output reports Ok even for a nonzero exit, which is enough:
-    // only a missing binary results in Err. Cache nothing; poppler may be
-    // installed while the app runs.
-    Command::new("pdftoppm")
+    // only a missing binary results in Err. Cached with a TTL so poppler can
+    // show up mid-session without paying a process spawn per compile.
+    static PROBE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
+        std::sync::Mutex::new(None);
+    const PROBE_TTL_SECONDS: u64 = 30;
+
+    let mut cached = PROBE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((checked_at, available)) = cached.as_ref()
+        && checked_at.elapsed().as_secs() < PROBE_TTL_SECONDS
+    {
+        return *available;
+    }
+    let available = Command::new("pdftoppm")
         .arg("-v")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()
-        .is_ok()
+        .is_ok();
+    *cached = Some((std::time::Instant::now(), available));
+    available
 }
 
 fn page_numbers_in(run_dir: &Path) -> Result<Vec<u32>, String> {

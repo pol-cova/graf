@@ -111,14 +111,47 @@ fn last_chars(text: &str, max_chars: usize) -> String {
 }
 
 pub fn parse_canvas_response(response: &str) -> Result<CanvasDocument, String> {
-    let cleaned = response
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
+    // Fenced blocks can sit anywhere in prose ("Here is your diagram: ...");
+    // the old string-edge trims missed those cases entirely.
+    let fenced = extract_fences(response);
+    if fenced.is_empty() {
+        return CanvasDocument::from_json(response.trim())
+            .map_err(|e| format!("Invalid generated .graf JSON: {e}"));
+    }
 
-    CanvasDocument::from_json(cleaned).map_err(|e| format!("Invalid generated .graf JSON: {e}"))
+    for candidate in fenced {
+        if let Ok(document) = CanvasDocument::from_json(candidate) {
+            return Ok(document);
+        }
+    }
+    Err(
+        "Response contained no parseable .graf JSON (fenced blocks present but invalid)"
+            .to_string(),
+    )
+}
+
+/// All content inside ``` blocks, in order; unterminated closers treat the
+/// remainder as body, matching how models often leave trailing fences.
+fn extract_fences(response: &str) -> Vec<&str> {
+    let mut blocks = Vec::new();
+    let mut rest = response;
+    while let Some(open) = rest.find("```") {
+        let after_open = &rest[open + 3..];
+        if let Some(newline) = after_open.find('\n') {
+            let body = &after_open[newline + 1..];
+            if let Some(close) = body.find("```") {
+                blocks.push(body[..close].trim());
+                rest = &body[close + 3..];
+            } else {
+                blocks.push(body.trim());
+                break;
+            }
+        } else {
+            blocks.push(after_open.trim());
+            break;
+        }
+    }
+    blocks
 }
 
 #[cfg(test)]
@@ -147,6 +180,27 @@ mod tests {
         let document = parse_canvas_response(&response).expect("valid canvas document");
 
         assert!(document.elements.is_empty());
+    }
+
+    #[test]
+    fn parses_fences_in_the_middle_of_prose() {
+        let json = CanvasDocument::new().to_json().expect("serialize canvas");
+        let response = format!("Here is your diagram:\n\n```json\n{json}\n```\n\nEnjoy.");
+
+        let document = parse_canvas_response(&response).expect("fenced mid-prose block");
+
+        assert!(document.elements.is_empty());
+    }
+
+    #[test]
+    fn unfenced_canvas_still_parses_and_broken_fences_do_not_loose_data() {
+        let json = CanvasDocument::new().to_json().expect("serialize canvas");
+        assert!(parse_canvas_response(&json).is_ok());
+
+        // Fences present but unparsable content: an explicit failure is
+        // better than a half-parsed snapshot or an empty document.
+        let bad = "```json\nthis is not json\n```";
+        assert!(parse_canvas_response(bad).is_err());
     }
 
     #[test]
