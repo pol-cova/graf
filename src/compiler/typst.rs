@@ -7,24 +7,19 @@ use log::info;
 
 use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
 use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
-use super::resolve::{ResolvedEngine, resolve};
+use super::resolve::{LazyEngine, typst as typst_spec};
 
 /// Intermediates retention, in line with the tectonic backend; both keep the
 /// newest two job dirs when idle for at least a minute.
 const KEEP_JOB_DIRS: usize = 2;
 const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
-const TYPST_COMMON_PATHS: &[&str] = &[
-    "/opt/homebrew/bin/typst",
-    "/usr/local/bin/typst",
-    "/usr/bin/typst",
-    "~/.cargo/bin/typst",
-];
-
 static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Engine spec that resolves once, lazily, off the UI thread: the first
+/// warm-up or compile call performs the `which`/path probing and caches it.
 pub struct TypstEngine {
-    resolved: Option<ResolvedEngine>,
+    resolved: LazyEngine,
     build_dir: crate::util::TemporarySessionDir,
 }
 
@@ -36,30 +31,28 @@ impl Default for TypstEngine {
 
 impl TypstEngine {
     pub fn new() -> Self {
-        let resolved = resolve("typst", "GRAF_TYPST_PATH", TYPST_COMMON_PATHS);
-        match &resolved {
-            Some(engine) => info!(
-                "typst: {} engine at {}",
-                engine.source,
-                engine.path.display()
-            ),
-            None => info!("typst: no engine found"),
-        }
-        let build_dir = crate::util::TemporarySessionDir::new("graf_typst");
         Self {
-            resolved,
-            build_dir,
+            resolved: typst_spec(),
+            build_dir: crate::util::TemporarySessionDir::new("graf_typst"),
         }
     }
 }
 
 impl DocumentEngine for TypstEngine {
+    fn warm_up(&self) {
+        // First touch of `resolved` runs here, on the background warm-up
+        // thread; typst holds no support-file cache beyond that.
+        if self.resolved.get().is_none() {
+            info!("typst warm-up skipped: no engine found");
+        }
+    }
+
     fn compile(&self, request: CompileRequest) -> Result<CompileOutput, CompileError> {
         let start = Instant::now();
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let Some(engine) = &self.resolved else {
+        let Some(engine) = self.resolved.get() else {
             let message = "Typst is not installed or configured".to_string();
             return Err(CompileError {
                 compile_id,
@@ -199,7 +192,7 @@ pub fn parse_typst_diagnostics_from_streams<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::resolve::EngineSource;
+    use crate::compiler::resolve::{EngineSource, TYPST_COMMON_PATHS, resolve};
     use std::fs;
 
     use std::path::Path;
@@ -276,10 +269,10 @@ warning: variable 'x' is never used
 
         let temp_build = tempfile::tempdir().unwrap();
         let engine = TypstEngine {
-            resolved: Some(ResolvedEngine {
+            resolved: LazyEngine::with_resolution(Some(crate::compiler::resolve::ResolvedEngine {
                 path: executable,
                 source: EngineSource::System,
-            }),
+            })),
             build_dir: crate::util::TemporarySessionDir::from_path(temp_build.path()),
         };
         let request = CompileRequest::with_project(
@@ -299,7 +292,7 @@ warning: variable 'x' is never used
     fn reports_when_typst_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
         let engine = TypstEngine {
-            resolved: None,
+            resolved: LazyEngine::with_resolution(None),
             build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
         };
         let request = CompileRequest::simple("= Document", 1);

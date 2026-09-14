@@ -1,7 +1,89 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
+use log::info;
+
+/// Probe-path tables for each backend, kept here next to `resolve` so the
+/// backends do not carry their own per-OS path knowledge.
+pub(crate) const TECTONIC_COMMON_PATHS: &[&str] = &[
+    "/opt/homebrew/bin/tectonic",
+    "/usr/local/bin/tectonic",
+    "/usr/bin/tectonic",
+];
+
+pub(crate) const TYPST_COMMON_PATHS: &[&str] = &[
+    "/opt/homebrew/bin/typst",
+    "/usr/local/bin/typst",
+    "/usr/bin/typst",
+    "~/.cargo/bin/typst",
+];
+
+/// Defers engine resolution until a background task first touches it:
+/// construction is cheap (no `which` subprocess, no filesystem probing), so
+/// engines can be created on the UI thread before the first frame and
+/// resolved from the warm-up task or a compile on a background thread.
+pub struct LazyEngine {
+    name: &'static str,
+    env_var: &'static str,
+    common_paths: &'static [&'static str],
+    cell: OnceLock<Option<ResolvedEngine>>,
+}
+
+impl LazyEngine {
+    pub fn new(name: &'static str, env_var: &'static str) -> Self {
+        let paths = match name {
+            "tectonic" => TECTONIC_COMMON_PATHS,
+            "typst" => TYPST_COMMON_PATHS,
+            other => unreachable!("unknown engine name {other}"),
+        };
+        Self {
+            name,
+            env_var,
+            common_paths: paths,
+            cell: OnceLock::new(),
+        }
+    }
+
+    /// Resolves once and logs the outcome; later calls return the cached
+    /// result. The work here runs on whatever thread calls it — engines
+    /// ensure that is a background thread, never the UI thread.
+    pub fn get(&self) -> Option<ResolvedEngine> {
+        self.cell
+            .get_or_init(|| {
+                let resolved = resolve(self.name, self.env_var, self.common_paths);
+                match &resolved {
+                    Some(engine) => info!(
+                        "{}: {} engine at {}",
+                        self.name,
+                        engine.source,
+                        engine.path.display()
+                    ),
+                    None => info!("{}: no engine found", self.name),
+                }
+                resolved
+            })
+            .clone()
+    }
+
+    /// Test-only: a preset resolution, bypassing probing entirely.
+    #[cfg(test)]
+    pub(crate) fn with_resolution(resolved: Option<ResolvedEngine>) -> Self {
+        let lazy = Self::new("tectonic", "GRAF_TECTONIC_PATH");
+        let _ = lazy.cell.set(resolved);
+        lazy
+    }
+}
+
+/// Specs for lazy engine resolution, one per backend.
+pub fn tectonic() -> LazyEngine {
+    LazyEngine::new("tectonic", "GRAF_TECTONIC_PATH")
+}
+
+pub fn typst() -> LazyEngine {
+    LazyEngine::new("typst", "GRAF_TYPST_PATH")
+}
 /// Where a resolved engine executable came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineSource {
@@ -23,7 +105,7 @@ impl std::fmt::Display for EngineSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedEngine {
     pub path: PathBuf,
     pub source: EngineSource,
@@ -222,5 +304,21 @@ mod tests {
             expand_home("~/bin/typst", None),
             PathBuf::from("~/bin/typst")
         );
+    }
+
+    #[test]
+    fn lazy_engine_resolves_once_and_caches() {
+        let resolved = Some(ResolvedEngine {
+            path: PathBuf::from("/x/tectonic"),
+            source: EngineSource::System,
+        });
+        let lazy = LazyEngine::with_resolution(resolved.clone());
+        assert_eq!(lazy.get(), resolved);
+        assert_eq!(lazy.get(), resolved);
+    }
+
+    #[test]
+    fn lazy_engine_preserves_an_unresolved_engine() {
+        assert!(LazyEngine::with_resolution(None).get().is_none());
     }
 }

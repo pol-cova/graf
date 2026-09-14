@@ -5,6 +5,31 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+/// Per-user directory for graf-managed data, routed per OS so modules that
+/// only need "a place under the app's data root" carry no macOS assumptions.
+/// macOS: `~/Library/Application Support/graf` (same layout as settings);
+/// Windows: `%APPDATA%\graf`; elsewhere: `$XDG_DATA_HOME/graf` or
+/// `~/.local/share/graf`.
+pub fn app_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(home_dir()?.join("Library/Application Support").join("graf"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA").map(|app_data| PathBuf::from(app_data).join("graf"))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+            return Some(PathBuf::from(data_home).join("graf"));
+        }
+        Some(home_dir()?.join(".local/share").join("graf"))
+    }
+}
+
 pub struct TemporarySessionDir {
     path: PathBuf,
     _managed: Option<tempfile::TempDir>,

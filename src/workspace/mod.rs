@@ -245,11 +245,17 @@ impl Workspace {
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
 
-        // Prime the Tectonic support-file cache in the background so the
-        // first user compile is not the one waiting on downloads.
+        // Prime engines off the UI thread: resolution (a `which` spawn and
+        // path probes) and the Tectonic support-file download both happen in
+        // this background task, so the first frame and the first compile do
+        // not wait on them.
         let warm_up_engine = tectonic_compiler.clone();
+        let warm_up_typst = typst_compiler.clone();
         cx.background_executor()
-            .spawn(async move { warm_up_engine.warm_up() })
+            .spawn(async move {
+                warm_up_typst.warm_up();
+                warm_up_engine.warm_up();
+            })
             .detach();
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(

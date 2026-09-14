@@ -6,13 +6,7 @@ use log::{info, warn};
 
 use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
 use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
-use super::resolve::{ResolvedEngine, resolve};
-
-const TECTONIC_COMMON_PATHS: &[&str] = &[
-    "/opt/homebrew/bin/tectonic",
-    "/usr/local/bin/tectonic",
-    "/usr/bin/tectonic",
-];
+use super::resolve::{LazyEngine, tectonic as tectonic_spec};
 
 const WARM_UP_SOURCE: &str =
     "\\documentclass{article}\n\\begin{document}\nWarm-up.\n\\end{document}\n";
@@ -20,8 +14,10 @@ const WARM_UP_SOURCE: &str =
 const KEEP_JOB_DIRS: usize = 2;
 const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 
+/// Engine spec that resolves once, lazily, off the UI thread: the first
+/// warm-up or compile call performs the `which`/path probing and caches it.
 pub struct TectonicEngine {
-    resolved: Option<ResolvedEngine>,
+    resolved: LazyEngine,
     build_dir: crate::util::TemporarySessionDir,
 }
 
@@ -33,19 +29,9 @@ impl Default for TectonicEngine {
 
 impl TectonicEngine {
     pub fn new() -> Self {
-        let resolved = resolve("tectonic", "GRAF_TECTONIC_PATH", TECTONIC_COMMON_PATHS);
-        match &resolved {
-            Some(engine) => info!(
-                "tectonic: {} engine at {}",
-                engine.source,
-                engine.path.display()
-            ),
-            None => info!("tectonic: no engine found"),
-        }
-        let build_dir = crate::util::TemporarySessionDir::new("graf_tectonic");
         Self {
-            resolved,
-            build_dir,
+            resolved: tectonic_spec(),
+            build_dir: crate::util::TemporarySessionDir::new("graf_tectonic"),
         }
     }
 
@@ -53,10 +39,10 @@ impl TectonicEngine {
     #[cfg(test)]
     pub fn with_paths(executable: impl Into<PathBuf>, build_dir: impl Into<PathBuf>) -> Self {
         Self {
-            resolved: Some(ResolvedEngine {
+            resolved: LazyEngine::with_resolution(Some(super::resolve::ResolvedEngine {
                 path: executable.into(),
                 source: super::resolve::EngineSource::System,
-            }),
+            })),
             build_dir: crate::util::TemporarySessionDir::from_path(build_dir.into()),
         }
     }
@@ -64,7 +50,9 @@ impl TectonicEngine {
 
 impl DocumentEngine for TectonicEngine {
     fn warm_up(&self) {
-        let Some(engine) = &self.resolved else {
+        // First touch of `resolved` runs here, on the background warm-up
+        // thread; the UI thread never waits on engine probing.
+        let Some(engine) = self.resolved.get() else {
             info!("tectonic warm-up skipped: no engine found");
             return;
         };
@@ -80,7 +68,7 @@ impl DocumentEngine for TectonicEngine {
         let compile_id = request.compile_id;
         let revision = request.revision;
 
-        let Some(engine) = &self.resolved else {
+        let Some(engine) = self.resolved.get() else {
             let message = "Tectonic is not installed or configured".to_string();
             return Err(CompileError {
                 compile_id,
@@ -161,19 +149,21 @@ impl DocumentEngine for TectonicEngine {
 /// Tectonic downloads TeX support files on demand into a cache directory. Its
 /// macOS default, ~/Library/Caches/Tectonic, reads as disposable, and a wiped
 /// cache forces a full re-download on the next compile. Keep the cache in
-/// Application Support instead. An explicit TECTONIC_CACHE_DIR wins.
+/// the app's per-user data directory (no macOS assumption in the engine
+/// module itself: the per-OS routing lives in `util`). An explicit
+/// TECTONIC_CACHE_DIR wins.
 fn support_cache_dir() -> Option<PathBuf> {
     support_cache_dir_with(
         std::env::var_os("TECTONIC_CACHE_DIR").is_some(),
-        crate::util::home_dir().as_deref(),
+        crate::util::app_data_dir().as_deref(),
     )
 }
 
-fn support_cache_dir_with(user_override: bool, home: Option<&Path>) -> Option<PathBuf> {
+fn support_cache_dir_with(user_override: bool, app_data_dir: Option<&Path>) -> Option<PathBuf> {
     if user_override {
         return None;
     }
-    Some(PathBuf::from(home?).join("Library/Application Support/graf/compilers/tectonic-cache"))
+    Some(app_data_dir?.join("compilers/tectonic-cache"))
 }
 
 /// Cap on parsed diagnostics so pathological builds (e.g. thousands of
@@ -250,6 +240,7 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
 mod tests {
     use super::*;
     use crate::compiler::engine::test_assets;
+    use crate::compiler::resolve::{TECTONIC_COMMON_PATHS, resolve};
     use std::fs;
     use std::path::Path;
 
@@ -258,15 +249,19 @@ mod tests {
     }
 
     #[test]
-    fn support_cache_dir_lands_in_application_support() {
-        let dir = support_cache_dir_with(false, Some(Path::new("/Users/someone"))).unwrap();
+    fn support_cache_dir_lands_in_the_app_data_directory() {
+        let dir = support_cache_dir_with(
+            false,
+            Some(Path::new("/Users/someone/Library/Application Support/graf")),
+        )
+        .unwrap();
         assert_eq!(
             dir,
             PathBuf::from(
                 "/Users/someone/Library/Application Support/graf/compilers/tectonic-cache"
             )
         );
-        assert!(support_cache_dir_with(true, Some(Path::new("/Users/someone"))).is_none());
+        assert!(support_cache_dir_with(true, None).is_none());
         assert!(support_cache_dir_with(false, None).is_none());
     }
 
@@ -274,7 +269,7 @@ mod tests {
     fn reports_when_tectonic_is_unavailable() {
         let directory = tempfile::tempdir().unwrap();
         let engine = TectonicEngine {
-            resolved: None,
+            resolved: LazyEngine::with_resolution(None),
             build_dir: crate::util::TemporarySessionDir::from_path(directory.path()),
         };
         let request = CompileRequest::simple("\\documentclass{article}", 1);
