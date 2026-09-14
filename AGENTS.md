@@ -63,12 +63,10 @@ Do not introduce warnings from Graf code. The known `block` future-compatibility
 - `src/app.rs`: GPUI application and native window setup
 - `src/workspace/`: shell, tabs, panels, commands, modals, and task coordination
 - `src/editor/`: text buffer, input, rendering, syntax, completion, and search
-- `src/project/`: documents, project tree, persistence, settings, recovery, and references
+- `src/project/`: documents, project tree, persistence, settings, templates, recovery, and references
 - `src/compiler/`: engine interface, diagnostics, Tectonic, Typst, and compile controller
 - `src/preview/`: PDF rasterization and preview state
-- `src/canvas/`: `.graf` scene model, editor, history, and exporters
-- `src/ai/`: provider boundary, operations, and reviewed diffs
-- `src/plugins/`: plugin manifests and command dispatch
+- `src/canvas/`: `.graf` scene model, editor, undo history, and exporters
 - `src/ui/`: shared theme values
 
 ## Platform notes
