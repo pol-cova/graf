@@ -7,7 +7,6 @@ use gpui::{
 
 /// Visible QuickOpen rows; results are capped so rendering stays cheap.
 pub(crate) const QUICK_OPEN_LIMIT: usize = 50;
-use crate::ai::operations::AiOperationKind;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
@@ -15,8 +14,6 @@ impl Workspace {
     pub fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let is_quick_open = matches!(self.active_modal, ActiveModal::QuickOpen(_));
         let is_cmd_palette = matches!(self.active_modal, ActiveModal::CommandPalette(_));
-        let is_ai_assist = matches!(self.active_modal, ActiveModal::AiAssist(_));
-        let is_diff_review = matches!(self.active_modal, ActiveModal::DiffReview(_));
         let is_confirm_close = matches!(self.active_modal, ActiveModal::ConfirmClose(_));
         let is_restore_recovery = matches!(self.active_modal, ActiveModal::RestoreRecovery);
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
@@ -24,8 +21,6 @@ impl Workspace {
 
         if !is_quick_open
             && !is_cmd_palette
-            && !is_ai_assist
-            && !is_diff_review
             && !is_confirm_close
             && !is_restore_recovery
             && !is_settings
@@ -38,8 +33,6 @@ impl Workspace {
             "Open file"
         } else if is_cmd_palette {
             "Commands"
-        } else if is_ai_assist {
-            "Writing assistant"
         } else if is_settings {
             "Settings"
         } else if is_about {
@@ -665,191 +658,6 @@ impl Workspace {
                         ),
                 );
             }
-        } else if is_diff_review {
-            if let ActiveModal::DiffReview(review) = &self.active_modal {
-                let metrics = review.diff_summary();
-                let original = review.original.clone();
-                let replacement = review.replacement.clone();
-
-                let diff_body = div()
-                    .id("diff-modal-body")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .overflow_scroll()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .text_xs()
-                            .child(
-                                div()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(theme::color(theme::ACCENT_BLUE))
-                                    .child(review.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
-                                    .child(metrics),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .p_2()
-                            .rounded_xs()
-                            .bg(theme::color(theme::BG_BAR))
-                            .border_1()
-                            .border_color(theme::color(theme::ACCENT_RED))
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("Original")
-                            .child(div().mt_1().child(original)),
-                    )
-                    .child(
-                        div()
-                            .p_2()
-                            .rounded_xs()
-                            .bg(theme::color(theme::BG_BAR))
-                            .border_1()
-                            .border_color(theme::color(theme::ACCENT_GREEN))
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT))
-                            .child("Proposed")
-                            .child(div().mt_1().child(replacement)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_end()
-                            .gap_2()
-                            .mt_2()
-                            .child(
-                                div()
-                                    .id("diff-reject-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .rounded_xs()
-                                    .bg(theme::color(theme::BG_SURFACE))
-                                    .border_1()
-                                    .border_color(theme::color(theme::BORDER))
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.active_modal = ActiveModal::None;
-                                            cx.notify();
-                                        }),
-                                    )
-                                    .child("Reject"),
-                            )
-                            .child(
-                                div()
-                                    .id("diff-accept-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .rounded_xs()
-                                    .bg(theme::color(theme::ACCENT_BLUE))
-                                    .text_xs()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(theme::color(theme::BG))
-                                    .cursor_pointer()
-                                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.accept_diff_review(cx);
-                                        }),
-                                    )
-                                    .child("Apply changes"),
-                            ),
-                    );
-
-                modal_content = modal_content.child(diff_body);
-            }
-        } else if is_ai_assist {
-            let ai_ops = [
-                (
-                    AiOperationKind::RewriteAcademic,
-                    "Rewrite buffer with formal tone & mathematical rigor",
-                ),
-                (
-                    AiOperationKind::Shorten,
-                    "Tighten prose while retaining formulas and key claims",
-                ),
-                (
-                    AiOperationKind::Explain,
-                    "Generate clear walkthrough of selected technical concepts",
-                ),
-                (
-                    AiOperationKind::FixDiagnostic {
-                        message: "Auto-detected diagnostic".to_string(),
-                        line: None,
-                    },
-                    "Analyze errors and apply automated syntax patch",
-                ),
-                (
-                    AiOperationKind::GenerateDiagram {
-                        prompt: "System Architecture Pipeline".to_string(),
-                    },
-                    "Create structured vector scene from description",
-                ),
-            ];
-
-            let mut list = div()
-                .id("ai-assist-list")
-                .flex()
-                .flex_col()
-                .py_1()
-                .overflow_scroll();
-            for (op, desc) in ai_ops {
-                let name = op.label();
-                let row = div()
-                    .id(format!("ai-op-{}", name))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px_3()
-                    .py_2()
-                    .text_xs()
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
-                            this.run_ai_operation(op.clone(), cx);
-                        }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(theme::color(theme::TEXT))
-                                    .child(name),
-                            )
-                            .child(
-                                div()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
-                                    .child(desc),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child("Run"),
-                    );
-                list = list.child(row);
-            }
-            modal_content = modal_content.child(list);
         } else if is_cmd_palette {
             let filter = self.prompt_editor.read(cx).text().to_lowercase();
 

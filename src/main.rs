@@ -1,11 +1,9 @@
 use log::info;
 
-mod ai;
 mod app;
 mod canvas;
 mod compiler;
 mod editor;
-mod plugins;
 mod preview;
 mod project;
 mod ui;

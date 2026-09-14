@@ -1,4 +1,3 @@
-mod ai;
 mod commands;
 mod compilation;
 mod diagnostics;
@@ -26,9 +25,6 @@ use gpui::{
 };
 
 use self::commands::CommandId;
-use crate::ai::diff::DiffReview;
-use crate::ai::operations::{AiOperationKind, execute_operation, parse_canvas_response};
-use crate::ai::provider::AiProvider;
 use crate::canvas::view::CanvasView;
 use crate::compiler::EngineKind;
 use crate::compiler::controller::CompilerController;
@@ -64,7 +60,6 @@ actions!(
         CommandPalette,
         CloseModal,
         Autocomplete,
-        AiAssist,
         OpenSettings,
         OpenAbout,
         TogglePerformanceOverlay,
@@ -143,8 +138,6 @@ pub enum ActiveModal {
     None,
     QuickOpen(String),
     CommandPalette(String),
-    AiAssist(String),
-    DiffReview(DiffReview),
     ConfirmClose(usize),
     RestoreRecovery,
     Settings(SettingsTab),
@@ -163,7 +156,6 @@ pub struct Workspace {
     pub(crate) tectonic_compiler: Arc<dyn DocumentEngine>,
     pub(crate) typst_compiler: Arc<dyn DocumentEngine>,
     pub(crate) pdf_renderer: Arc<dyn PdfRenderer>,
-    pub(crate) ai_provider: Arc<dyn AiProvider>,
     pub(crate) settings: GrafSettings,
     pub(crate) controller: CompilerController,
     pub(crate) compile_task: Option<Task<()>>,
@@ -172,8 +164,6 @@ pub struct Workspace {
     /// Cancel flag for the in-flight compile; flipping it kills the running
     /// compiler subprocess (and rasterization) instead of waiting it out.
     pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-    /// Generation of the newest AI op; older in-flight results are dropped.
-    pub(crate) ai_operation_generation: u64,
     pub(crate) show_welcome: bool,
     pub(crate) sidebar_visible: bool,
     pub(crate) sidebar_tab: SidebarTab,
@@ -256,7 +246,6 @@ impl Workspace {
             .spawn(async move { warm_up_engine.warm_up() })
             .detach();
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
-        let ai_provider: Arc<dyn AiProvider> = crate::ai::provider::create_provider(&settings.ai);
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
             settings.editor.compile_debounce_ms,
         ));
@@ -298,14 +287,12 @@ impl Workspace {
             tectonic_compiler,
             typst_compiler,
             pdf_renderer,
-            ai_provider,
             settings,
             controller,
             compile_task: None,
             compile_running: false,
             compile_pending: false,
             compile_cancel: None,
-            ai_operation_generation: 0,
             show_welcome,
             sidebar_visible: true,
             sidebar_tab: SidebarTab::Files,
@@ -617,11 +604,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn open_ai_assist(&mut self, cx: &mut Context<Self>) {
-        self.active_modal = ActiveModal::AiAssist(String::new());
-        cx.notify();
-    }
-
     pub fn open_settings(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.active_modal = ActiveModal::Settings(tab);
         cx.notify();
@@ -649,18 +631,6 @@ impl Workspace {
         self.documents
             .push(Document::new_untitled(&doc_name, initial_typst));
         self.activate_document(self.documents.len() - 1, cx);
-    }
-
-    pub fn accept_diff_review(&mut self, cx: &mut Context<Self>) {
-        if let ActiveModal::DiffReview(review) = &self.active_modal {
-            let repl = review.replacement.clone();
-            self.editor.update(cx, |ed, cx| {
-                ed.set_text(repl, cx);
-            });
-            self.active_modal = ActiveModal::None;
-            self.trigger_compile(cx);
-            cx.notify();
-        }
     }
 
     pub fn new_canvas_diagram(&mut self, cx: &mut Context<Self>) {
@@ -761,12 +731,6 @@ impl Workspace {
         for item in zotero_lib.items {
             self.bib_index.add_entry(item.to_bib_entry());
         }
-        cx.notify();
-    }
-
-    pub fn scan_plugins(&mut self, cx: &mut Context<Self>) {
-        let mut host = crate::plugins::host::PluginHost::new();
-        let _ = host.scan_plugin_directory();
         cx.notify();
     }
 
@@ -875,7 +839,6 @@ impl Workspace {
             CommandId::ExportSvg => self.export_canvas_to_svg(cx),
             CommandId::CheckWritingStyle => self.lint_academic_style(cx),
             CommandId::SyncZotero => self.sync_zotero_library(cx),
-            CommandId::ReloadPlugins => self.scan_plugins(cx),
         }
     }
 
@@ -951,10 +914,6 @@ impl Workspace {
         window.focus(&self.prompt_editor.read(cx).focus_handle(cx), cx);
     }
 
-    fn on_ai_assist(&mut self, _: &AiAssist, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open_ai_assist(cx);
-    }
-
     fn on_open_settings(&mut self, _: &OpenSettings, _window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings(SettingsTab::Editor, cx);
     }
@@ -1007,7 +966,6 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_toggle_find))
             .on_action(cx.listener(Self::on_quick_open))
             .on_action(cx.listener(Self::on_command_palette))
-            .on_action(cx.listener(Self::on_ai_assist))
             .on_action(cx.listener(Self::on_open_settings))
             .on_action(cx.listener(Self::on_open_about))
             .on_action(cx.listener(Self::on_close_modal))

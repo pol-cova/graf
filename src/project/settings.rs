@@ -11,8 +11,8 @@ pub struct GrafSettings {
     pub editor: EditorSettings,
     #[serde(default)]
     pub layout: LayoutSettings,
-    #[serde(default)]
-    pub ai: AiSettings,
+    // `ai` settings were removed for the v1 editor-only scope; legacy keys
+    // in an existing settings.json are silently ignored by serde.
 }
 
 impl GrafSettings {
@@ -151,32 +151,6 @@ fn preserve_corrupt_settings(path: &Path) -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum AiProviderKind {
-    #[default]
-    Acp,
-    OpenAiCompatible,
-    Disabled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(default)]
-pub struct AcpSettings {
-    pub command: Option<PathBuf>,
-    pub args: Vec<String>,
-    pub timeout_seconds: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(default)]
-pub struct AiSettings {
-    pub provider: AiProviderKind,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-    pub acp: AcpSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
