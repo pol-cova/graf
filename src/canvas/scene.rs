@@ -121,7 +121,7 @@ impl CanvasDocument {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct CanvasViewport {
     pub pan_x: f32,
     pub pan_y: f32,
@@ -158,7 +158,6 @@ pub struct CanvasElement {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub rotation: f32,
     pub style: ElementStyle,
     pub kind: ElementKind,
 }
@@ -178,7 +177,6 @@ impl CanvasElement {
             y,
             width,
             height,
-            rotation: 0.0,
             style: ElementStyle::default(),
             kind: ElementKind::Rectangle { border_radius },
         }
@@ -191,7 +189,6 @@ impl CanvasElement {
             y,
             width,
             height,
-            rotation: 0.0,
             style: ElementStyle::default(),
             kind: ElementKind::Ellipse,
         }
@@ -210,7 +207,6 @@ impl CanvasElement {
             y: start_y.min(end_y),
             width: (end_x - start_x).abs(),
             height: (end_y - start_y).abs(),
-            rotation: 0.0,
             style: ElementStyle::default(),
             kind: ElementKind::Arrow {
                 start_x,
@@ -234,7 +230,6 @@ impl CanvasElement {
             y: start_y.min(end_y),
             width: (end_x - start_x).abs(),
             height: (end_y - start_y).abs(),
-            rotation: 0.0,
             style: ElementStyle::default(),
             kind: ElementKind::Line {
                 start_x,
@@ -262,7 +257,6 @@ impl CanvasElement {
             y,
             width,
             height,
-            rotation: 0.0,
             style: ElementStyle {
                 stroke_color: "#abb2bf".to_string(),
                 stroke_width: 1.0,
