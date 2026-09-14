@@ -1,111 +1,135 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandPaletteItem {
-    pub id: u32,
+    pub id: CommandId,
     pub title: &'static str,
     pub shortcut: &'static str,
     pub category: &'static str,
 }
 
+/// Exhaustive identifier for every palette command; dispatch matches on
+/// this enum so the compiler flags forgotten arms instead of silently
+/// ignoring a hand-typed number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandId {
+    Compile,
+    Save,
+    FindInFile,
+    ToggleProject,
+    TogglePreview,
+    ToggleProblems,
+    CloseTab,
+    NewVectorDiagram,
+    NewTypstDocument,
+    AboutGraf,
+    OpenSettings,
+    CheckWritingStyle,
+    SyncZotero,
+    ExportTikz,
+    ExportSvg,
+    InsertTable,
+    ReloadPlugins,
+}
+
 pub fn all_commands() -> &'static [CommandPaletteItem] {
     &[
         CommandPaletteItem {
-            id: 1,
+            id: CommandId::Compile,
             title: "Compile",
             shortcut: "⌘⇧B",
             category: "Document",
         },
         CommandPaletteItem {
-            id: 2,
+            id: CommandId::Save,
             title: "Save",
             shortcut: "⌘S",
             category: "File",
         },
         CommandPaletteItem {
-            id: 14,
+            id: CommandId::InsertTable,
             title: "Insert Table or Matrix",
             shortcut: "⌘⌥T",
             category: "Editor",
         },
         CommandPaletteItem {
-            id: 17,
+            id: CommandId::CheckWritingStyle,
             title: "Check Writing Style",
             shortcut: "⌘⌥L",
             category: "Quality",
         },
         CommandPaletteItem {
-            id: 18,
+            id: CommandId::SyncZotero,
             title: "Sync Zotero Library",
             shortcut: "",
             category: "References",
         },
         CommandPaletteItem {
-            id: 15,
+            id: CommandId::ExportTikz,
             title: "Export Canvas as TikZ",
             shortcut: "",
             category: "Export",
         },
         CommandPaletteItem {
-            id: 16,
+            id: CommandId::ExportSvg,
             title: "Export Canvas as SVG",
             shortcut: "",
             category: "Export",
         },
         CommandPaletteItem {
-            id: 21,
+            id: CommandId::ReloadPlugins,
             title: "Reload Plugins",
             shortcut: "",
             category: "Extensions",
         },
         CommandPaletteItem {
-            id: 11,
+            id: CommandId::NewTypstDocument,
             title: "New Typst Document",
             shortcut: "⌘T",
             category: "File",
         },
         CommandPaletteItem {
-            id: 8,
+            id: CommandId::NewVectorDiagram,
             title: "New Vector Diagram",
             shortcut: "⌘N",
             category: "File",
         },
         CommandPaletteItem {
-            id: 10,
+            id: CommandId::OpenSettings,
             title: "Settings",
             shortcut: "⌘,",
             category: "Preferences",
         },
         CommandPaletteItem {
-            id: 12,
+            id: CommandId::AboutGraf,
             title: "About graf",
             shortcut: "",
             category: "About",
         },
         CommandPaletteItem {
-            id: 3,
+            id: CommandId::FindInFile,
             title: "Find in File",
             shortcut: "⌘F",
             category: "Editor",
         },
         CommandPaletteItem {
-            id: 4,
+            id: CommandId::ToggleProject,
             title: "Toggle Project",
             shortcut: "⌘⇧E",
             category: "View",
         },
         CommandPaletteItem {
-            id: 5,
+            id: CommandId::TogglePreview,
             title: "Toggle Preview",
             shortcut: "⌘⇧P",
             category: "View",
         },
         CommandPaletteItem {
-            id: 6,
+            id: CommandId::ToggleProblems,
             title: "Toggle Problems",
             shortcut: "⌘⇧M",
             category: "View",
         },
         CommandPaletteItem {
-            id: 7,
+            id: CommandId::CloseTab,
             title: "Close Tab",
             shortcut: "⌘W",
             category: "File",

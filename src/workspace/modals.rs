@@ -867,7 +867,7 @@ impl Workspace {
                 let category = item.category;
 
                 let row = div()
-                    .id(format!("cmd-row-{}", id))
+                    .id(format!("cmd-row-{:?}", id))
                     .flex()
                     .items_center()
                     .justify_between()

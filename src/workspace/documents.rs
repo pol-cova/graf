@@ -17,13 +17,10 @@ impl Workspace {
             .update(cx, |editor, cx| editor.set_diagnostics(Vec::new(), cx));
 
         let document = &self.documents[idx];
-        let title = document.title();
+        let kind = document.kind();
         let content = document.buffer().content().to_string();
-        let is_canvas = title.ends_with(".graf");
-        let is_typst = title.ends_with(".typ");
-        let is_plain_text = !is_typst && !title.ends_with(".tex");
 
-        if is_canvas {
+        if kind.is_canvas() {
             self.active_view_kind = ActiveViewKind::Canvas;
             if let Err(error) = self
                 .canvas
@@ -35,8 +32,7 @@ impl Workspace {
             self.active_view_kind = ActiveViewKind::Editor;
             self.editor.update(cx, |editor, cx| {
                 editor.set_text(content, cx);
-                editor.set_is_typst(is_typst, cx);
-                editor.set_plain_text(is_plain_text, cx);
+                editor.set_kind(kind, cx);
             });
         }
 
