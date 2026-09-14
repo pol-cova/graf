@@ -66,6 +66,12 @@ impl CanvasHistory {
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
+
+    /// Depth of the undo stack, for tests.
+    #[cfg(test)]
+    pub(crate) fn undo_len(&self) -> usize {
+        self.undo_stack.len()
+    }
 }
 
 #[cfg(test)]

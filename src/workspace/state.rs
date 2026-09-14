@@ -1,6 +1,66 @@
 //! Pure-logic home for the workspace: the index and naming arithmetic runs
 //! without GPUI so it can be unit-tested directly.
 
+use std::collections::HashMap;
+
+use crate::canvas::history::CanvasHistory;
+use crate::project::document::DocumentId;
+
+/// Undo/redo history for `.graf` documents, keyed by document identity.
+///
+/// One shared `Entity<CanvasView>` renders every canvas document, so the
+/// history cannot simply live in the view: `load_from_json` on each tab
+/// switch used to wipe it, making undo a one-way door after a round-trip.
+/// The history instead follows the document: the workspace swaps a
+/// document's history out of the view on deactivation and back in on
+/// activation.
+#[derive(Debug, Default)]
+pub(crate) struct CanvasHistoryStore {
+    owner: Option<DocumentId>,
+    entries: HashMap<DocumentId, CanvasHistory>,
+}
+
+impl CanvasHistoryStore {
+    /// Claims the history belonging to `id` as the new viewer of the shared
+    /// canvas; returns the history (or a fresh one) to hand into the view.
+    pub(crate) fn activate(&mut self, id: DocumentId) -> CanvasHistory {
+        self.owner = Some(id);
+        self.entries.remove(&id).unwrap_or_default()
+    }
+
+    /// Parks the view's current history under its active owner before the
+    /// display switches to another document.
+    pub(crate) fn settle(&mut self, history: CanvasHistory) {
+        if let Some(owner) = self.owner.take() {
+            self.entries.insert(owner, history);
+        }
+    }
+
+    /// Re-associates the history the view currently holds with `id` without
+    /// disturbing the view; used when a new canvas document adopts the
+    /// currently displayed scene as its starting content.
+    pub(crate) fn retitle(&mut self, id: DocumentId) {
+        self.owner = Some(id);
+    }
+
+    /// Discards any stashed history for `id`; called when its tab closes.
+    pub(crate) fn drop_document(&mut self, id: DocumentId) {
+        self.entries.remove(&id);
+        if self.owner == Some(id) {
+            self.owner = None;
+        }
+    }
+
+    /// Depth of the undo stack stashed for `id`, for tests.
+    #[cfg(test)]
+    pub(crate) fn undo_len(&self, id: DocumentId) -> usize {
+        self.entries
+            .get(&id)
+            .map(|history| history.undo_len())
+            .unwrap_or(0)
+    }
+}
+
 /// Index of the active tab after removing `removed_idx` from a list that had
 /// `len_before` tabs. Mirrors `force_close_tab`.
 pub(crate) fn active_index_after_close(
@@ -57,6 +117,67 @@ pub(crate) fn next_draft_title(kind: DraftKind, existing: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::scene::CanvasDocument;
+    #[test]
+    fn history_follows_its_document_across_tab_round_trips() {
+        let mut store = CanvasHistoryStore::default();
+        let diagram = DocumentId(7);
+
+        // Tab A: user creates; history survives the switch away and back.
+        let mut activated = store.activate(diagram);
+        activated.push_snapshot(CanvasDocument::new());
+        store.settle(activated);
+
+        let restored = store.activate(diagram);
+        assert!(restored.can_undo(), "undo must survive a tab round-trip");
+    }
+
+    #[test]
+    fn activating_a_never_edited_document_starts_fresh() {
+        let mut store = CanvasHistoryStore::default();
+        let history = store.activate(DocumentId(3));
+        assert!(!history.can_undo());
+    }
+
+    #[test]
+    fn closing_the_tab_discards_its_history() {
+        let mut store = CanvasHistoryStore::default();
+        let diagram = DocumentId(9);
+        let mut activated = store.activate(diagram);
+        activated.push_snapshot(CanvasDocument::new());
+        store.settle(activated);
+
+        store.drop_document(diagram);
+        let fresh = store.activate(diagram);
+        assert!(!fresh.can_undo());
+    }
+
+    #[test]
+    fn settle_keeps_the_active_owner_and_retitles_change_it() {
+        let mut store = CanvasHistoryStore::default();
+        let first = DocumentId(1);
+        let second = DocumentId(2);
+        let mut trail = CanvasHistory::new();
+        trail.push_snapshot(CanvasDocument::new());
+
+        // A live canvas document settles its trail on deactivation...
+        store.retitle(first);
+        store.settle(trail);
+        assert_eq!(store.undo_len(first), 1);
+
+        // ...and a new canvas document adopting the displayed scene takes
+        // the view's history with it, not `first`'s.
+        store.retitle(second);
+        store.settle(CanvasHistory::new());
+        assert_eq!(store.undo_len(first), 1);
+        assert_eq!(store.undo_len(second), 0);
+    }
+}
+
+#[cfg(test)]
+mod index_after_close_tests {
+    use super::*;
+
     #[test]
     fn closing_before_the_active_tab_shifts_the_active_index() {
         assert_eq!(active_index_after_close(3, 0, 5), 2);
