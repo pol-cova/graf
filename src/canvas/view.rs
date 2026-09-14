@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::canvas::history::CanvasHistory;
-use crate::canvas::scene::{CanvasDocument, CanvasElement, ElementKind};
+use crate::canvas::scene::{CanvasDocument, CanvasElement, CanvasViewport, ElementKind};
 use crate::canvas::svg::export_to_svg;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
@@ -575,6 +575,10 @@ impl CanvasView {
             .overflow_hidden();
         let zoom = self.document.viewport.zoom;
 
+        // Open-ended segments paint once through the path API (real
+        // endpoints + arrowheads are impossible with axis-aligned divs).
+        let mut strokes: Vec<StrokeSpec> = Vec::new();
+
         for elem in &self.document.elements {
             // Elements far outside the viewport contribute nothing to the
             // frame; skipping them keeps drag cost proportional to what is
@@ -610,7 +614,36 @@ impl CanvasView {
             let width = px(elem.width * zoom);
             let height = px(elem.height * zoom);
 
+            // Lines and arrows are deferred to one path-paint pass below;
+            // real endpoints and arrowheads are impossible with
+            // axis-aligned divs.
             let node = match &elem.kind {
+                ElementKind::Line {
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                } => {
+                    strokes.push(StrokeSpec {
+                        start: (*start_x, *start_y),
+                        end: (*end_x, *end_y),
+                        arrowhead: false,
+                    });
+                    continue;
+                }
+                ElementKind::Arrow {
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                } => {
+                    strokes.push(StrokeSpec {
+                        start: (*start_x, *start_y),
+                        end: (*end_x, *end_y),
+                        arrowhead: true,
+                    });
+                    continue;
+                }
                 ElementKind::Rectangle { border_radius } => div()
                     .id(format!("shape-{}", elem.id))
                     .absolute()
@@ -643,37 +676,6 @@ impl CanvasView {
                         theme::color(theme::BORDER)
                     })
                     .shadow_md(),
-                ElementKind::Line {
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                }
-                | ElementKind::Arrow {
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                } => {
-                    let (min_screen_x, min_screen_y) = self
-                        .document
-                        .viewport
-                        .world_to_screen(start_x.min(*end_x), start_y.min(*end_y));
-                    let min_x = min_screen_x;
-                    let min_y = min_screen_y;
-                    let w = ((end_x - start_x).abs() * zoom).max(4.0);
-                    let h = ((end_y - start_y).abs() * zoom).max(4.0);
-
-                    div()
-                        .id(format!("shape-{}", elem.id))
-                        .absolute()
-                        .left(px(min_x))
-                        .top(px(min_y))
-                        .w(px(w))
-                        .h(px(h))
-                        .bg(theme::color(theme::ACCENT_BLUE))
-                        .rounded_xs()
-                }
                 ElementKind::Text {
                     content, font_size, ..
                 } => div()
@@ -694,10 +696,75 @@ impl CanvasView {
             viewport = viewport.child(node);
         }
 
+        // Segments/arrowheads paint through the path API once per frame;
+        // real endpoints are impossible with axis-aligned divs.
+        if !strokes.is_empty() {
+            let stroke_specs = strokes;
+            let viewport_layer = self.document.viewport;
+            viewport = viewport.child(gpui::canvas(
+                move |_bounds, _window, _cx| {},
+                move |_bounds, (), window, _cx| {
+                    for spec in &stroke_specs {
+                        draw_stroke(window, viewport_layer, *spec);
+                    }
+                },
+            ));
+        }
+
         viewport
     }
 }
 
+/// One open-ended segment: a stroked line with an optional arrowhead,
+/// defined in world coordinates and mapped through the shared transform.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StrokeSpec {
+    start: (f32, f32),
+    end: (f32, f32),
+    arrowhead: bool,
+}
+
+const STROKE_WIDTH_PX: f32 = 3.0;
+const ARROWHEAD_LENGTH_PX: f32 = 12.0;
+
+fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) {
+    let (sx, sy) = viewport.world_to_screen(spec.start.0, spec.start.1);
+    let (ex, ey) = viewport.world_to_screen(spec.end.0, spec.end.1);
+    let color = theme::color(theme::ACCENT_BLUE);
+
+    let main_path = {
+        let mut builder = gpui::PathBuilder::stroke(px(STROKE_WIDTH_PX));
+        builder.move_to(gpui::point(px(sx), px(sy)));
+        builder.line_to(gpui::point(px(ex), px(ey)));
+        builder.build()
+    };
+    let Ok(main_path) = main_path else {
+        return;
+    };
+    window.paint_path(main_path, color);
+
+    if !spec.arrowhead {
+        return;
+    }
+    // Two flanks forming a head at the end point, rotated off the segment
+    // direction by a fixed spread.
+    let angle = (ey - sy).atan2(ex - sx);
+    for flank_offset in [-30.0f32, 30.0] {
+        let head_angle = angle + flank_offset.to_radians();
+        let head_x = ex - ARROWHEAD_LENGTH_PX * head_angle.cos();
+        let head_y = ey - ARROWHEAD_LENGTH_PX * head_angle.sin();
+        let head_path = {
+            let mut builder = gpui::PathBuilder::stroke(px(STROKE_WIDTH_PX));
+            builder.move_to(gpui::point(px(ex), px(ey)));
+            builder.line_to(gpui::point(px(head_x), px(head_y)));
+            builder.build()
+        };
+        let Ok(head_path) = head_path else {
+            continue;
+        };
+        window.paint_path(head_path, color);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,5 +824,21 @@ mod tests {
         let removed = doc.remove_element("r1");
         assert!(removed.is_some());
         assert_eq!(doc.elements.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod stroke_tests {
+    use super::*;
+
+    #[test]
+    fn arrowhead_flanks_beside_the_segment() {
+        // Sanity on the geometry: flank origins are the end point, both
+        // flanks point backwards along the direction.
+        let spec = StrokeSpec { start: (0.0, 0.0), end: (100.0, 0.0), arrowhead: true };
+        let angle = 0.0f32;
+        let head_x = spec.end.0 - ARROWHEAD_LENGTH_PX * (angle + 30.0f32.to_radians()).cos();
+        assert!(head_x < spec.end.0);
+        assert!(spec.start.0 < spec.end.0);
     }
 }
