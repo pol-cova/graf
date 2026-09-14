@@ -44,12 +44,14 @@ const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
 /// page-images directory on disk; 4 covers the docs a user bounces between.
 const RASTER_CACHE_CAPACITY: usize = 4;
 
-type RasterCache = std::collections::VecDeque<(u64, Arc<Vec<RenderedPage>>)>;
+type RasterCache = std::collections::VecDeque<(u64, Arc<Vec<RenderedPage>>, bool)>;
 
 pub struct NativePdfRenderer {
     cache_dir: crate::util::TemporarySessionDir,
-    /// (content hash, pages) ordered least- to most-recently used. Identical
-    /// PDF bytes skip re-rasterization entirely.
+    /// (content hash, pages, degraded-to-sips flag) ordered least- to
+    /// most-recently used. Identical PDF bytes skip re-rasterization
+    /// entirely; the flag keeps the fallback notice honest for hits, since
+    /// both the full pipeline and the degraded sips path cache here.
     raster_cache: std::sync::Mutex<RasterCache>,
     /// Set when the last completed render degraded to the `sips` fallback.
     used_fallback: AtomicBool,
@@ -70,33 +72,32 @@ impl NativePdfRenderer {
         }
     }
 
-    fn cache_hit(&self, hash: u64) -> Option<Arc<Vec<RenderedPage>>> {
+    fn cache_hit(&self, hash: u64) -> Option<(Arc<Vec<RenderedPage>>, bool)> {
         let mut cache = self
             .raster_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let position = cache.iter().position(|(key, _)| *key == hash)?;
+        let position = cache.iter().position(|(key, _, _)| *key == hash)?;
         cache.rotate_left(position);
-        let entry = cache.pop_front()?;
+        let entry = cache.front()?.clone();
         // A pruned or reclaimed directory would leave the preview pointing
         // at missing images; re-rasterize in that case.
         if entry.1.first().is_some_and(|page| page.image_path.exists()) {
-            cache.push_front(entry.clone());
-            Some(entry.1)
+            Some((entry.1, entry.2))
         } else {
             None
         }
     }
 
-    fn cache_insert(&self, hash: u64, pages: Arc<Vec<RenderedPage>>) {
+    fn cache_insert(&self, hash: u64, pages: Arc<Vec<RenderedPage>>, degraded: bool) {
         let mut cache = self
             .raster_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(position) = cache.iter().position(|(key, _)| *key == hash) {
+        if let Some(position) = cache.iter().position(|(key, _, _)| *key == hash) {
             cache.remove(position);
         }
-        cache.push_front((hash, pages));
+        cache.push_front((hash, pages, degraded));
         while cache.len() > RASTER_CACHE_CAPACITY {
             cache.pop_back();
         }
@@ -109,6 +110,30 @@ fn hash_pdf_bytes(pdf_bytes: &[u8]) -> u64 {
     pdf_bytes.len().hash(&mut hasher);
     pdf_bytes.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Decides the failure message produced by one rasterization subprocess:
+/// success means `None`, a cancelled or failed run means a message, and —
+/// unlike a bare `.ok()?` — a spawn error (missing binary, exec failure)
+/// must also be a message rather than a silent pass-through.
+fn rasterization_failure(
+    result: std::io::Result<
+        Result<std::process::Output, crate::compiler::engine::CompileCancelled>,
+    >,
+    tool: &'static str,
+) -> Option<String> {
+    match result {
+        Err(error) => Some(format!("{tool} could not start: {error}")),
+        Ok(Err(_)) => Some(format!("{tool} rasterization cancelled")),
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                None
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Some(format!("{tool} rasterization failed: {stderr}"))
+            }
+        }
+    }
 }
 
 impl NativePdfRenderer {
@@ -128,17 +153,7 @@ impl NativePdfRenderer {
             .arg("-1")
             .arg(pdf_file)
             .arg(&output_root);
-        let output = run_with_cancel(command, cancel).ok()?;
-
-        let output = match output {
-            Ok(output) => output,
-            Err(_) => return Some("rasterization cancelled".to_string()),
-        };
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Some(format!("pdftoppm rasterization failed: {stderr}"));
-        }
-        None
+        rasterization_failure(run_with_cancel(command, cancel), "pdftoppm")
     }
 
     #[cfg(target_os = "macos")]
@@ -158,17 +173,7 @@ impl NativePdfRenderer {
             .arg(pdf_file)
             .arg("--out")
             .arg(&png_file);
-        let output = run_with_cancel(command, cancel).ok()?;
-
-        let output = match output {
-            Ok(output) => output,
-            Err(_) => return Some("rasterization cancelled".to_string()),
-        };
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Some(format!("sips rasterization failed: {stderr}"));
-        }
-        None
+        rasterization_failure(run_with_cancel(command, cancel), "sips")
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -193,12 +198,13 @@ impl PdfRenderer for NativePdfRenderer {
         }
 
         let hash = hash_pdf_bytes(pdf_bytes);
-        if let Some(cached) = self.cache_hit(hash) {
-            // The cache hit means the full pipeline produced these pages;
-            // any fallback notice from an earlier sips render must go.
+        if let Some((pages, degraded)) = self.cache_hit(hash) {
+            // The cache must not clear a notice by assumption: sips-path
+            // results are cached too, so restore the notice state that
+            // produced these exact pages.
             self.used_fallback
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            return Ok((*cached).clone());
+                .store(degraded, std::sync::atomic::Ordering::Relaxed);
+            return Ok((*pages).clone());
         }
 
         // Each render gets a fresh directory, so the cache would grow by a
@@ -225,9 +231,14 @@ impl PdfRenderer for NativePdfRenderer {
         let failure = if pdftoppm_available() {
             self.rasterize_with_pdftoppm(&pdf_file, &run_dir, cancel)
         } else {
-            self.used_fallback
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            self.rasterize_with_sips(&pdf_file, cancel)
+            // Only a *successful* sips render was a degraded render; a
+            // failed one is an error, not a fallback the archive kept.
+            let failure = self.rasterize_with_sips(&pdf_file, cancel);
+            if failure.is_none() {
+                self.used_fallback
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            failure
         };
 
         if let Some(message) = failure {
@@ -256,7 +267,12 @@ impl PdfRenderer for NativePdfRenderer {
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        self.cache_insert(hash, Arc::new(pages.clone()));
+        self.cache_insert(
+            hash,
+            Arc::new(pages.clone()),
+            self.used_fallback
+                .load(std::sync::atomic::Ordering::Relaxed),
+        );
         Ok(pages)
     }
 
@@ -508,5 +524,84 @@ Page three.
     fn hash_distinguishes_prefix_lengths() {
         assert_ne!(hash_pdf_bytes(b"%PDF-x"), hash_pdf_bytes(b"%PDF-"));
         assert_eq!(hash_pdf_bytes(b"same"), hash_pdf_bytes(b"same"));
+    }
+
+    fn sample_pages(path: &Path) -> Vec<RenderedPage> {
+        vec![RenderedPage {
+            page_index: 0,
+            width: 10,
+            height: 10,
+            image_path: path.join("page-1.png"),
+        }]
+    }
+
+    #[test]
+    fn degraded_cache_hit_keeps_the_fallback_notice() {
+        // Regression: sips-fallback pages land in the raster cache like any
+        // other render; a later hit used to clear the notice as if these
+        // pages came from the full pipeline.
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::write(directory.path().join("page-1.png"), b"png").expect("page image");
+        let renderer = NativePdfRenderer::new();
+        let bytes = b"%PDF-cache-hit";
+        renderer.cache_insert(
+            hash_pdf_bytes(bytes),
+            Arc::new(sample_pages(directory.path())),
+            true,
+        );
+
+        renderer.render_document(1, bytes, None).expect("hit");
+        assert!(renderer.render_notice().is_some());
+    }
+
+    #[test]
+    fn full_pipeline_cache_hit_clears_the_fallback_notice() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::write(directory.path().join("page-1.png"), b"png").expect("page image");
+        let renderer = NativePdfRenderer::new();
+        renderer
+            .used_fallback
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let bytes = b"%PDF-cache-hit full";
+        renderer.cache_insert(
+            hash_pdf_bytes(bytes),
+            Arc::new(sample_pages(directory.path())),
+            false,
+        );
+
+        renderer.render_document(1, bytes, None).expect("hit");
+        assert!(renderer.render_notice().is_none());
+    }
+
+    #[test]
+    fn spawn_errors_are_failures_not_silent_success() {
+        // A missing binary (Err from run_with_cancel) used to satisfy the
+        // old `.ok()?` and continued as if nothing failed.
+        let spawn_error = std::io::Result::Err(std::io::Error::other("not found"));
+        let message = rasterization_failure(spawn_error, "pdftoppm").expect("failure");
+        assert!(message.contains("could not start"), "{message}");
+    }
+
+    #[test]
+    fn rasterization_failure_classifies_subprocess_results() {
+        use crate::compiler::engine::run_with_cancel;
+
+        // Cancelled run → message without blame on the tool's stderr.
+        let cancel = Arc::new(AtomicBool::new(true));
+        let command = Command::new("echo");
+        let cancelled =
+            rasterization_failure(run_with_cancel(command, Some(&cancel)), "pdftoppm").unwrap();
+        assert!(cancelled.contains("cancelled"), "{cancelled}");
+
+        // Successful run → no failure.
+        let command = Command::new("echo");
+        assert!(rasterization_failure(run_with_cancel(command, None), "pdftoppm").is_none(),);
+
+        // Failed run → error text included.
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("echo oops >&2; exit 3");
+        let failed =
+            rasterization_failure(run_with_cancel(command, None), "sips").expect("failure");
+        assert!(failed.contains("oops"), "{failed}");
     }
 }
