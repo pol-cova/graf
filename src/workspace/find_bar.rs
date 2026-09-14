@@ -15,9 +15,9 @@ impl Workspace {
                 .h(px(24.0))
                 .rounded_xs()
                 .text_xs()
-                .text_color(theme::color(theme::TEXT_MUTED))
+                .text_color(theme::TEXT_MUTED)
                 .cursor_pointer()
-                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                .hover(|style| style.bg(theme::HOVER_BG))
         };
 
         div()
@@ -32,9 +32,9 @@ impl Workspace {
             .h(px(36.0))
             .px_1()
             .rounded_xs()
-            .bg(theme::color(theme::BG_SURFACE))
+            .bg(theme::BG_SURFACE)
             .border_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .shadow_lg()
             .on_mouse_down(
                 gpui::MouseButton::Left,
@@ -49,9 +49,9 @@ impl Workspace {
                     .h(px(26.0))
                     .px_2()
                     .rounded_xs()
-                    .bg(theme::color(theme::BG))
+                    .bg(theme::BG)
                     .border_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .overflow_hidden()
                     .child(
                         div()
@@ -67,7 +67,7 @@ impl Workspace {
                     .min_w(px(48.0))
                     .text_center()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT_MUTED))
+                    .text_color(theme::TEXT_MUTED)
                     .child(self.find_state.count_label()),
             )
             .child(
@@ -110,9 +110,9 @@ impl Workspace {
                     .role(Role::Button)
                     .aria_label("Match case")
                     .bg(if self.find_state.case_sensitive {
-                        theme::color(theme::TAB_ACTIVE)
+                        theme::TAB_ACTIVE
                     } else {
-                        theme::color(theme::BG_SURFACE)
+                        theme::BG_SURFACE
                     })
                     .on_mouse_down(
                         gpui::MouseButton::Left,

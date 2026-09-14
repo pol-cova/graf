@@ -23,11 +23,11 @@ impl EditorView {
                 .px_3()
                 .py_1p5()
                 .text_xs()
-                .text_color(theme::color(theme::TEXT))
+                .text_color(theme::TEXT)
                 .cursor_pointer()
-                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                .hover(|style| style.bg(theme::HOVER_BG))
         };
-        let separator = || div().h(px(1.0)).my_1().bg(theme::color(theme::BORDER));
+        let separator = || div().h(px(1.0)).my_1().bg(theme::BORDER);
 
         root = root.child(
             div()
@@ -41,8 +41,8 @@ impl EditorView {
                 .py_1()
                 .rounded_xs()
                 .border_1()
-                .border_color(theme::color(theme::BORDER))
-                .bg(theme::color(theme::BG_SURFACE))
+                .border_color(theme::BORDER)
+                .bg(theme::BG_SURFACE)
                 .shadow_lg()
                 .on_mouse_down(
                     MouseButton::Left,

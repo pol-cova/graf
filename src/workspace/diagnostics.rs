@@ -13,9 +13,9 @@ impl Workspace {
             .flex_none()
             .flex_col()
             .h(px(self.diagnostics_height))
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_t_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .overflow_scroll();
 
         let error_count = self
@@ -35,9 +35,9 @@ impl Workspace {
                 .flex_none()
                 .h(px(3.0))
                 .w_full()
-                .bg(theme::color(theme::BG_BAR))
+                .bg(theme::BG_BAR)
                 .cursor(CursorStyle::ResizeUpDown)
-                .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
+                .hover(|style| style.bg(theme::ACCENT_BLUE))
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
@@ -54,7 +54,7 @@ impl Workspace {
                 .px_3()
                 .py_1p5()
                 .border_b_1()
-                .border_color(theme::color(theme::BORDER))
+                .border_color(theme::BORDER)
                 .child(
                     div()
                         .flex()
@@ -66,9 +66,9 @@ impl Workspace {
                                 .text_xs()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(if self.diagnostics_filter == DiagnosticsFilter::All {
-                                    theme::color(theme::TEXT)
+                                    theme::TEXT
                                 } else {
-                                    theme::color(theme::TEXT_MUTED)
+                                    theme::TEXT_MUTED
                                 })
                                 .on_mouse_down(
                                     gpui::MouseButton::Left,
@@ -86,9 +86,9 @@ impl Workspace {
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(
                                     if self.diagnostics_filter == DiagnosticsFilter::Errors {
-                                        theme::color(theme::ACCENT_RED)
+                                        theme::ACCENT_RED
                                     } else {
-                                        theme::color(theme::TEXT_MUTED)
+                                        theme::TEXT_MUTED
                                     },
                                 )
                                 .on_mouse_down(
@@ -107,9 +107,9 @@ impl Workspace {
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(
                                     if self.diagnostics_filter == DiagnosticsFilter::Warnings {
-                                        theme::color(theme::ACCENT_ORANGE)
+                                        theme::ACCENT_ORANGE
                                     } else {
-                                        theme::color(theme::TEXT_MUTED)
+                                        theme::TEXT_MUTED
                                     },
                                 )
                                 .on_mouse_down(
@@ -130,7 +130,7 @@ impl Workspace {
                         .w(px(24.0))
                         .h(px(24.0))
                         .cursor_pointer()
-                        .hover(|s| s.text_color(theme::color(theme::TEXT)))
+                        .hover(|s| s.text_color(theme::TEXT))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(|this, _, _, cx| this.toggle_diagnostics(cx)),
@@ -157,7 +157,7 @@ impl Workspace {
                     .items_center()
                     .justify_center()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT_MUTED))
+                    .text_color(theme::TEXT_MUTED)
                     .child("No problems"),
             );
         }
@@ -176,7 +176,7 @@ impl Workspace {
                 .py_1()
                 .text_xs()
                 .cursor_pointer()
-                .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                .hover(|s| s.bg(theme::HOVER_BG))
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |this, _, _, cx| {
@@ -189,31 +189,26 @@ impl Workspace {
                         .items_center()
                         .gap_1()
                         .text_color(if is_error {
-                            theme::color(theme::ACCENT_RED)
+                            theme::ACCENT_RED
                         } else {
-                            theme::color(theme::ACCENT_ORANGE)
+                            theme::ACCENT_ORANGE
                         })
                         .child(div().w(px(12.0)).h(px(12.0)).child(icon_colored(
                             Icon::Alert,
-                            theme::color(if is_error {
+                            if is_error {
                                 theme::ACCENT_RED
                             } else {
                                 theme::ACCENT_ORANGE
-                            }),
+                            },
                         )))
                         .child(if is_error { "Error" } else { "Warning" }),
                 )
                 .child(
                     div()
-                        .text_color(theme::color(theme::ACCENT_BLUE))
+                        .text_color(theme::ACCENT_BLUE)
                         .child(format!("{line_num}:")),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .text_color(theme::color(theme::TEXT))
-                        .child(msg),
-                );
+                .child(div().flex_1().text_color(theme::TEXT).child(msg));
 
             drawer = drawer.child(row);
         }

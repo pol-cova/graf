@@ -18,7 +18,7 @@ pub enum Icon {
 }
 
 pub fn icon(kind: Icon) -> Svg {
-    icon_colored(kind, theme::color(theme::TEXT_MUTED))
+    icon_colored(kind, theme::TEXT_MUTED)
 }
 
 pub fn icon_colored(kind: Icon, color: Rgba) -> Svg {

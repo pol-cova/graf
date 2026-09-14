@@ -57,10 +57,10 @@ impl Workspace {
             .flex_col()
             .w(px(580.0))
             .max_h(px(460.0))
-            .bg(theme::color(theme::BG_SURFACE))
+            .bg(theme::BG_SURFACE)
             .rounded_md()
             .border_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .shadow_lg()
             .on_mouse_down(
                 gpui::MouseButton::Left,
@@ -74,12 +74,12 @@ impl Workspace {
                     .px_3()
                     .py_2()
                     .border_b_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .child(
                         div()
                             .text_xs()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::TEXT)
                             .child(title),
                     )
                     .child(
@@ -87,21 +87,16 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
-                                    .child("Esc"),
-                            )
+                            .child(div().text_xs().text_color(theme::TEXT_MUTED).child("Esc"))
                             .child(
                                 div()
                                     .id("close-modal")
                                     .px_1()
                                     .rounded_xs()
                                     .text_sm()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .cursor_pointer()
-                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|style| style.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         gpui::MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.close_modal(cx)),
@@ -120,9 +115,9 @@ impl Workspace {
                 .my_2()
                 .px_2()
                 .rounded_xs()
-                .bg(theme::color(theme::BG))
+                .bg(theme::BG)
                 .border_1()
-                .border_color(theme::color(theme::BORDER))
+                .border_color(theme::BORDER)
                 .overflow_hidden()
                 .child(
                     div()
@@ -146,8 +141,8 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .border_b_1()
-                    .border_color(theme::color(theme::BORDER))
-                    .bg(theme::color(theme::BG_BAR))
+                    .border_color(theme::BORDER)
+                    .bg(theme::BG_BAR)
                     .children(tabs.into_iter().map(|(t, label)| {
                         let is_active = t == tab;
                         div()
@@ -164,17 +159,17 @@ impl Workspace {
                                 gpui::FontWeight::NORMAL
                             })
                             .bg(if is_active {
-                                theme::color(theme::BG_SURFACE)
+                                theme::BG_SURFACE
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .text_color(if is_active {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(move |this, _, _, cx| {
@@ -199,12 +194,12 @@ impl Workspace {
                                 .px_2()
                                 .py_1()
                                 .rounded_xs()
-                                .bg(theme::color(theme::BG_BAR))
+                                .bg(theme::BG_BAR)
                                 .border_1()
-                                .border_color(theme::color(theme::BORDER))
+                                .border_color(theme::BORDER)
                                 .text_xs()
                                 .cursor_pointer()
-                                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                .hover(|style| style.bg(theme::HOVER_BG))
                         };
 
                         settings_body = settings_body
@@ -221,7 +216,7 @@ impl Workspace {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                                    .text_color(theme::TEXT_MUTED)
                                                     .child("Rebuild the active document after changes."),
                                             ),
                                     )
@@ -254,7 +249,7 @@ impl Workspace {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                                    .text_color(theme::TEXT_MUTED)
                                                     .child("Wait before rebuilding after a keystroke."),
                                             ),
                                     )
@@ -280,12 +275,12 @@ impl Workspace {
                                 .px_2()
                                 .py_1()
                                 .rounded_xs()
-                                .bg(theme::color(theme::BG_BAR))
+                                .bg(theme::BG_BAR)
                                 .border_1()
-                                .border_color(theme::color(theme::BORDER))
+                                .border_color(theme::BORDER)
                                 .text_xs()
                                 .cursor_pointer()
-                                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                .hover(|style| style.bg(theme::HOVER_BG))
                         };
 
                         settings_body = settings_body
@@ -403,7 +398,7 @@ impl Workspace {
                             .w(px(56.0))
                             .h(px(56.0))
                             .rounded_md()
-                            .bg(theme::color(theme::ACCENT_BLUE))
+                            .bg(theme::ACCENT_BLUE)
                             .text_size(px(28.0))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(gpui::white())
@@ -419,19 +414,19 @@ impl Workspace {
                                 div()
                                     .text_lg()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(theme::color(theme::TEXT))
+                                    .text_color(theme::TEXT)
                                     .child("graf"),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .child(format!("Version {version}")),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .child("A native workspace for technical writing"),
                             ),
                     )
@@ -449,11 +444,11 @@ impl Workspace {
                                     .py_1p5()
                                     .rounded_xs()
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .text_center()
                                     .text_xs()
                                     .cursor_pointer()
-                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|style| style.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         gpui::MouseButton::Left,
                                         cx.listener(move |_, _, _, cx| {
@@ -476,7 +471,7 @@ impl Workspace {
                                     .flex_1()
                                     .py_1p5()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::ACCENT_BLUE))
+                                    .bg(theme::ACCENT_BLUE)
                                     .text_center()
                                     .text_xs()
                                     .text_color(gpui::white())
@@ -507,19 +502,19 @@ impl Workspace {
                         .px_2()
                         .py_1()
                         .rounded_xs()
-                        .bg(theme::color(theme::BG_BAR))
+                        .bg(theme::BG_BAR)
                         .text_xs()
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .text_color(theme::color(theme::TEXT))
+                                .text_color(theme::TEXT)
                                 .child(entry.title.clone()),
                         )
                         .child(
                             div()
-                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .text_color(theme::TEXT_MUTED)
                                 .child(format!("{} chars", entry.content.len())),
                         ),
                 );
@@ -534,7 +529,7 @@ impl Workspace {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::TEXT)
                             .child("graf found unsaved changes from a previous session."),
                     )
                     .child(list)
@@ -551,9 +546,9 @@ impl Workspace {
                                     .py_1()
                                     .rounded_xs()
                                     .text_xs()
-                                    .text_color(theme::color(theme::ACCENT_RED))
+                                    .text_color(theme::ACCENT_RED)
                                     .cursor_pointer()
-                                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|style| style.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         gpui::MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.discard_recovery(cx)),
@@ -566,9 +561,9 @@ impl Workspace {
                                     .px_3()
                                     .py_1()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::ACCENT_BLUE))
+                                    .bg(theme::ACCENT_BLUE)
                                     .text_xs()
-                                    .text_color(theme::color(theme::BG))
+                                    .text_color(theme::BG)
                                     .cursor_pointer()
                                     .on_mouse_down(
                                         gpui::MouseButton::Left,
@@ -594,7 +589,7 @@ impl Workspace {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(theme::color(theme::TEXT))
+                                .text_color(theme::TEXT)
                                 .child(format!("Save changes to {title}?")),
                         )
                         .child(
@@ -611,7 +606,7 @@ impl Workspace {
                                         .rounded_xs()
                                         .text_xs()
                                         .cursor_pointer()
-                                        .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                        .hover(|style| style.bg(theme::HOVER_BG))
                                         .on_mouse_down(
                                             gpui::MouseButton::Left,
                                             cx.listener(|this, _, _, cx| {
@@ -628,9 +623,9 @@ impl Workspace {
                                         .py_1()
                                         .rounded_xs()
                                         .text_xs()
-                                        .text_color(theme::color(theme::ACCENT_RED))
+                                        .text_color(theme::ACCENT_RED)
                                         .cursor_pointer()
-                                        .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                                        .hover(|style| style.bg(theme::HOVER_BG))
                                         .on_mouse_down(
                                             gpui::MouseButton::Left,
                                             cx.listener(move |this, _, _, cx| {
@@ -646,9 +641,9 @@ impl Workspace {
                                         .px_3()
                                         .py_1()
                                         .rounded_xs()
-                                        .bg(theme::color(theme::ACCENT_BLUE))
+                                        .bg(theme::ACCENT_BLUE)
                                         .text_xs()
-                                        .text_color(theme::color(theme::BG))
+                                        .text_color(theme::BG)
                                         .cursor_pointer()
                                         .on_mouse_down(
                                             gpui::MouseButton::Left,
@@ -689,8 +684,8 @@ impl Workspace {
                     .px_3()
                     .py_1p5()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT))
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .text_color(theme::TEXT)
+                    .hover(|s| s.bg(theme::HOVER_BG))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -711,20 +706,16 @@ impl Workspace {
                                     .px_1p5()
                                     .py_0p5()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::BG_BAR))
+                                    .bg(theme::BG_BAR)
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .text_xs()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .child(category),
                             )
                             .child(name),
                     )
-                    .child(
-                        div()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child(shortcut),
-                    );
+                    .child(div().text_color(theme::TEXT_MUTED).child(shortcut));
                 list = list.child(row);
             }
             modal_content = modal_content.child(list);
@@ -755,8 +746,8 @@ impl Workspace {
                     .px_3()
                     .py_1p5()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT))
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .text_color(theme::TEXT)
+                    .hover(|s| s.bg(theme::HOVER_BG))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -769,7 +760,7 @@ impl Workspace {
                     .child(
                         div()
                             .w(px(32.0))
-                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .text_color(theme::ACCENT_BLUE)
                             .child(kind_label),
                     )
                     .child(
@@ -785,13 +776,13 @@ impl Workspace {
                             )
                             .child(
                                 div()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .child(template.description),
                             ),
                     )
                     .child(
                         div()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .child(template.file_name),
                     );
                 list = list.child(row);
@@ -825,8 +816,8 @@ impl Workspace {
                     .px_3()
                     .py_1p5()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT))
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                    .text_color(theme::TEXT)
+                    .hover(|style| style.bg(theme::HOVER_BG))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -840,7 +831,7 @@ impl Workspace {
                     .child(
                         div()
                             .w(px(32.0))
-                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .text_color(theme::ACCENT_BLUE)
                             .child(kind.label()),
                     )
                     .child(title);

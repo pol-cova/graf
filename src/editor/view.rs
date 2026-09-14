@@ -14,7 +14,7 @@ use gpui::{
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     Role, ScrollWheelEvent, ShapedLine, Style, TextRun, UTF16Selection, Window, actions, div, fill,
-    point, prelude::*, px, relative, rgba, size,
+    point, prelude::*, px, relative, size,
 };
 
 use crate::ui::theme;
@@ -523,8 +523,8 @@ impl Render for EditorView {
             .flex_col()
             .min_w_0()
             .overflow_hidden()
-            .bg(theme::color(theme::BG))
-            .text_color(theme::color(theme::TEXT));
+            .bg(theme::BG)
+            .text_color(theme::TEXT);
 
         if self.single_line {
             root = root.child(SingleLineInputElement {
@@ -542,16 +542,10 @@ impl Render for EditorView {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT))
+                    .text_color(theme::TEXT)
                     .child(single_line_content)
                     .when(single_line_focused, |line| {
-                        line.child(
-                            div()
-                                .w(px(1.0))
-                                .h(px(15.0))
-                                .ml(px(1.0))
-                                .bg(theme::color(theme::TEXT)),
-                        )
+                        line.child(div().w(px(1.0)).h(px(15.0)).ml(px(1.0)).bg(theme::TEXT))
                     }),
             );
         } else {

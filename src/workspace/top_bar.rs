@@ -17,9 +17,9 @@ impl Workspace {
             .h(px(38.0))
             .pl(px(78.0))
             .pr_2()
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_b_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .child(
                 div()
                     .flex()
@@ -39,23 +39,23 @@ impl Workspace {
                             .rounded_xs()
                             .text_sm()
                             .text_color(if self.sidebar_visible {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.toggle_sidebar(cx)),
                             )
                             .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
                                 Icon::PanelLeft,
-                                theme::color(if self.sidebar_visible {
+                                if self.sidebar_visible {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
-                                }),
+                                },
                             ))),
                     )
                     .child(
@@ -71,23 +71,23 @@ impl Workspace {
                             .rounded_xs()
                             .text_sm()
                             .text_color(if self.preview_visible {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.toggle_preview(cx)),
                             )
                             .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
                                 Icon::PanelRight,
-                                theme::color(if self.preview_visible {
+                                if self.preview_visible {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
-                                }),
+                                },
                             ))),
                     )
                     .child(
@@ -103,27 +103,27 @@ impl Workspace {
                             .rounded_xs()
                             .text_xs()
                             .text_color(if !self.latest_diagnostics.is_empty() {
-                                theme::color(theme::ACCENT_RED)
+                                theme::ACCENT_RED
                             } else if self.diagnostics_drawer_open {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.toggle_diagnostics(cx)),
                             )
                             .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
                                 Icon::PanelBottom,
-                                theme::color(if !self.latest_diagnostics.is_empty() {
+                                if !self.latest_diagnostics.is_empty() {
                                     theme::ACCENT_RED
                                 } else if self.diagnostics_drawer_open {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
-                                }),
+                                },
                             ))),
                     ),
             )
@@ -144,20 +144,20 @@ impl Workspace {
                             .py_1()
                             .rounded_xs()
                             .bg(if is_compiling {
-                                theme::color(theme::HOVER_BG)
+                                theme::HOVER_BG
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .text_xs()
                             .text_color(if is_compiling {
-                                theme::color(theme::ACCENT_ORANGE)
+                                theme::ACCENT_ORANGE
                             } else if can_compile {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.trigger_compile(cx)),
@@ -176,14 +176,14 @@ impl Workspace {
                             .justify_center()
                             .rounded_xs()
                             .bg(if self.workspace_menu_open {
-                                theme::color(theme::HOVER_BG)
+                                theme::HOVER_BG
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .text_sm()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.toggle_workspace_menu(cx)),
@@ -208,9 +208,9 @@ impl Workspace {
                 .px_3()
                 .py_1p5()
                 .text_xs()
-                .text_color(theme::color(theme::TEXT))
+                .text_color(theme::TEXT)
                 .cursor_pointer()
-                .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                .hover(|style| style.bg(theme::HOVER_BG))
         };
 
         div()
@@ -233,9 +233,9 @@ impl Workspace {
                     .w(px(210.0))
                     .py_1()
                     .rounded_xs()
-                    .bg(theme::color(theme::BG_SURFACE))
+                    .bg(theme::BG_SURFACE)
                     .border_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .shadow_lg()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -298,7 +298,7 @@ impl Workspace {
                                 "Off"
                             }),
                     )
-                    .child(div().h(px(1.0)).my_1().bg(theme::color(theme::BORDER)))
+                    .child(div().h(px(1.0)).my_1().bg(theme::BORDER))
                     .child(
                         menu_row()
                             .id("menu-performance-overlay")

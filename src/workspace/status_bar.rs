@@ -54,11 +54,11 @@ impl Workspace {
             .justify_between()
             .h(px(26.0))
             .px_3()
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_t_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .text_xs()
-            .text_color(theme::color(theme::TEXT_MUTED))
+            .text_color(theme::TEXT_MUTED)
             .child(
                 div().flex().items_center().gap_2().child(
                     div()
@@ -66,7 +66,7 @@ impl Workspace {
                         .flex()
                         .items_center()
                         .cursor_pointer()
-                        .hover(|s| s.text_color(theme::color(theme::TEXT)))
+                        .hover(|s| s.text_color(theme::TEXT))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(|this, _, _, cx| this.toggle_diagnostics(cx)),
@@ -75,7 +75,7 @@ impl Workspace {
                             div()
                                 .max_w(px(520.0))
                                 .truncate()
-                                .text_color(theme::color(status_color))
+                                .text_color(status_color)
                                 .child(status_text),
                         ),
                 ),
@@ -98,11 +98,7 @@ impl Workspace {
                     })
                     .child("UTF-8")
                     .when(self.active_document_is_compilable(), |status| {
-                        status.child(
-                            div()
-                                .text_color(theme::color(theme::ACCENT_GREEN))
-                                .child("Auto compile"),
-                        )
+                        status.child(div().text_color(theme::ACCENT_GREEN).child("Auto compile"))
                     }),
             )
     }

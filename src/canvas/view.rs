@@ -368,7 +368,7 @@ impl Render for CanvasView {
             .flex_1()
             .flex_col()
             .size_full()
-            .bg(theme::color(theme::BG_CANVAS))
+            .bg(theme::BG_CANVAS)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_mouse_down))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::handle_mouse_up))
@@ -402,9 +402,9 @@ impl CanvasView {
             .justify_between()
             .h(px(36.0))
             .px_3()
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_b_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .child(
                 div()
                     .flex()
@@ -421,24 +421,24 @@ impl CanvasView {
                             .py_1()
                             .rounded_xs()
                             .bg(if is_active {
-                                theme::color(theme::TAB_ACTIVE)
+                                theme::TAB_ACTIVE
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .border_1()
                             .border_color(if is_active {
-                                theme::color(theme::ACCENT_BLUE)
+                                theme::ACCENT_BLUE
                             } else {
-                                theme::color(theme::BORDER)
+                                theme::BORDER
                             })
                             .text_xs()
                             .text_color(if is_active {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, _, cx| {
@@ -460,17 +460,17 @@ impl CanvasView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
+                            .bg(theme::BG_SURFACE)
                             .border_1()
-                            .border_color(theme::color(theme::BORDER))
+                            .border_color(theme::BORDER)
                             .text_xs()
                             .text_color(if self.history.can_undo() {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.undo(cx)),
@@ -483,17 +483,17 @@ impl CanvasView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
+                            .bg(theme::BG_SURFACE)
                             .border_1()
-                            .border_color(theme::color(theme::BORDER))
+                            .border_color(theme::BORDER)
                             .text_xs()
                             .text_color(if self.history.can_redo() {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.redo(cx)),
@@ -506,17 +506,17 @@ impl CanvasView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .bg(theme::color(theme::BG_SURFACE))
+                            .bg(theme::BG_SURFACE)
                             .border_1()
-                            .border_color(theme::color(theme::BORDER))
+                            .border_color(theme::BORDER)
                             .text_xs()
                             .text_color(if self.selected_element_id.is_some() {
-                                theme::color(theme::ACCENT_RED)
+                                theme::ACCENT_RED
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.delete_selected(cx)),
@@ -534,12 +534,12 @@ impl CanvasView {
                                     .px_2()
                                     .py_0p5()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::BG_SURFACE))
+                                    .bg(theme::BG_SURFACE)
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .text_xs()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|s| s.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.zoom_out(cx)),
@@ -552,12 +552,12 @@ impl CanvasView {
                                     .px_2()
                                     .py_0p5()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::BG_SURFACE))
+                                    .bg(theme::BG_SURFACE)
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .text_xs()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|s| s.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.reset_zoom(cx)),
@@ -570,12 +570,12 @@ impl CanvasView {
                                     .px_2()
                                     .py_0p5()
                                     .rounded_xs()
-                                    .bg(theme::color(theme::BG_SURFACE))
+                                    .bg(theme::BG_SURFACE)
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .text_xs()
                                     .cursor_pointer()
-                                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                                    .hover(|s| s.bg(theme::HOVER_BG))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, cx| this.zoom_in(cx)),
@@ -689,12 +689,12 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded(px(*border_radius * zoom))
-                    .bg(theme::color(theme::BG_SURFACE))
+                    .bg(theme::BG_SURFACE)
                     .border_2()
                     .border_color(if is_selected {
-                        theme::color(theme::ACCENT_BLUE)
+                        theme::ACCENT_BLUE
                     } else {
-                        theme::color(theme::BORDER)
+                        theme::BORDER
                     })
                     .shadow_md(),
                 ElementKind::Ellipse => div()
@@ -705,12 +705,12 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded_full()
-                    .bg(theme::color(theme::BG_SURFACE))
+                    .bg(theme::BG_SURFACE)
                     .border_2()
                     .border_color(if is_selected {
-                        theme::color(theme::ACCENT_BLUE)
+                        theme::ACCENT_BLUE
                     } else {
-                        theme::color(theme::BORDER)
+                        theme::BORDER
                     })
                     .shadow_md(),
                 ElementKind::Text {
@@ -726,7 +726,7 @@ impl CanvasView {
                     .items_center()
                     .text_xs()
                     .text_size(px(*font_size * zoom))
-                    .text_color(theme::color(theme::TEXT))
+                    .text_color(theme::TEXT)
                     .child(content.clone()),
             };
 
@@ -780,7 +780,7 @@ fn commit_drag_snapshot(
 fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) {
     let (sx, sy) = viewport.world_to_screen(spec.start.0, spec.start.1);
     let (ex, ey) = viewport.world_to_screen(spec.end.0, spec.end.1);
-    let color = theme::color(theme::ACCENT_BLUE);
+    let color = theme::ACCENT_BLUE;
 
     let main_path = {
         let mut builder = gpui::PathBuilder::stroke(px(STROKE_WIDTH_PX));
