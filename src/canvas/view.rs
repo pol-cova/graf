@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::canvas::history::CanvasHistory;
-use crate::canvas::scene::{CanvasDocument, CanvasViewport, DEFAULT_FILL_COLOR, ElementKind};
+use crate::canvas::scene::{CanvasDocument, CanvasViewport, ElementKind};
 use crate::canvas::svg::export_to_svg;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
@@ -559,9 +559,7 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded(px(*border_radius * zoom))
-                    .bg(color_to_rgba(
-                        elem.effective_fill_color().unwrap_or(DEFAULT_FILL_COLOR),
-                    ))
+                    .bg(color_to_rgba(elem.closed_shape_fill()))
                     .border_2()
                     .border_color(if is_selected {
                         theme::ACCENT_BLUE
@@ -577,9 +575,7 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded_full()
-                    .bg(color_to_rgba(
-                        elem.effective_fill_color().unwrap_or(DEFAULT_FILL_COLOR),
-                    ))
+                    .bg(color_to_rgba(elem.closed_shape_fill()))
                     .border_2()
                     .border_color(if is_selected {
                         theme::ACCENT_BLUE

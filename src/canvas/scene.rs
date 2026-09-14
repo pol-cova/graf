@@ -328,6 +328,17 @@ impl CanvasElement {
         }
     }
 
+    /// Fill with the default resolved, only valid where the kind is known
+    /// to be closed (rectangle/ellipse); call sites stay free of an
+    /// `unwrap_or(DEFAULT)` that would silently mask an open shape if the
+    /// kind dispatch ever changed.
+    pub fn closed_shape_fill(&self) -> &str {
+        self.style
+            .fill_color
+            .as_deref()
+            .unwrap_or(DEFAULT_FILL_COLOR)
+    }
+
     pub fn contains_point(&self, px: f32, py: f32, tolerance: f32) -> bool {
         match &self.kind {
             ElementKind::Ellipse => {
