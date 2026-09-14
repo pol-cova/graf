@@ -5,6 +5,27 @@ use crate::compiler::controller::CompileState;
 use crate::ui::theme;
 
 impl Workspace {
+    /// Word count for the status bar, recomputed only when the editor
+    /// changes: the bar re-renders every frame, so the scan is cached by
+    /// (editor revision, Typst-ness), the same pattern as `outline_cache`.
+    fn cached_word_count(&self, cx: &Context<Self>) -> usize {
+        let editor = self.editor.read(cx);
+        let revision = editor.revision();
+        let is_typst =
+            self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
+
+        if let Some((cached_revision, cached_is_typst, count)) =
+            self.word_count_cache.borrow().as_ref()
+            && *cached_revision == revision
+            && *cached_is_typst == is_typst
+        {
+            return *count;
+        }
+
+        let stats = crate::project::stats::DocumentStats::compute(editor.text(), is_typst);
+        *self.word_count_cache.borrow_mut() = Some((revision, is_typst, stats.word_count));
+        stats.word_count
+    }
     pub fn render_status_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         // Text comes from the canonical `CompileState::status_text` so the
         // bar can never drift from the controller; only the tint is local.
@@ -73,11 +94,7 @@ impl Workspace {
                     .child(if self.active_view_kind == ActiveViewKind::Canvas {
                         String::new()
                     } else {
-                        let text = self.editor.read(cx).text();
-                        let is_typst = self.active_document_kind()
-                            == Some(crate::project::document::DocumentKind::Typst);
-                        let stats = crate::project::stats::DocumentStats::compute(text, is_typst);
-                        format!("{} words", stats.word_count)
+                        format!("{} words", self.cached_word_count(cx))
                     })
                     .child("UTF-8")
                     .when(self.active_document_is_compilable(), |status| {

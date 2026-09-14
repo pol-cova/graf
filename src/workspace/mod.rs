@@ -188,6 +188,9 @@ pub struct Workspace {
     /// `&self` paint) must not parse the document every paint.
     pub(crate) outline_cache:
         std::cell::RefCell<Option<(u64, Vec<crate::project::outline::OutlineItem>)>>,
+    /// Cached word count keyed by (editor revision, Typst-ness): the status
+    /// bar paints every frame but this scan must run per edit, not per frame.
+    pub(crate) word_count_cache: std::cell::RefCell<Option<(u64, bool, usize)>>,
     pub(crate) completions: Vec<crate::editor::completion::CompletionItem>,
     pub(crate) completion_open: bool,
     pub(crate) completion_selected: usize,
@@ -326,6 +329,7 @@ impl Workspace {
             bib_index: crate::project::bibtex::BibtexIndex::new(),
             label_index: crate::project::bibtex::LabelIndex::default(),
             outline_cache: std::cell::RefCell::new(None),
+            word_count_cache: std::cell::RefCell::new(None),
             completions: Vec::new(),
             completion_open: false,
             completion_selected: 0,
