@@ -42,70 +42,79 @@ pub fn export_to_svg(doc: &CanvasDocument) -> String {
         ));
     }
 
-    for elem in &doc.elements {
-        let stroke = &elem.style.stroke_color;
-        let stroke_width = elem.style.stroke_width;
-        let fill = elem.style.fill_color.as_deref().unwrap_or("none");
-        let opacity = elem.style.opacity;
-
-        let dash_attr = match elem.style.stroke_style {
+    for blueprint in doc
+        .elements
+        .iter()
+        .map(crate::canvas::geometry::ElementBlueprint::from)
+    {
+        let stroke = &blueprint.style.stroke_color;
+        let fill = blueprint.style.fill_color.as_deref().unwrap_or("none");
+        let dash_attr = match blueprint.style.stroke_style {
             StrokeStyle::Solid => String::new(),
             StrokeStyle::Dashed => r#" stroke-dasharray="6,4""#.to_string(),
             StrokeStyle::Dotted => r#" stroke-dasharray="2,2""#.to_string(),
         };
 
-        match &elem.kind {
-            ElementKind::Rectangle { border_radius } => {
+        // SVG coordinates are world coordinates today: both run y-down with
+        // a 1:1 unit scale, so the mapping here is the identity.
+        match &blueprint.shape {
+            crate::canvas::geometry::Shape::Rectangle {
+                x,
+                y,
+                width,
+                height,
+                radius,
+            } => {
                 svg.push_str(&format!(
-                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width:.1}" opacity="{opacity:.2}"{dash_attr} />
+                    r#"<rect x="{x:.1}" y="{y:.1}" width="{width:.1}" height="{height:.1}" rx="{radius:.1}" fill="{fill}" stroke="{stroke}" stroke-width="{sw:.1}" opacity="{o:.2}"{dash_attr} />
 "#,
-                    elem.x, elem.y, elem.width, elem.height, border_radius
+                    sw = blueprint.style.stroke_width,
+                    o = blueprint.style.opacity,
                 ));
             }
-            ElementKind::Ellipse => {
-                let cx = elem.x + elem.width / 2.0;
-                let cy = elem.y + elem.height / 2.0;
-                let rx = elem.width / 2.0;
-                let ry = elem.height / 2.0;
+            crate::canvas::geometry::Shape::Ellipse { cx, cy, rx, ry } => {
                 svg.push_str(&format!(
-                    r#"<ellipse cx="{cx:.1}" cy="{cy:.1}" rx="{rx:.1}" ry="{ry:.1}" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width:.1}" opacity="{opacity:.2}"{dash_attr} />
-"#
+                    r#"<ellipse cx="{cx:.1}" cy="{cy:.1}" rx="{rx:.1}" ry="{ry:.1}" fill="{fill}" stroke="{stroke}" stroke-width="{sw:.1}" opacity="{o:.2}"{dash_attr} />
+"#,
+                    sw = blueprint.style.stroke_width,
+                    o = blueprint.style.opacity,
                 ));
             }
-            ElementKind::Line {
-                start_x,
-                start_y,
-                end_x,
-                end_y,
+            crate::canvas::geometry::Shape::Segment {
+                start,
+                end,
+                arrowhead,
             } => {
+                let arrow_marker = if *arrowhead {
+                    format!(
+                        r#" marker-end="url(#arrowhead_{})""#,
+                        stroke.trim_start_matches('#')
+                    )
+                } else {
+                    String::new()
+                };
                 svg.push_str(&format!(
-                    r#"<line x1="{start_x:.1}" y1="{start_y:.1}" x2="{end_x:.1}" y2="{end_y:.1}" stroke="{stroke}" stroke-width="{stroke_width:.1}" opacity="{opacity:.2}"{dash_attr} />
-"#
+                    r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{stroke}" stroke-width="{sw:.1}" opacity="{o:.2}"{arrow_marker}{dash} />
+"#,
+                    start.0, start.1, end.0, end.1,
+                    sw = blueprint.style.stroke_width,
+                    o = blueprint.style.opacity,
+                    dash = dash_attr,
                 ));
             }
-            ElementKind::Arrow {
-                start_x,
-                start_y,
-                end_x,
-                end_y,
-            } => {
-                let marker_id = format!("arrowhead_{}", stroke.trim_start_matches('#'));
-                svg.push_str(&format!(
-                    r#"<line x1="{start_x:.1}" y1="{start_y:.1}" x2="{end_x:.1}" y2="{end_y:.1}" stroke="{stroke}" stroke-width="{stroke_width:.1}" opacity="{opacity:.2}" marker-end="url(#{marker_id})"{dash_attr} />
-"#
-                ));
-            }
-            ElementKind::Text {
-                content,
+            crate::canvas::geometry::Shape::Text {
+                x,
+                baseline_y,
                 font_size,
                 font_family,
+                content,
+                ..
             } => {
                 let escaped = escape_xml(content);
-                let baseline_y = elem.y + font_size;
                 svg.push_str(&format!(
-                    r#"<text x="{:.1}" y="{baseline_y:.1}" font-family="{font_family}" font-size="{font_size:.1}" fill="{stroke}" opacity="{opacity:.2}">{escaped}</text>
+                    r#"<text x="{x:.1}" y="{baseline_y:.1}" font-family="{font_family}" font-size="{font_size:.1}" fill="{stroke}" opacity="{o:.2}">{escaped}</text>
 "#,
-                    elem.x
+                    o = blueprint.style.opacity,
                 ));
             }
         }

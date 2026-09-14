@@ -1,42 +1,55 @@
-use crate::canvas::scene::{CanvasDocument, ElementKind, StrokeStyle};
+use crate::canvas::scene::CanvasDocument;
 
 pub fn export_to_tikz(doc: &CanvasDocument) -> String {
-    let scale = 0.04;
-
     let mut tikz = String::new();
     tikz.push_str("% Requires: \\usepackage{tikz}\n");
     tikz.push_str("\\begin{tikzpicture}\n");
 
-    for elem in &doc.elements {
-        let stroke_color = clean_hex_color(&elem.style.stroke_color);
-        let stroke_width = elem.style.stroke_width;
-        let fill_color = elem.style.fill_color.as_deref().map(clean_hex_color);
-
-        let mut draw_opts = Vec::new();
-        draw_opts.push(format!("draw={stroke_color}"));
-        draw_opts.push(format!("line width={stroke_width:.1}pt"));
-
-        if let Some(fill) = fill_color {
-            draw_opts.push(format!("fill={fill}"));
+    // SVG and TikZ disagree on axes: TikZ's y runs bottom-up, so world
+    // coordinates flip sign in this emitter. The shared geometry walk
+    // (canvas/geometry.rs) exposes world coords; the flip + scale are the
+    // TikZ unit convention.
+    for blueprint in doc
+        .elements
+        .iter()
+        .map(crate::canvas::geometry::ElementBlueprint::from)
+    {
+        let stroke_color = clean_hex_color(&blueprint.style.stroke_color);
+        let mut draw_opts = vec![
+            format!("draw={}", stroke_color),
+            format!("line width={:.1}pt", blueprint.style.stroke_width),
+        ];
+        if let Some(filled_color) = blueprint.style.fill_color.as_deref().map(clean_hex_color) {
+            draw_opts.push(format!("fill={filled_color}"));
         }
-
-        match elem.style.stroke_style {
-            StrokeStyle::Solid => {}
-            StrokeStyle::Dashed => draw_opts.push("dashed".to_string()),
-            StrokeStyle::Dotted => draw_opts.push("dotted".to_string()),
+        if let crate::canvas::scene::StrokeStyle::Dashed = blueprint.style.stroke_style {
+            draw_opts.push("dashed".to_string());
+        } else if let crate::canvas::scene::StrokeStyle::Dotted = blueprint.style.stroke_style {
+            draw_opts.push("dotted".to_string());
         }
-
         let opts_str = draw_opts.join(", ");
+        const TIKZ_PX_TO_UNIT: f32 = 0.04;
+        const PT_PER_UNIT: f32 = 28.35; // TikZ lengths are set in pt
 
-        match &elem.kind {
-            ElementKind::Rectangle { border_radius } => {
-                let x1 = elem.x * scale;
-                let y1 = -elem.y * scale;
-                let x2 = (elem.x + elem.width) * scale;
-                let y2 = -(elem.y + elem.height) * scale;
+        let to = |x: f32, y: f32| (x * TIKZ_PX_TO_UNIT, -(y) * TIKZ_PX_TO_UNIT);
+        let _ = PT_PER_UNIT;
 
-                let corners_opt = if *border_radius > 0.0 {
-                    format!(", rounded corners={:.1}pt", border_radius * scale * 28.35)
+        match &blueprint.shape {
+            crate::canvas::geometry::Shape::Rectangle {
+                x,
+                y,
+                width,
+                height,
+                radius,
+            } => {
+                let (x1, y1) = to(*x, *y);
+                let (x2, y2) = to(*x + *width, *y + *height);
+
+                let corners_opt = if *radius > 0.0 {
+                    format!(
+                        ", rounded corners={:.1}pt",
+                        *radius * TIKZ_PX_TO_UNIT * PT_PER_UNIT
+                    )
                 } else {
                     String::new()
                 };
@@ -45,53 +58,35 @@ pub fn export_to_tikz(doc: &CanvasDocument) -> String {
                     "  \\draw[{opts_str}{corners_opt}] ({x1:.2}, {y1:.2}) rectangle ({x2:.2}, {y2:.2});\n"
                 ));
             }
-            ElementKind::Ellipse => {
-                let rx = (elem.width / 2.0) * scale;
-                let ry = (elem.height / 2.0) * scale;
-                let cx = (elem.x + elem.width / 2.0) * scale;
-                let cy = -(elem.y + elem.height / 2.0) * scale;
-
+            crate::canvas::geometry::Shape::Ellipse { cx, cy, rx, ry } => {
+                let (cx, cy) = to(*cx, *cy);
+                let rx = rx * TIKZ_PX_TO_UNIT;
+                let ry = ry * TIKZ_PX_TO_UNIT;
                 tikz.push_str(&format!(
                     "  \\draw[{opts_str}] ({cx:.2}, {cy:.2}) ellipse ({rx:.2} and {ry:.2});\n"
                 ));
             }
-            ElementKind::Line {
-                start_x,
-                start_y,
-                end_x,
-                end_y,
+            crate::canvas::geometry::Shape::Segment {
+                start,
+                end,
+                arrowhead,
             } => {
-                let x1 = start_x * scale;
-                let y1 = -start_y * scale;
-                let x2 = end_x * scale;
-                let y2 = -end_y * scale;
-
+                let (x1, y1) = to(start.0, start.1);
+                let (x2, y2) = to(end.0, end.1);
+                let arrow_opts = if *arrowhead { "->, >=stealth, " } else { "" };
                 tikz.push_str(&format!(
-                    "  \\draw[{opts_str}] ({x1:.2}, {y1:.2}) -- ({x2:.2}, {y2:.2});\n"
+                    "  \\draw[{arrow_opts}{opts_str}] ({x1:.2}, {y1:.2}) -- ({x2:.2}, {y2:.2});\n"
                 ));
             }
-            ElementKind::Arrow {
-                start_x,
-                start_y,
-                end_x,
-                end_y,
+            crate::canvas::geometry::Shape::Text {
+                x,
+                top_y,
+                font_size,
+                content,
+                ..
             } => {
-                let x1 = start_x * scale;
-                let y1 = -start_y * scale;
-                let x2 = end_x * scale;
-                let y2 = -end_y * scale;
-
-                tikz.push_str(&format!(
-                    "  \\draw[->, >=stealth, {opts_str}] ({x1:.2}, {y1:.2}) -- ({x2:.2}, {y2:.2});\n"
-                ));
-            }
-            ElementKind::Text {
-                content, font_size, ..
-            } => {
-                let x = elem.x * scale;
-                let y = -elem.y * scale;
+                let (x, y) = to(*x, *top_y);
                 let escaped = escape_latex(content);
-
                 tikz.push_str(&format!(
                     "  \\node[anchor=north west, text={stroke_color}, font=\\fontsize{{{font_size:.0}}}{{{font_size:.0}}}\\selectfont] at ({x:.2}, {y:.2}) {{{escaped}}};\n"
                 ));
