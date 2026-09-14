@@ -69,21 +69,17 @@ impl BibtexIndex {
     }
 
     pub fn search(&self, query: &str) -> Vec<&BibEntry> {
-        if query.is_empty() {
-            return self.entries.iter().collect();
-        }
-
-        let query_lower = query.to_lowercase();
+        let query_lower = crate::project::text_search::fold(query.trim());
         self.entries
             .iter()
             .filter(|e| {
-                e.key_lower.contains(&query_lower)
+                crate::project::text_search::matches(&e.key_lower, &query_lower)
                     || e.title_lower
                         .as_ref()
-                        .is_some_and(|t| t.contains(&query_lower))
+                        .is_some_and(|t| crate::project::text_search::matches(t, &query_lower))
                     || e.author_lower
                         .as_ref()
-                        .is_some_and(|a| a.contains(&query_lower))
+                        .is_some_and(|a| crate::project::text_search::matches(a, &query_lower))
             })
             .collect()
     }
@@ -167,14 +163,11 @@ impl LabelIndex {
     }
 
     pub fn search(&self, query: &str) -> Vec<&str> {
-        if query.is_empty() {
-            return self.labels.iter().map(String::as_str).collect();
-        }
-        let query_lower = query.to_lowercase();
+        let query_lower = crate::project::text_search::fold(query.trim());
         self.labels
             .iter()
             .zip(&self.labels_lower)
-            .filter(|(_, lower)| lower.contains(&query_lower))
+            .filter(|(_, lower)| crate::project::text_search::matches(lower, &query_lower))
             .map(|(label, _)| label.as_str())
             .collect()
     }
@@ -278,6 +271,21 @@ mod tests {
         let results_author = index.search("Knuth");
         assert_eq!(results_author.len(), 1);
         assert_eq!(results_author[0].key, "knuth1984texbook");
+    }
+
+    #[test]
+    fn search_is_trimmed_and_case_insensitive_for_every_field() {
+        let mut index = BibtexIndex::new();
+        index.parse_and_load(
+            "@article{vaswani2017, title = {Attention Is All You Need}, author = {Ashish Vaswani}}",
+        );
+
+        // Shared folded-search semantics: surrounding whitespace in the
+        // query is ignored and matching is a case-insensitive substring.
+        assert_eq!(index.search("  ATTENTION  ").len(), 1);
+        assert_eq!(index.search(" VASWANI2017 ").len(), 1);
+        assert_eq!(index.search(" ashish ").len(), 1);
+        assert!(index.search("nothing-matches").is_empty());
     }
 
     #[test]

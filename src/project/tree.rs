@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use crate::project::kinds::FileKind;
+use crate::project::text_search;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileNode {
     Directory {
@@ -16,46 +19,6 @@ pub enum FileNode {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    Latex,
-    Typst,
-    Bibtex,
-    Style,
-    Image,
-    Pdf,
-    GrafCanvas,
-    Other,
-}
-
-impl FileKind {
-    pub fn from_path(path: &Path) -> Self {
-        match path.extension().and_then(|ext| ext.to_str()) {
-            Some("tex") => Self::Latex,
-            Some("typ") => Self::Typst,
-            Some("bib") => Self::Bibtex,
-            Some("sty") | Some("cls") => Self::Style,
-            Some("png") | Some("jpg") | Some("jpeg") | Some("svg") => Self::Image,
-            Some("pdf") => Self::Pdf,
-            Some("graf") => Self::GrafCanvas,
-            _ => Self::Other,
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Latex => "TEX",
-            Self::Typst => "TYP",
-            Self::Bibtex => "BIB",
-            Self::Style => "STY",
-            Self::Image => "IMG",
-            Self::Pdf => "PDF",
-            Self::GrafCanvas => "GRF",
-            Self::Other => "",
-        }
-    }
-}
-
 /// One flattened project file for QuickOpen. Prebuilt with the tree so
 /// per-keystroke matching never walks nodes or clones `PathBuf` lists.
 #[derive(Debug, Clone)]
@@ -66,12 +29,6 @@ pub struct QuickOpenEntry {
     relative_lower: String,
     pub path: PathBuf,
     pub kind: FileKind,
-}
-
-impl QuickOpenEntry {
-    fn matches(&self, query_lower: &str) -> bool {
-        self.relative_lower.contains(query_lower)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -129,14 +86,13 @@ impl ProjectTree {
         if query.is_empty() {
             return self.quick_open_files.iter().take(limit).collect();
         }
-        let query_lower = query.to_lowercase();
+        let query_lower = text_search::fold(query);
         self.quick_open_files
             .iter()
-            .filter(|entry| entry.matches(&query_lower))
+            .filter(|entry| text_search::matches(&entry.relative_lower, &query_lower))
             .take(limit)
             .collect()
     }
-
     pub fn root_document(&self) -> Option<&Path> {
         self.root_document.as_deref()
     }
@@ -297,28 +253,41 @@ fn should_ignore(name: &str) -> bool {
         || name.ends_with(".synctex.gz")
 }
 
+/// Root-document candidates, probed in order. Both engines get their
+/// conventional names so a Typst-only project no longer falls through to
+/// the welcome screen.
+const ROOT_DOC_CANDIDATES: &[(&str, FileKind)] = &[
+    ("main.tex", FileKind::Latex),
+    ("main.typ", FileKind::Typst),
+    ("document.tex", FileKind::Latex),
+    ("document.typ", FileKind::Typst),
+    ("paper.tex", FileKind::Latex),
+    ("paper.typ", FileKind::Typst),
+];
+
+/// Typst has no `\documentclass`; a root file instead declares page or
+/// document setup. `#import` alone is too weak (shared preamble files).
+const TYPST_ROOT_MARKERS: &[&str] = &["#set page(", "#set document(", "#outline("];
+
 fn detect_root_document(root_dir: &Path, children: &[FileNode]) -> Option<PathBuf> {
-    let main_tex = root_dir.join("main.tex");
-    if main_tex.exists() {
-        return Some(main_tex);
-    }
-    let doc_tex = root_dir.join("document.tex");
-    if doc_tex.exists() {
-        return Some(doc_tex);
-    }
-    let paper_tex = root_dir.join("paper.tex");
-    if paper_tex.exists() {
-        return Some(paper_tex);
+    for (name, _) in ROOT_DOC_CANDIDATES {
+        let candidate = root_dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
     }
 
+    // Fall back to any compilable file that looks like a document root.
     for child in children {
-        if let FileNode::File {
-            path,
-            kind: FileKind::Latex,
-            ..
-        } = child
-        {
-            let is_root = fs::read_to_string(path).is_ok_and(|c| c.contains("\\documentclass"));
+        if let FileNode::File { path, kind, .. } = child {
+            let is_root = match kind {
+                FileKind::Latex => {
+                    fs::read_to_string(path).is_ok_and(|c| c.contains("\\documentclass"))
+                }
+                FileKind::Typst => fs::read_to_string(path)
+                    .is_ok_and(|c| TYPST_ROOT_MARKERS.iter().any(|m| c.contains(m))),
+                _ => false,
+            };
             if is_root {
                 return Some(path.clone());
             }
@@ -462,5 +431,53 @@ mod tests {
                 .iter()
                 .any(|e| e.relative.ends_with("extreme.tex"))
         );
+    }
+
+    #[test]
+    fn typst_only_project_detects_root_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("main.typ"), "#set page(width: 8.5in)\n= Hello\n").unwrap();
+        fs::write(dir.join("refs.bib"), "@article{key, title={T}}").unwrap();
+
+        let tree = ProjectTree::scan(dir);
+        assert_eq!(tree.root_document(), Some(dir.join("main.typ").as_path()));
+    }
+
+    #[test]
+    fn typst_root_by_document_marker_without_conventional_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::create_dir_all(dir.join("chapters")).unwrap();
+        fs::write(dir.join("chapters/ch1.typ"), "= Chapter one").unwrap();
+        fs::write(
+            dir.join("thesis.typ"),
+            "#set document(title: \"Thesis\")\n#include \"chapters/ch1.typ\"\n",
+        )
+        .unwrap();
+
+        let tree = ProjectTree::scan(dir);
+        assert_eq!(tree.root_document(), Some(dir.join("thesis.typ").as_path()));
+    }
+
+    #[test]
+    fn shared_typst_preamble_is_not_mistaken_for_a_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("theme.typ"), "#let accent = rgb(\"#0055ff\")").unwrap();
+
+        let tree = ProjectTree::scan(dir);
+        assert_eq!(tree.root_document(), None);
+    }
+
+    #[test]
+    fn latex_conventional_names_still_win_in_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("paper.typ"), "#set page(margin: 1in)").unwrap();
+        fs::write(dir.join("main.tex"), "\\documentclass{article}").unwrap();
+
+        let tree = ProjectTree::scan(dir);
+        assert_eq!(tree.root_document(), Some(dir.join("main.tex").as_path()));
     }
 }

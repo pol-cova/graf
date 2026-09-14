@@ -241,13 +241,18 @@ mod tests {
         assert!(loaded.is_some(), "truncation repair should recover entries");
         assert_eq!(loaded.unwrap().entries[0].content, "unsaved ideas");
 
-        // Cut mid-string in a later entry: earlier entries still recover.
-        let mid_cut = &full_json[..full_json.len() - "]\n} \n \nX".len()];
+        // Cut at a known anchor (after the entry's closing `}`) rather than
+        // counting serde's exact whitespace: earlier entries still recover.
+        let entry_object_end = full_json
+            .find("}")
+            .expect("pretty-printed journal contains object braces")
+            + "}".len();
+        let mid_cut = &full_json[..entry_object_end];
         fs::write(temp_dir.join(RECOVERY_FILE_NAME), mid_cut).unwrap();
         let repaired = RecoveryJournal::load_from_dir(&temp_dir);
-        if let Some(repaired) = repaired {
-            assert!(!repaired.entries.is_empty());
-        }
+        let repaired = repaired.expect("anchor-cut journal must still salvage the first entry");
+        assert_eq!(repaired.entries.len(), 1);
+        assert_eq!(repaired.entries[0].content, "unsaved ideas");
 
         // The raw journal is never deleted on parse failure.
         assert!(temp_dir.join(RECOVERY_FILE_NAME).exists());

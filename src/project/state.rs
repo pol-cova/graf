@@ -3,6 +3,7 @@
 //! keeps the workspace shell from re-implementing a project-index layer.
 
 use super::bibtex::{BibtexIndex, LabelIndex};
+use super::kinds::FileKind;
 
 #[derive(Debug, Default)]
 pub struct ProjectState {
@@ -26,7 +27,7 @@ impl ProjectState {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "bib") {
+            if FileKind::from_path(&path) == FileKind::Bibtex {
                 let Ok(content) = std::fs::read_to_string(&path) else {
                     continue;
                 };

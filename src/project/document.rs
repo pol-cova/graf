@@ -192,8 +192,8 @@ mod tests {
 }
 
 /// Language/home kind of a document, derived once from its filename.
-/// Replaces the `ends_with(".typ")` / `.tex` / `.graf` chains that used to
-/// be re-derived inline at a dozen unrelated call sites.
+/// Delegates to the shared `kinds` classifier so tree labels and document
+/// kinds can never disagree about what an extension means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentKind {
     Latex,
@@ -209,11 +209,10 @@ impl Document {
 }
 
 pub fn kind_for_title(title: &str) -> DocumentKind {
-    let extension = title.rsplit_once('.').map(|(_, ext)| ext);
-    match extension {
-        Some("tex") => DocumentKind::Latex,
-        Some("typ") => DocumentKind::Typst,
-        Some("graf") => DocumentKind::Canvas,
+    match super::kinds::FileKind::from_path(Path::new(title)) {
+        super::kinds::FileKind::Latex => DocumentKind::Latex,
+        super::kinds::FileKind::Typst => DocumentKind::Typst,
+        super::kinds::FileKind::GrafCanvas => DocumentKind::Canvas,
         _ => DocumentKind::PlainText,
     }
 }
