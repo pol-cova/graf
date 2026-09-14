@@ -468,7 +468,7 @@ impl EditorView {
     }
 
     fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
-        let range = word_range_at(self.buffer.content(), offset);
+        let range = super::text_ops::word_range_at(self.buffer.content(), offset);
         self.selected_range = range.clone();
         self.cursor = range.end;
         self.selection_reversed = false;
