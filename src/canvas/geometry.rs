@@ -47,10 +47,14 @@ pub(crate) enum Shape<'a> {
     },
 }
 
-/// One element walked once, ready for either emitter to render.
+/// One element walked once, ready for either emitter to render. `stroke`
+/// and `fill` are the effective colors (kind-aware defaults already
+/// resolved) so emitters never re-implement that rule.
 #[derive(Debug, Clone)]
 pub(crate) struct ElementBlueprint<'a> {
     pub style: &'a ElementStyle,
+    pub stroke: &'a str,
+    pub fill: Option<&'a str>,
     pub shape: Shape<'a>,
 }
 
@@ -105,6 +109,8 @@ impl<'a> From<&'a CanvasElement> for ElementBlueprint<'a> {
         };
         ElementBlueprint {
             style: &elem.style,
+            stroke: elem.effective_stroke_color(),
+            fill: elem.effective_fill_color(),
             shape,
         }
     }
@@ -154,5 +160,18 @@ mod tests {
         assert!(matches!(blueprint.shape, Shape::Rectangle { .. }));
         let _ = ElementStyle::default();
         let _ = ElementKind::Ellipse;
+    }
+
+    #[test]
+    fn blueprint_resolves_default_colors_once() {
+        let shape = CanvasElement::new_rectangle("r1", 0.0, 0.0, 1.0, 1.0, 0.0);
+        let bp = ElementBlueprint::from(&shape);
+        assert_eq!(bp.stroke, crate::canvas::scene::DEFAULT_STROKE_COLOR);
+        assert_eq!(bp.fill, Some(crate::canvas::scene::DEFAULT_FILL_COLOR));
+
+        let text = CanvasElement::new_text("t1", 0.0, 0.0, "hi", 12.0);
+        let bp = ElementBlueprint::from(&text);
+        assert_eq!(bp.stroke, crate::canvas::scene::DEFAULT_TEXT_COLOR);
+        assert_eq!(bp.fill, None);
     }
 }

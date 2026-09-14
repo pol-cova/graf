@@ -38,7 +38,7 @@ impl Workspace {
                             .justify_center()
                             .rounded_xs()
                             .text_sm()
-                            .text_color(if self.sidebar_visible {
+                            .text_color(if self.layout.sidebar_visible {
                                 theme::TEXT
                             } else {
                                 theme::TEXT_MUTED
@@ -51,7 +51,7 @@ impl Workspace {
                             )
                             .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
                                 Icon::PanelLeft,
-                                if self.sidebar_visible {
+                                if self.layout.sidebar_visible {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
@@ -70,7 +70,7 @@ impl Workspace {
                             .justify_center()
                             .rounded_xs()
                             .text_sm()
-                            .text_color(if self.preview_visible {
+                            .text_color(if self.layout.preview_visible {
                                 theme::TEXT
                             } else {
                                 theme::TEXT_MUTED
@@ -83,7 +83,7 @@ impl Workspace {
                             )
                             .child(div().w(px(15.0)).h(px(15.0)).child(icon_colored(
                                 Icon::PanelRight,
-                                if self.preview_visible {
+                                if self.layout.preview_visible {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
@@ -104,7 +104,7 @@ impl Workspace {
                             .text_xs()
                             .text_color(if !self.latest_diagnostics.is_empty() {
                                 theme::ACCENT_RED
-                            } else if self.diagnostics_drawer_open {
+                            } else if self.layout.diagnostics_drawer_open {
                                 theme::TEXT
                             } else {
                                 theme::TEXT_MUTED
@@ -119,7 +119,7 @@ impl Workspace {
                                 Icon::PanelBottom,
                                 if !self.latest_diagnostics.is_empty() {
                                     theme::ACCENT_RED
-                                } else if self.diagnostics_drawer_open {
+                                } else if self.layout.diagnostics_drawer_open {
                                     theme::TEXT
                                 } else {
                                     theme::TEXT_MUTED
@@ -266,7 +266,11 @@ impl Workspace {
                                 }),
                             )
                             .child("Project")
-                            .child(if self.sidebar_visible { "On" } else { "Off" }),
+                            .child(if self.layout.sidebar_visible {
+                                "On"
+                            } else {
+                                "Off"
+                            }),
                     )
                     .child(
                         menu_row()
@@ -279,7 +283,11 @@ impl Workspace {
                                 }),
                             )
                             .child("Preview")
-                            .child(if self.preview_visible { "On" } else { "Off" }),
+                            .child(if self.layout.preview_visible {
+                                "On"
+                            } else {
+                                "Off"
+                            }),
                     )
                     .child(
                         menu_row()
@@ -292,7 +300,7 @@ impl Workspace {
                                 }),
                             )
                             .child("Problems")
-                            .child(if self.diagnostics_drawer_open {
+                            .child(if self.layout.diagnostics_drawer_open {
                                 "On"
                             } else {
                                 "Off"

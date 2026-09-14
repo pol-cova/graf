@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use log::{info, warn};
 
 use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
-use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
+use super::engine::{
+    CompileError, CompileOutput, CompileRequest, DocumentEngine, next_diagnostic_id,
+};
 use super::resolve::{LazyEngine, tectonic as tectonic_spec};
 
 const WARM_UP_SOURCE: &str =
@@ -69,25 +71,22 @@ impl DocumentEngine for TectonicEngine {
         let revision = request.revision;
 
         let Some(engine) = self.resolved.get() else {
-            let message = "Tectonic is not installed or configured".to_string();
-            return Err(CompileError {
+            let identity = super::engine::EngineIdentity {
+                label: "tectonic",
+                display_name: "Tectonic",
+                diagnostic_source: DiagnosticSource::Tectonic,
+            };
+            return Err(identity.unavailable_error(
                 compile_id,
                 revision,
-                diagnostics: vec![Diagnostic::new(
-                    1,
-                    Severity::Error,
-                    DiagnosticSource::Tectonic,
-                    request.root_document.clone(),
-                    None,
-                    message.clone(),
-                )],
-                message,
-                duration: start.elapsed(),
-            });
+                request.source_document().map(Path::to_path_buf),
+                start,
+            ));
         };
         let request = &request;
         let identity = super::engine::EngineIdentity {
             label: "tectonic",
+            display_name: "Tectonic",
             diagnostic_source: DiagnosticSource::Tectonic,
         };
 
@@ -180,7 +179,6 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
     stderr: impl Iterator<Item = &'a str>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut diag_id = 1u64;
     // Same cap policy as the typst backend: stop once the cap is reached
     // inside the loop, without truncating the stream up front (a truncated
     // prefix could miss errors that arrive later in the stream).
@@ -195,24 +193,22 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
             .or_else(|| trimmed.strip_prefix("fatal:"))
         {
             diagnostics.push(Diagnostic::new(
-                diag_id,
+                next_diagnostic_id().0,
                 Severity::Error,
                 DiagnosticSource::Tectonic,
                 None,
                 None,
                 msg.trim(),
             ));
-            diag_id += 1;
         } else if let Some(msg) = trimmed.strip_prefix("warning:") {
             diagnostics.push(Diagnostic::new(
-                diag_id,
+                next_diagnostic_id().0,
                 Severity::Warning,
                 DiagnosticSource::Tectonic,
                 None,
                 None,
                 msg.trim(),
             ));
-            diag_id += 1;
         } else if let Some(msg) = trimmed.strip_prefix('!') {
             // The line number trails immediately after the bang line.
             let line_num = lines
@@ -224,14 +220,13 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
                 .and_then(|num_str| num_str.parse::<usize>().ok());
 
             diagnostics.push(Diagnostic::new(
-                diag_id,
+                next_diagnostic_id().0,
                 Severity::Error,
                 DiagnosticSource::Tectonic,
                 None,
                 line_num,
                 msg.trim(),
             ));
-            diag_id += 1;
         }
     }
 

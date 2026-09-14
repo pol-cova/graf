@@ -44,4 +44,19 @@ impl Diagnostic {
             message: message.into(),
         }
     }
+
+    /// Builds a parser-grade warning from a style-linter finding. The
+    /// mapping lives here (not in `project::linter`) so project code never
+    /// assembles compiler structs by hand, and so every style warning draws
+    /// its id from the same process-wide sequence as engine diagnostics.
+    pub fn from_style_warning(line: usize, message: impl Into<String>) -> Self {
+        Self {
+            id: super::engine::next_diagnostic_id(),
+            severity: Severity::Warning,
+            source: DiagnosticSource::Parser,
+            file: None,
+            line: Some(line),
+            message: message.into(),
+        }
+    }
 }

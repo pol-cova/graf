@@ -16,9 +16,9 @@ impl Workspace {
 
         self.active_doc_idx = idx;
         self.show_welcome = false;
-        self.compile_task = None;
+        self.compile.task = None;
         self.cancel_in_flight_compile();
-        self.compile_cancel = None;
+        self.compile.cancel = None;
         self.controller.reset();
         self.latest_diagnostics.clear();
         self.editor
@@ -38,7 +38,7 @@ impl Workspace {
                 canvas.load_from_json(&content, history, cx)
             });
             if let Err(error) = loaded {
-                self.workspace_error = Some(error);
+                self.workspace_error = Some(error.to_string());
             }
         } else {
             self.active_view_kind = ActiveViewKind::Editor;

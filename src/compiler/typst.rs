@@ -1,11 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use log::info;
 
-use super::diagnostics::{Diagnostic, DiagnosticId, DiagnosticSource, Severity};
+use super::diagnostics::{Diagnostic, DiagnosticSource, Severity};
 use super::engine::{CompileError, CompileOutput, CompileRequest, DocumentEngine};
 use super::resolve::{LazyEngine, typst as typst_spec};
 
@@ -13,8 +12,6 @@ use super::resolve::{LazyEngine, typst as typst_spec};
 /// newest two job dirs when idle for at least a minute.
 const KEEP_JOB_DIRS: usize = 2;
 const PRUNE_MIN_IDLE: Duration = Duration::from_secs(60);
-
-static NEXT_DIAG_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Engine spec that resolves once, lazily, off the UI thread: the first
 /// warm-up or compile call performs the `which`/path probing and caches it.
@@ -53,26 +50,23 @@ impl DocumentEngine for TypstEngine {
         let revision = request.revision;
 
         let Some(engine) = self.resolved.get() else {
-            let message = "Typst is not installed or configured".to_string();
-            return Err(CompileError {
+            let identity = super::engine::EngineIdentity {
+                label: "Typst",
+                display_name: "Typst",
+                diagnostic_source: DiagnosticSource::Typst,
+            };
+            return Err(identity.unavailable_error(
                 compile_id,
                 revision,
-                diagnostics: vec![Diagnostic {
-                    id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
-                    severity: Severity::Error,
-                    source: DiagnosticSource::Typst,
-                    message: message.clone(),
-                    file: request.root_document.clone(),
-                    line: None,
-                }],
-                message,
-                duration: start.elapsed(),
-            });
+                request.source_document().map(Path::to_path_buf),
+                start,
+            ));
         };
         let request = &request;
 
         let identity = super::engine::EngineIdentity {
             label: "Typst",
+            display_name: "Typst",
             diagnostic_source: DiagnosticSource::Typst,
         };
         let job = super::engine::prepare_job(
@@ -163,7 +157,7 @@ pub fn parse_typst_diagnostics_from_streams<'a>(
             };
 
             diagnostics.push(Diagnostic {
-                id: DiagnosticId(NEXT_DIAG_ID.fetch_add(1, Ordering::Relaxed)),
+                id: super::engine::next_diagnostic_id(),
                 severity,
                 source: DiagnosticSource::Typst,
                 message: message.to_string(),

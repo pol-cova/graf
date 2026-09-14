@@ -1,10 +1,10 @@
 use gpui::{
-    Context, FocusHandle, Focusable, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Render, Window, div, prelude::*, px,
+    Context, FocusHandle, Focusable, IntoElement, MouseButton, Render, Window, actions, div,
+    prelude::*, px,
 };
 
 use crate::canvas::history::CanvasHistory;
-use crate::canvas::scene::{CanvasDocument, CanvasElement, CanvasViewport, ElementKind};
+use crate::canvas::scene::{CanvasDocument, CanvasViewport, ElementKind};
 use crate::canvas::svg::export_to_svg;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
@@ -50,19 +50,21 @@ impl CanvasTool {
 
 pub struct CanvasView {
     focus_handle: FocusHandle,
-    document: CanvasDocument,
-    history: CanvasHistory,
-    active_tool: CanvasTool,
-    selected_element_id: Option<String>,
-    is_dragging: bool,
-    drag_start: Option<(f32, f32)>,
+    // Document/mutation state is shared with the `input` submodule.
+    pub(crate) document: CanvasDocument,
+    pub(crate) history: CanvasHistory,
+    pub(crate) active_tool: CanvasTool,
+    pub(crate) selected_element_id: Option<String>,
+    // Drag state is shared with the `input` submodule.
+    pub(crate) is_dragging: bool,
+    pub(crate) drag_start: Option<(f32, f32)>,
     /// Scene as of pointer-down, captured when a Select press lands on an
     /// element. The first mouse-move that actually shifts the element
     /// commits it to the history once, so a plain click never pads the
     /// undo stack and undo after a drag reverts the drag instead of
     /// wiping the element.
-    pending_drag_snapshot: Option<CanvasDocument>,
-    revision: u64,
+    pub(crate) pending_drag_snapshot: Option<CanvasDocument>,
+    pub(crate) revision: u64,
     /// Monotonic element-id source; a count-derived id collides after any
     /// deletion and makes selection/removal hit the wrong element.
     next_element_counter: ElementIdAllocator,
@@ -71,15 +73,21 @@ pub struct CanvasView {
 /// Never repeats: `elem-{n+1}` from a plain counter is safe where a
 /// `elements.len()+1` scheme is not.
 #[derive(Debug, Default, Clone, PartialEq)]
-struct ElementIdAllocator {
+pub(crate) struct ElementIdAllocator {
     next: u64,
 }
 
 impl ElementIdAllocator {
-    fn allocate(&mut self) -> String {
+    pub(crate) fn allocate(&mut self) -> String {
         self.next += 1;
         format!("elem-{}", self.next)
     }
+}
+
+/// Keeps the viewport zoom inside the documented clamp window; shared by
+/// the zoom commands so the bounds live in exactly one place.
+pub(crate) fn clamp_zoom(zoom: f32) -> f32 {
+    zoom.clamp(ZOOM_MIN, ZOOM_MAX)
 }
 
 impl CanvasView {
@@ -106,10 +114,8 @@ impl CanvasView {
         json: &str,
         history: CanvasHistory,
         cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        let doc =
-            CanvasDocument::from_json(json).map_err(|e| format!("Failed to parse .graf: {e}"))?;
-        self.document = doc;
+    ) -> Result<(), serde_json::Error> {
+        self.document = CanvasDocument::from_json(json)?;
         self.history = history;
         self.selected_element_id = None;
         self.revision += 1;
@@ -117,10 +123,8 @@ impl CanvasView {
         Ok(())
     }
 
-    pub fn save_to_json(&self) -> Result<String, String> {
-        self.document
-            .to_json()
-            .map_err(|e| format!("Failed to serialize .graf: {e}"))
+    pub fn save_to_json(&self) -> Result<String, serde_json::Error> {
+        self.document.to_json()
     }
 
     pub fn export_svg(&self) -> String {
@@ -141,7 +145,7 @@ impl CanvasView {
         std::mem::take(&mut self.history)
     }
 
-    fn next_element_id(&mut self) -> String {
+    pub(crate) fn next_element_id(&mut self) -> String {
         self.next_element_counter.allocate()
     }
 
@@ -169,12 +173,12 @@ impl CanvasView {
     }
 
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
-        self.document.viewport.zoom = (self.document.viewport.zoom + ZOOM_STEP).min(ZOOM_MAX);
+        self.document.viewport.zoom = clamp_zoom(self.document.viewport.zoom + ZOOM_STEP);
         cx.notify();
     }
 
     pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
-        self.document.viewport.zoom = (self.document.viewport.zoom - ZOOM_STEP).max(ZOOM_MIN);
+        self.document.viewport.zoom = clamp_zoom(self.document.viewport.zoom - ZOOM_STEP);
         cx.notify();
     }
 
@@ -192,167 +196,6 @@ impl CanvasView {
             self.revision += 1;
             cx.notify();
         }
-    }
-
-    fn handle_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if event.button != MouseButton::Left {
-            return;
-        }
-
-        // Input and rendering must share one coordinate mapping or shapes
-        // appear away from the click at any zoom other than 1.
-        let (x, y) = self
-            .document
-            .viewport
-            .screen_to_world(event.position.x.as_f32(), event.position.y.as_f32());
-
-        self.is_dragging = true;
-        self.drag_start = Some((x, y));
-        self.pending_drag_snapshot = None;
-
-        match self.active_tool {
-            CanvasTool::Select => {
-                let hit = self.document.find_element_at(x, y).map(|e| e.id.clone());
-                // The element may be dragged next; remember the pre-drag
-                // scene so the first actual movement can commit an undo
-                // entry. Clicks without a move never push one.
-                let will_drag = hit.is_some();
-                self.selected_element_id = hit;
-                self.pending_drag_snapshot = will_drag.then(|| self.document.clone());
-            }
-            CanvasTool::Rectangle => {
-                self.history.push_snapshot(self.document.clone());
-                let id = self.next_element_id();
-                let rect = CanvasElement::new_rectangle(id.clone(), x, y, 120.0, 80.0, 4.0);
-                self.document.add_element(rect);
-                self.selected_element_id = Some(id);
-                self.revision += 1;
-                self.active_tool = CanvasTool::Select;
-            }
-            CanvasTool::Ellipse => {
-                self.history.push_snapshot(self.document.clone());
-                let id = self.next_element_id();
-                let ellipse = CanvasElement::new_ellipse(id.clone(), x, y, 100.0, 100.0);
-                self.document.add_element(ellipse);
-                self.selected_element_id = Some(id);
-                self.revision += 1;
-                self.active_tool = CanvasTool::Select;
-            }
-            CanvasTool::Arrow => {
-                self.history.push_snapshot(self.document.clone());
-                let id = self.next_element_id();
-                let arrow = CanvasElement::new_arrow(id.clone(), x, y, x + 80.0, y);
-                self.document.add_element(arrow);
-                self.selected_element_id = Some(id);
-                self.revision += 1;
-                self.active_tool = CanvasTool::Select;
-            }
-            CanvasTool::Line => {
-                self.history.push_snapshot(self.document.clone());
-                let id = self.next_element_id();
-                let line = CanvasElement::new_line(id.clone(), x, y, x + 80.0, y);
-                self.document.add_element(line);
-                self.selected_element_id = Some(id);
-                self.revision += 1;
-                self.active_tool = CanvasTool::Select;
-            }
-            CanvasTool::Text => {
-                self.history.push_snapshot(self.document.clone());
-                let id = self.next_element_id();
-                let text = CanvasElement::new_text(id.clone(), x, y, "Label", 14.0);
-                self.document.add_element(text);
-                self.selected_element_id = Some(id);
-                self.revision += 1;
-                self.active_tool = CanvasTool::Select;
-            }
-        }
-        cx.notify();
-    }
-
-    fn handle_mouse_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_dragging {
-            return;
-        }
-
-        let current_x = event.position.x.as_f32();
-        let current_y = event.position.y.as_f32();
-
-        if let Some((start_x, start_y)) = self.drag_start {
-            // Deltas are measured in screen space; convert to world units so
-            // a drag moves the shape exactly as far as the cursor went.
-            let (world_x, world_y) = self.document.viewport.screen_to_world(current_x, current_y);
-            let (world_start_x, world_start_y) =
-                self.document.viewport.screen_to_world(start_x, start_y);
-            let dx = world_x - world_start_x;
-            let dy = world_y - world_start_y;
-
-            // Zero deltas happen on hover-style moves after pointer-down;
-            // they move nothing and must not touch revision or history.
-            if dx == 0.0 && dy == 0.0 {
-                return;
-            }
-
-            commit_drag_snapshot(
-                &mut self.pending_drag_snapshot,
-                &mut self.history,
-                self.selected_element_id.is_some(),
-            );
-
-            if let Some(elem) = self
-                .selected_element_id
-                .as_ref()
-                .and_then(|id| self.document.elements.iter_mut().find(|e| &e.id == id))
-            {
-                elem.x += dx;
-                elem.y += dy;
-                match &mut elem.kind {
-                    ElementKind::Line {
-                        start_x,
-                        start_y,
-                        end_x,
-                        end_y,
-                    }
-                    | ElementKind::Arrow {
-                        start_x,
-                        start_y,
-                        end_x,
-                        end_y,
-                    } => {
-                        *start_x += dx;
-                        *start_y += dy;
-                        *end_x += dx;
-                        *end_y += dy;
-                    }
-                    _ => {}
-                }
-                self.drag_start = Some((current_x, current_y));
-                self.document.invalidate_geometry_cache();
-                self.revision += 1;
-                cx.notify();
-            }
-        }
-    }
-
-    fn handle_mouse_up(
-        &mut self,
-        _event: &MouseUpEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.is_dragging = false;
-        self.drag_start = None;
-        self.pending_drag_snapshot = None;
-        cx.notify();
     }
 }
 
@@ -377,9 +220,49 @@ impl Render for CanvasView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_mouse_down))
             .on_mouse_move(cx.listener(Self::handle_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::handle_mouse_up))
+            .on_action(
+                cx.listener(|this, _: &SelectTool, _, cx| this.set_tool(CanvasTool::Select, cx)),
+            )
+            .on_action(cx.listener(|this, _: &RectangleTool, _, cx| {
+                this.set_tool(CanvasTool::Rectangle, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &EllipseTool, _, cx| this.set_tool(CanvasTool::Ellipse, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ArrowTool, _, cx| this.set_tool(CanvasTool::Arrow, cx)),
+            )
+            .on_action(cx.listener(|this, _: &LineTool, _, cx| this.set_tool(CanvasTool::Line, cx)))
+            .on_action(cx.listener(|this, _: &TextTool, _, cx| this.set_tool(CanvasTool::Text, cx)))
             .child(self.render_toolbar(cx))
             .child(self.render_viewport(viewport_size))
     }
+}
+
+actions!(
+    canvas,
+    [
+        SelectTool,
+        RectangleTool,
+        EllipseTool,
+        ArrowTool,
+        LineTool,
+        TextTool
+    ]
+);
+
+/// Tool shortcuts advertised by the toolbar labels; bound only inside the
+/// `Canvas` key context.
+pub fn register_bindings(cx: &mut gpui::App) {
+    use gpui::KeyBinding;
+    cx.bind_keys([
+        KeyBinding::new("v", SelectTool, Some("Canvas")),
+        KeyBinding::new("r", RectangleTool, Some("Canvas")),
+        KeyBinding::new("o", EllipseTool, Some("Canvas")),
+        KeyBinding::new("a", ArrowTool, Some("Canvas")),
+        KeyBinding::new("l", LineTool, Some("Canvas")),
+        KeyBinding::new("t", TextTool, Some("Canvas")),
+    ]);
 }
 
 impl CanvasView {
@@ -602,9 +485,9 @@ impl CanvasView {
             .document
             .viewport
             .screen_to_world(-world_width * half_extra, -world_height * half_extra);
-        let is_visible = |(x, y, w, h): (f32, f32, f32, f32)| {
-            x + w >= world_origin_x
-                && y + h >= world_origin_y
+        let is_visible = |(x, y, x2, y2): (f32, f32, f32, f32)| {
+            x2 >= world_origin_x
+                && y2 >= world_origin_y
                 && x <= world_origin_x + world_width
                 && y <= world_origin_y + world_height
         };
@@ -625,27 +508,7 @@ impl CanvasView {
             // Elements far outside the viewport contribute nothing to the
             // frame; skipping them keeps drag cost proportional to what is
             // visible rather than the whole scene.
-            let bounds = match &elem.kind {
-                ElementKind::Line {
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                }
-                | ElementKind::Arrow {
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                } => (
-                    start_x.min(*end_x),
-                    start_y.min(*end_y),
-                    (start_x - end_x).abs(),
-                    (start_y - end_y).abs(),
-                ),
-                _ => (elem.x, elem.y, elem.width, elem.height),
-            };
-            if !is_visible(bounds) {
+            if !is_visible(elem.bounds()) {
                 continue;
             }
 
@@ -670,6 +533,7 @@ impl CanvasView {
                         start: (*start_x, *start_y),
                         end: (*end_x, *end_y),
                         arrowhead: false,
+                        color: color_to_rgba(elem.effective_stroke_color()),
                     });
                     continue;
                 }
@@ -683,6 +547,7 @@ impl CanvasView {
                         start: (*start_x, *start_y),
                         end: (*end_x, *end_y),
                         arrowhead: true,
+                        color: color_to_rgba(elem.effective_stroke_color()),
                     });
                     continue;
                 }
@@ -694,12 +559,12 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded(px(*border_radius * zoom))
-                    .bg(theme::BG_SURFACE)
+                    .bg(color_to_rgba(elem.closed_shape_fill()))
                     .border_2()
                     .border_color(if is_selected {
                         theme::ACCENT_BLUE
                     } else {
-                        theme::BORDER
+                        color_to_rgba(elem.effective_stroke_color())
                     })
                     .shadow_md(),
                 ElementKind::Ellipse => div()
@@ -710,12 +575,12 @@ impl CanvasView {
                     .w(width)
                     .h(height)
                     .rounded_full()
-                    .bg(theme::BG_SURFACE)
+                    .bg(color_to_rgba(elem.closed_shape_fill()))
                     .border_2()
                     .border_color(if is_selected {
                         theme::ACCENT_BLUE
                     } else {
-                        theme::BORDER
+                        color_to_rgba(elem.effective_stroke_color())
                     })
                     .shadow_md(),
                 ElementKind::Text {
@@ -731,7 +596,7 @@ impl CanvasView {
                     .items_center()
                     .text_xs()
                     .text_size(px(*font_size * zoom))
-                    .text_color(theme::TEXT)
+                    .text_color(color_to_rgba(elem.effective_stroke_color()))
                     .child(content.clone()),
             };
 
@@ -764,28 +629,31 @@ struct StrokeSpec {
     start: (f32, f32),
     end: (f32, f32),
     arrowhead: bool,
+    color: gpui::Rgba,
 }
 
 const STROKE_WIDTH_PX: f32 = 3.0;
 const ARROWHEAD_LENGTH_PX: f32 = 12.0;
 
-/// Commits the pending pre-drag snapshot on the first frame that moves the
-/// element, so drags become undoable as one step while plain clicks do not
-/// pad the undo stack.
-fn commit_drag_snapshot(
-    pending: &mut Option<CanvasDocument>,
-    history: &mut CanvasHistory,
-    moved: bool,
-) {
-    if moved && let Some(snapshot) = pending.take() {
-        history.push_snapshot(snapshot);
+/// Rendered when a stored color string cannot be parsed as `#rgbhex`.
+const FALLBACK_COLOR_HEX: u32 = 0x528bff;
+
+fn parse_hex_color(color: &str) -> u32 {
+    let digits = color.trim_start_matches('#');
+    if digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        u32::from_str_radix(digits, 16).unwrap_or(FALLBACK_COLOR_HEX)
+    } else {
+        FALLBACK_COLOR_HEX
     }
+}
+
+fn color_to_rgba(color: &str) -> gpui::Rgba {
+    gpui::rgb(parse_hex_color(color))
 }
 
 fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) {
     let (sx, sy) = viewport.world_to_screen(spec.start.0, spec.start.1);
     let (ex, ey) = viewport.world_to_screen(spec.end.0, spec.end.1);
-    let color = theme::ACCENT_BLUE;
 
     let main_path = {
         let mut builder = gpui::PathBuilder::stroke(px(STROKE_WIDTH_PX));
@@ -796,7 +664,7 @@ fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) 
     let Ok(main_path) = main_path else {
         return;
     };
-    window.paint_path(main_path, color);
+    window.paint_path(main_path, spec.color);
 
     if !spec.arrowhead {
         return;
@@ -817,74 +685,14 @@ fn draw_stroke(window: &mut Window, viewport: CanvasViewport, spec: StrokeSpec) 
         let Ok(head_path) = head_path else {
             continue;
         };
-        window.paint_path(head_path, color);
+        window.paint_path(head_path, spec.color);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::scene::CanvasViewport;
-
-    #[test]
-    fn one_undo_entry_per_drag_not_per_frame() {
-        let mut history = CanvasHistory::new();
-        let mut pending = Some(CanvasDocument::new());
-
-        commit_drag_snapshot(&mut pending, &mut history, true);
-        assert!(history.can_undo());
-        assert!(pending.is_none());
-
-        // Subsequent drag frames keep the single snapshot; no per-frame churn.
-        commit_drag_snapshot(&mut pending, &mut history, true);
-        assert_eq!(history.undo_len(), 1);
-    }
-
-    #[test]
-    fn click_without_movement_pushes_no_undo_entry() {
-        let mut history = CanvasHistory::new();
-        let mut pending = Some(CanvasDocument::new());
-
-        // A click that never moves the element commits nothing...
-        commit_drag_snapshot(&mut pending, &mut history, false);
-        assert!(!history.can_undo());
-        assert!(pending.is_some());
-    }
-
-    #[test]
-    fn drag_can_be_reverted_instead_of_deleting_the_element() {
-        // Regression for the data-loss path: before the pending snapshot,
-        // undo after a drag popped the pre-creation entry and deleted the
-        // element entirely.
-        let mut pre_drag = CanvasDocument::new();
-        pre_drag.add_element(CanvasElement::new_rectangle(
-            "r1", 0.0, 0.0, 50.0, 50.0, 0.0,
-        ));
-
-        let mut dragged = pre_drag.clone();
-        dragged.elements[0].x = 30.0;
-
-        let mut history = CanvasHistory::new();
-        let mut pending = Some(pre_drag);
-        commit_drag_snapshot(&mut pending, &mut history, true);
-
-        let restored = history.undo(dragged).unwrap();
-        assert_eq!(restored.elements.len(), 1);
-        assert_eq!(restored.elements[0].x, 0.0);
-    }
-
-    #[test]
-    fn element_ids_never_collide_after_deletion() {
-        let mut ids = ElementIdAllocator::default();
-        let first = ids.allocate();
-        let second = ids.allocate();
-        assert_ne!(first, second);
-
-        // The old behavior derived ids from element count and would repeat
-        // the second id after deleting the first: a monotonic counter cannot.
-        let third = ids.allocate();
-        assert_eq!(third, "elem-3");
-        assert_ne!(third, second);
-    }
+    use crate::canvas::scene::{CanvasElement, CanvasViewport, DEFAULT_STROKE_COLOR};
 
     #[test]
     fn viewport_transform_roundtrip_matches_screen_to_world() {
@@ -906,6 +714,29 @@ mod tests {
     }
 
     #[test]
+    fn zoom_clamping_holds_at_both_ends() {
+        assert_eq!(clamp_zoom(ZOOM_MAX + 10.0 * ZOOM_STEP), ZOOM_MAX);
+        assert_eq!(clamp_zoom(ZOOM_MIN - 10.0 * ZOOM_STEP), ZOOM_MIN);
+        assert_eq!(clamp_zoom(1.5), 1.5);
+    }
+
+    #[test]
+    fn drag_delta_scales_inversely_with_zoom() {
+        // handle_mouse_move subtracts two world points; a screen-space drag
+        // must cover 1/zoom as many world units at zoomed-in cameras.
+        for zoom in [0.5, 1.0, 2.0] {
+            let viewport = CanvasViewport {
+                zoom,
+                ..Default::default()
+            };
+            let (ax, ay) = viewport.screen_to_world(100.0, 40.0);
+            let (bx, by) = viewport.screen_to_world(160.0, 10.0);
+            assert!(((bx - ax) - 60.0 / zoom).abs() < 1e-4, "zoom {zoom}");
+            assert!(((by - ay) - (-30.0 / zoom)).abs() < 1e-4, "zoom {zoom}");
+        }
+    }
+
+    #[test]
     fn test_canvas_tool_names() {
         assert_eq!(CanvasTool::Select.name(), "Select (V)");
         assert_eq!(CanvasTool::Rectangle.name(), "Rectangle (R)");
@@ -916,22 +747,41 @@ mod tests {
     }
 
     #[test]
-    fn test_canvas_document_element_management() {
+    fn imported_style_colors_survive_into_render_specs() {
+        // The render pipeline must read ElementStyle, not the theme: a
+        // custom export color must reach the stroke spec unchanged.
         let mut doc = CanvasDocument::new();
-        doc.add_element(CanvasElement::new_rectangle(
-            "r1", 0.0, 0.0, 50.0, 50.0, 0.0,
-        ));
-        assert_eq!(doc.elements.len(), 1);
+        let mut elem = CanvasElement::new_rectangle("r1", 0.0, 0.0, 10.0, 10.0, 0.0);
+        elem.style.stroke_color = Some("#ff0000".to_string());
+        doc.add_element(elem);
+        let stroke = doc
+            .elements
+            .first()
+            .map(|e| e.effective_stroke_color())
+            .unwrap();
+        assert_eq!(stroke, "#ff0000");
+        let _ = export_to_svg(&doc);
+    }
 
-        let removed = doc.remove_element("r1");
-        assert!(removed.is_some());
-        assert_eq!(doc.elements.len(), 0);
+    #[test]
+    fn default_stroke_color_is_the_export_fallback() {
+        let elem = CanvasElement::new_rectangle("r1", 0.0, 0.0, 10.0, 10.0, 0.0);
+        assert_eq!(elem.effective_stroke_color(), DEFAULT_STROKE_COLOR);
+    }
+
+    #[test]
+    fn parse_hex_color_handles_legacy_and_bad_input() {
+        assert_eq!(parse_hex_color("#ff00aa"), 0xff00aa);
+        assert_eq!(parse_hex_color("ff00aa"), 0xff00aa);
+        assert_eq!(parse_hex_color("#GGG"), FALLBACK_COLOR_HEX);
+        assert_eq!(parse_hex_color("#12345"), FALLBACK_COLOR_HEX);
     }
 }
 
 #[cfg(test)]
 mod stroke_tests {
     use super::*;
+    use crate::canvas::scene::DEFAULT_STROKE_COLOR;
 
     #[test]
     fn arrowhead_flanks_beside_the_segment() {
@@ -941,6 +791,7 @@ mod stroke_tests {
             start: (0.0, 0.0),
             end: (100.0, 0.0),
             arrowhead: true,
+            color: color_to_rgba(DEFAULT_STROKE_COLOR),
         };
         let angle = 0.0f32;
         let head_x = spec.end.0 - ARROWHEAD_LENGTH_PX * (angle + 30.0f32.to_radians()).cos();

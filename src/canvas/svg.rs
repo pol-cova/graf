@@ -14,16 +14,16 @@ pub fn export_to_svg(doc: &CanvasDocument) -> String {
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{vb_x:.1} {vb_y:.1} {vb_width:.1} {vb_height:.1}\" width=\"{vb_width:.1}\" height=\"{vb_height:.1}\">\n"
     ));
 
-    let mut arrow_colors: Vec<String> = doc
+    let mut arrow_colors: Vec<&str> = doc
         .elements
         .iter()
         .filter(|e| matches!(e.kind, ElementKind::Arrow { .. }))
-        .map(|e| e.style.stroke_color.clone())
+        .map(|e| e.effective_stroke_color())
         .collect();
     arrow_colors.sort();
     arrow_colors.dedup();
     if arrow_colors.is_empty() {
-        arrow_colors.push(DEFAULT_STROKE_COLOR.to_string());
+        arrow_colors.push(DEFAULT_STROKE_COLOR);
     }
 
     svg.push_str("<defs>\n");
@@ -47,8 +47,8 @@ pub fn export_to_svg(doc: &CanvasDocument) -> String {
         .iter()
         .map(crate::canvas::geometry::ElementBlueprint::from)
     {
-        let stroke = &blueprint.style.stroke_color;
-        let fill = blueprint.style.fill_color.as_deref().unwrap_or("none");
+        let stroke = blueprint.stroke;
+        let fill = blueprint.fill.unwrap_or("none");
         let dash_attr = match blueprint.style.stroke_style {
             StrokeStyle::Solid => String::new(),
             StrokeStyle::Dashed => r#" stroke-dasharray="6,4""#.to_string(),
@@ -199,5 +199,16 @@ mod tests {
         );
         // Already-escaped input must not double-escape (the & of an entity).
         assert_eq!(escape_xml("&amp;"), "&amp;amp;");
+    }
+
+    #[test]
+    fn empty_document_uses_fallback_viewport() {
+        // A bare scene must still emit a valid, non-degenerate SVG.
+        let svg = export_to_svg(&CanvasDocument::new());
+        assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.contains("viewBox=\"-16.0 -16.0 432.0 332.0\""));
+        assert!(svg.contains("width=\"432.0\""));
+        assert!(svg.contains("height=\"332.0\""));
+        assert!(svg.ends_with("</svg>\n"));
     }
 }

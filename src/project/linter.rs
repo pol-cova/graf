@@ -59,25 +59,16 @@ pub fn lint_academic_warnings_as_diagnostics(
     text: &str,
     is_typst: bool,
 ) -> Vec<crate::compiler::diagnostics::Diagnostic> {
-    let warnings = lint_academic_text(text, is_typst);
-    warnings
+    lint_academic_text(text, is_typst)
         .into_iter()
-        .map(|warning| crate::compiler::diagnostics::Diagnostic {
-            id: crate::compiler::diagnostics::DiagnosticId(
-                NEXT_LINT_DIAG_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            ),
-            severity: crate::compiler::diagnostics::Severity::Warning,
-            source: crate::compiler::diagnostics::DiagnosticSource::Parser,
-            file: None,
-            line: Some(warning.line),
-            message: warning.message,
+        .map(|warning| {
+            crate::compiler::diagnostics::Diagnostic::from_style_warning(
+                warning.line,
+                warning.message,
+            )
         })
         .collect()
 }
-
-/// Lint diagnostics share one id sequence so none collide with compile
-/// diagnostics that allocate from their own counters.
-static NEXT_LINT_DIAG_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     let mut warnings = Vec::new();
@@ -319,6 +310,30 @@ mod tests {
         assert!(warnings.iter().any(|w| w.matched_text == "In order to"));
         assert!(warnings.iter().any(|w| w.matched_text == "clearly"));
         assert!(warnings.iter().any(|w| w.matched_text == "utilize"));
+    }
+
+    #[test]
+    fn lint_diagnostics_draw_ids_from_one_growing_sequence() {
+        let first = lint_academic_warnings_as_diagnostics("was shown", false);
+        let second = lint_academic_warnings_as_diagnostics("was shown", false);
+
+        assert!(!first.is_empty() && !second.is_empty());
+        let max_first = first.iter().map(|d| d.id.0).max().unwrap();
+        let min_second = second.iter().map(|d| d.id.0).min().unwrap();
+        assert!(
+            min_second > max_first,
+            "ids must never repeat or reset between lint runs"
+        );
+        for diagnostic in first.iter().chain(second.iter()) {
+            assert_eq!(
+                diagnostic.severity,
+                crate::compiler::diagnostics::Severity::Warning
+            );
+            assert_eq!(
+                diagnostic.source,
+                crate::compiler::diagnostics::DiagnosticSource::Parser
+            );
+        }
     }
 
     #[test]

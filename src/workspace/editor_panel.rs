@@ -1,10 +1,13 @@
-use gpui::{Context, CursorStyle, IntoElement, ParentElement, Role, Styled, div, prelude::*, px};
+use gpui::{
+    AnyElement, Context, CursorStyle, IntoElement, ParentElement, Role, Styled, div, prelude::*, px,
+};
 use std::path::Path;
 
 use super::{ActiveViewKind, ResizingPanel, Workspace};
 use crate::project::tree::FileKind;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
+use crate::ui::widgets::list_row;
 
 impl Workspace {
     pub fn render_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -18,7 +21,7 @@ impl Workspace {
 
         let mut body = div().flex().flex_1().min_h_0();
 
-        if self.sidebar_visible {
+        if self.layout.sidebar_visible {
             body = body
                 .child(self.render_sidebar(cx))
                 .child(self.render_vertical_resize_handle(ResizingPanel::Sidebar, cx));
@@ -26,7 +29,7 @@ impl Workspace {
 
         body = body.child(self.render_editor_and_diagnostics(cx));
 
-        if self.preview_visible {
+        if self.layout.preview_visible {
             body = body
                 .child(self.render_vertical_resize_handle(ResizingPanel::Preview, cx))
                 .child(self.render_preview());
@@ -75,6 +78,8 @@ impl Workspace {
             let is_dirty = doc.is_dirty();
             let title = doc.title().to_string();
 
+            let close_button = tab_close_button(idx, is_dirty, cx);
+
             let tab = div()
                 .id(format!("tab-{}", doc.id().0))
                 .group("document-tab")
@@ -117,62 +122,7 @@ impl Workspace {
                         .child(FileKind::from_path(Path::new(&title)).label()),
                 )
                 .child(div().flex_1().min_w_0().truncate().child(title))
-                .child(if is_dirty {
-                    div()
-                        .id(format!("modified-tab-{idx}"))
-                        .relative()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .w(px(14.0))
-                        .h(px(14.0))
-                        .child(
-                            div()
-                                .w(px(6.0))
-                                .h(px(6.0))
-                                .rounded_full()
-                                .bg(theme::TEXT_MUTED)
-                                .group_hover("document-tab", |style| style.invisible()),
-                        )
-                        .child(
-                            div()
-                                .id(format!("close-dirty-tab-{idx}"))
-                                .absolute()
-                                .inset_0()
-                                .invisible()
-                                .group_hover("document-tab", |style| style.visible())
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .role(Role::Button)
-                                .aria_label("Close modified document")
-                                .text_color(theme::TEXT_MUTED)
-                                .hover(|style| style.text_color(theme::TEXT))
-                                .on_mouse_down(
-                                    gpui::MouseButton::Left,
-                                    cx.listener(move |this, _, _, cx| {
-                                        this.close_tab(idx, cx);
-                                    }),
-                                )
-                                .child(div().w(px(13.0)).h(px(13.0)).child(icon(Icon::Close))),
-                        )
-                } else {
-                    div()
-                        .id(format!("close-tab-{idx}"))
-                        .w(px(14.0))
-                        .text_center()
-                        .role(Role::Button)
-                        .aria_label("Close document")
-                        .text_color(theme::TEXT_MUTED)
-                        .hover(|style| style.text_color(theme::TEXT))
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                this.close_tab(idx, cx);
-                            }),
-                        )
-                        .child(div().w(px(13.0)).h(px(13.0)).child(icon(Icon::Close)))
-                });
+                .child(close_button);
 
             tab_bar = tab_bar.child(tab);
         }
@@ -215,37 +165,13 @@ impl Workspace {
 
                 for (index, item) in self.completions.iter().enumerate() {
                     let item_clone = item.clone();
-                    let row = div()
-                        .id(format!("comp-row-{}", item.label))
-                        .role(Role::ListBoxOption)
-                        .aria_label(format!("{}: {}", item.label, item.detail))
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .text_xs()
-                        .border_l_2()
-                        .border_color(if index == self.completion_selected {
-                            theme::ACCENT_BLUE
-                        } else {
-                            theme::BG_SURFACE
-                        })
-                        .bg(if index == self.completion_selected {
-                            theme::HOVER_BG
-                        } else {
-                            theme::BG_SURFACE
-                        })
-                        .text_color(theme::TEXT)
-                        .hover(|s| s.bg(theme::HOVER_BG))
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                this.apply_completion(&item_clone, cx);
-                            }),
-                        )
-                        .child(
+                    let selected = index == self.completion_selected;
+                    let row = list_row(
+                        format!("comp-row-{}", item.label),
+                        cx.listener(move |this, _, _, cx| {
+                            this.apply_completion(&item_clone, cx);
+                        }),
+                        [
                             div()
                                 .flex()
                                 .flex_1()
@@ -265,15 +191,31 @@ impl Workspace {
                                         .truncate()
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(item.label.clone()),
-                                ),
-                        )
-                        .child(
+                                )
+                                .into_any_element(),
                             div()
                                 .max_w(px(120.0))
                                 .truncate()
                                 .text_color(theme::TEXT_MUTED)
-                                .child(item.detail.clone()),
-                        );
+                                .child(item.detail.clone())
+                                .into_any_element(),
+                        ],
+                    )
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!("{}: {}", item.label, item.detail))
+                    .px_2()
+                    .py_1()
+                    .border_l_2()
+                    .border_color(if selected {
+                        theme::ACCENT_BLUE
+                    } else {
+                        theme::BG_SURFACE
+                    })
+                    .bg(if selected {
+                        theme::HOVER_BG
+                    } else {
+                        theme::BG_SURFACE
+                    });
 
                     comp_list = comp_list.child(row);
                 }
@@ -283,7 +225,7 @@ impl Workspace {
 
             area = area.child(editor_layer);
 
-            if self.diagnostics_drawer_open && !self.latest_diagnostics.is_empty() {
+            if self.layout.diagnostics_drawer_open && !self.latest_diagnostics.is_empty() {
                 area = area.child(self.render_diagnostics_drawer(cx));
             }
         }
@@ -296,11 +238,73 @@ impl Workspace {
             .flex()
             .flex_none()
             .flex_col()
-            .w(px(self.preview_width))
+            .w(px(self.layout.preview_width))
             .min_w(px(320.0))
             .bg(theme::BG_SURFACE)
             .border_l_1()
             .border_color(theme::BORDER)
             .child(self.preview.clone())
+    }
+}
+
+/// One builder for both tab-close variants: a dirty tab hides the close
+/// button behind a dot until group-hover; a clean tab shows it directly.
+fn tab_close_button(idx: usize, is_dirty: bool, cx: &mut Context<Workspace>) -> AnyElement {
+    let close_control = |id: String, aria_label: &'static str, idx: usize| {
+        div()
+            .id(id)
+            .flex()
+            .items_center()
+            .justify_center()
+            .role(Role::Button)
+            .aria_label(aria_label)
+            .text_color(theme::TEXT_MUTED)
+            .hover(|style| style.text_color(theme::TEXT))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |this, _, _, cx| this.close_tab(idx, cx)),
+            )
+            .child(div().w(px(13.0)).h(px(13.0)).child(icon(Icon::Close)))
+    };
+
+    if is_dirty {
+        div()
+            .id(format!("modified-tab-{idx}"))
+            .relative()
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(14.0))
+            .h(px(14.0))
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(theme::TEXT_MUTED)
+                    .group_hover("document-tab", |style| style.invisible()),
+            )
+            .child(
+                close_control(
+                    format!("close-dirty-tab-{idx}"),
+                    "Close modified document",
+                    idx,
+                )
+                .absolute()
+                .inset_0()
+                .invisible()
+                .group_hover("document-tab", |style| style.visible()),
+            )
+            .into_any_element()
+    } else {
+        div()
+            .w(px(14.0))
+            .text_center()
+            .child(close_control(
+                format!("close-tab-{idx}"),
+                "Close document",
+                idx,
+            ))
+            .into_any_element()
     }
 }

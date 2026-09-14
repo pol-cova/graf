@@ -1,5 +1,6 @@
 pub mod bibtex;
 pub mod document;
+pub mod kinds;
 pub mod linter;
 pub mod outline;
 pub(crate) mod persistence;
@@ -8,5 +9,6 @@ pub mod settings;
 pub mod state;
 pub mod stats;
 pub mod templates;
+pub mod text_search;
 pub mod tree;
 pub mod zotero;

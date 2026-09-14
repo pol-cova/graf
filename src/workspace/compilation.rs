@@ -5,7 +5,7 @@ impl Workspace {
     /// cancel flag so the engine kills the subprocess instead of running to
     /// completion. Called whenever the source changes faster than the build.
     pub(super) fn cancel_in_flight_compile(&mut self) {
-        if let Some(flag) = self.compile_cancel.as_ref() {
+        if let Some(flag) = self.compile.cancel.as_ref() {
             flag.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -30,13 +30,13 @@ impl Workspace {
             // generation check below is the explicit backstop so a stale
             // timer can never call trigger_compile even if this invariant
             // is broken by a later refactor.
-            self.debounce_generation += 1;
+            self.compile.generation += 1;
             let debounce = self.controller.debounce_duration();
-            let generation = self.debounce_generation;
-            self.compile_task = Some(cx.spawn(async move |this, cx| {
+            let generation = self.compile.generation;
+            self.compile.task = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(debounce).await;
                 this.update(cx, |this, cx| {
-                    if this.debounce_generation == generation {
+                    if this.compile.generation == generation {
                         this.trigger_compile(cx);
                     }
                 })
@@ -47,7 +47,7 @@ impl Workspace {
 
     pub fn trigger_compile(&mut self, cx: &mut Context<Self>) {
         if !self.active_document_is_compilable() {
-            self.compile_pending = false;
+            self.compile.pending = false;
             self.controller.reset();
             self.latest_diagnostics.clear();
             self.preview.update(cx, |preview, cx| preview.clear(cx));
@@ -55,14 +55,14 @@ impl Workspace {
             return;
         }
 
-        if self.compile_running {
-            self.compile_pending = true;
+        if self.compile.running {
+            self.compile.pending = true;
             return;
         }
 
         // Drop the previous token so a fresh one guards this compile.
         self.cancel_in_flight_compile();
-        self.compile_cancel = None;
+        self.compile.cancel = None;
 
         self.preview
             .update(cx, |preview, cx| preview.set_rendering(cx));
@@ -84,9 +84,8 @@ impl Workspace {
         let root_document = self
             .project_tree
             .root_document()
-            .filter(|path| match engine {
-                EngineKind::Latex => path.extension().is_some_and(|extension| extension == "tex"),
-                EngineKind::Typst => path.extension().is_some_and(|extension| extension == "typ"),
+            .filter(|path| {
+                crate::project::kinds::FileKind::from_path(path).as_engine() == Some(engine)
             })
             .map(Path::to_path_buf)
             .or_else(|| {
@@ -96,13 +95,13 @@ impl Workspace {
             });
 
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.compile_cancel = Some(cancel_flag.clone());
+        self.compile.cancel = Some(cancel_flag.clone());
         let render_cancel = cancel_flag.clone();
         let request = CompileRequest::with_project(text, rev, project_root, root_document)
             .with_cancel(cancel_flag);
         self.controller.begin_compile(request.compile_id, rev);
-        self.compile_running = true;
-        self.compile_pending = false;
+        self.compile.running = true;
+        self.compile.pending = false;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -146,7 +145,7 @@ impl Workspace {
                     // means a newer edit arrived; abort the raster too.
                     let render_cancelled = this
                         .update(cx, |this, _| {
-                            this.compile_cancel
+                            this.compile.cancel
                                 .as_ref()
                                 .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed))
                         })
@@ -236,9 +235,9 @@ impl Workspace {
     }
 
     fn finish_compile(&mut self, cx: &mut Context<Self>) {
-        self.compile_running = false;
-        if self.compile_pending {
-            self.compile_pending = false;
+        self.compile.running = false;
+        if self.compile.pending {
+            self.compile.pending = false;
             self.trigger_compile(cx);
         } else {
             cx.notify();

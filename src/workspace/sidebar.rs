@@ -8,13 +8,13 @@ use crate::ui::theme;
 
 impl Workspace {
     pub fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_files = self.sidebar_tab == SidebarTab::Files;
+        let is_files = self.layout.sidebar_tab == SidebarTab::Files;
 
         let mut sidebar = div()
             .flex()
             .flex_none()
             .flex_col()
-            .w(px(self.sidebar_width))
+            .w(px(self.layout.sidebar_width))
             .bg(theme::BG_SURFACE)
             .border_r_1()
             .border_color(theme::BORDER)
@@ -50,7 +50,7 @@ impl Workspace {
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    this.sidebar_tab = SidebarTab::Files;
+                                    this.layout.sidebar_tab = SidebarTab::Files;
                                     cx.notify();
                                 }),
                             )
@@ -81,7 +81,7 @@ impl Workspace {
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
-                                    this.sidebar_tab = SidebarTab::Outline;
+                                    this.layout.sidebar_tab = SidebarTab::Outline;
                                     cx.notify();
                                 }),
                             )

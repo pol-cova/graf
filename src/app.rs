@@ -16,6 +16,7 @@ pub fn run() {
     application().run(|cx: &mut App| {
         crate::editor::view::register_bindings(cx);
         crate::workspace::register_bindings(cx);
+        crate::canvas::view::register_bindings(cx);
         set_app_menus(cx);
 
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);

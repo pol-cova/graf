@@ -128,7 +128,7 @@ impl Element for EditorElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let editor = self.editor.read(cx);
-        let line_height = window.line_height().as_f32().max(20.0);
+        let line_height = window.line_height().as_f32().max(theme::EDITOR_LINE_HEIGHT);
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(window.rem_size());
 
@@ -351,7 +351,7 @@ impl Element for EditorElement {
                     window
                         .text_system()
                         .shape_line(num_str.into(), font_size, &[run], None);
-                let gutter_x = px(gutter_width - 10.0) - shaped.width;
+                let gutter_x = px(gutter_width - theme::GUTTER_NUMBER_MARGIN) - shaped.width;
                 if let Err(error) = shaped.paint(
                     point(bounds.left() + gutter_x, bounds.top() + px(y)),
                     line_height_px,

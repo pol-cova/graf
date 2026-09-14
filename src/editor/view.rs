@@ -24,6 +24,17 @@ pub(crate) const MAX_FONT_SIZE: f32 = 24.0;
 pub(crate) const MIN_TAB_SIZE: usize = 1;
 pub(crate) const MAX_TAB_SIZE: usize = 8;
 
+/// One place computes the gutter width from line count so layout and the
+/// completion anchor clamp cannot disagree.
+pub(crate) fn gutter_width_for(line_count: usize, line_numbers: bool) -> f32 {
+    if !line_numbers {
+        return 0.0;
+    }
+    let digits = line_count.to_string().len().max(2);
+    (digits as f32 * theme::GUTTER_CHAR_WIDTH + theme::GUTTER_BASE_WIDTH)
+        .max(theme::GUTTER_MIN_WIDTH)
+}
+
 actions!(
     editor,
     [
@@ -183,12 +194,12 @@ impl EditorView {
             last_line_layouts: Vec::new(),
             last_first_line: 0,
             last_bounds: None,
-            last_line_height: 22.0,
+            last_line_height: theme::EDITOR_LINE_HEIGHT,
             goal_col: None,
             diagnostics: Vec::new(),
             is_typst: false,
             plain_text: false,
-            font_size: 14.0,
+            font_size: theme::EDITOR_FONT_SIZE,
             tab_size: 2,
             line_numbers: true,
             completion_active: false,
@@ -225,12 +236,7 @@ impl EditorView {
     }
 
     pub fn gutter_width(&self) -> f32 {
-        if !self.line_numbers {
-            return 0.0;
-        }
-        let line_count = self.buffer.line_count();
-        let digits = line_count.to_string().len().max(2);
-        (digits as f32 * 9.0 + 26.0).max(48.0)
+        gutter_width_for(self.buffer.line_count(), self.line_numbers)
     }
 
     pub fn jump_to_line(&mut self, line: usize, cx: &mut Context<Self>) {
@@ -447,7 +453,7 @@ impl EditorView {
         let y = line as f32 * self.last_line_height - self.scroll_offset + self.last_line_height;
         let desired_x = self.gutter_width() + TEXT_PADDING + x;
         let max_x = self.last_bounds.map_or(desired_x, |bounds| {
-            (bounds.size.width.as_f32() - 320.0).max(0.0)
+            (bounds.size.width.as_f32() - theme::COMPLETION_POPUP_WIDTH).max(0.0)
         });
         (desired_x.min(max_x), y.max(0.0))
     }
@@ -471,9 +477,9 @@ impl Render for EditorView {
                 "Document editor"
             })
             .track_focus(&self.focus_handle)
-            .font_family("Menlo")
+            .font_family(theme::EDITOR_FONT_FAMILY)
             .text_size(px(self.font_size))
-            .line_height(px(23.0))
+            .line_height(px(theme::EDITOR_LINE_HEIGHT))
             .on_action(cx.listener(Self::on_backspace))
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_left))
