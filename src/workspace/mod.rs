@@ -1,3 +1,4 @@
+mod actions;
 mod commands;
 mod compilation;
 mod diagnostics;
@@ -5,6 +6,7 @@ mod documents;
 mod editor_panel;
 mod find_bar;
 mod modals;
+mod render;
 mod state;
 pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
 pub(crate) use state::next_draft_title;
@@ -21,7 +23,7 @@ use log::{info, warn};
 
 use gpui::{
     Context, DebugFrameOverlayMode, Entity, FocusHandle, Focusable, KeyBinding, MouseMoveEvent,
-    MouseUpEvent, PathPromptOptions, Render, Task, Window, actions, div, prelude::*,
+    MouseUpEvent, PathPromptOptions, Task, Window, actions, prelude::*,
 };
 
 use self::commands::CommandId;
@@ -39,7 +41,6 @@ use crate::preview::view::PreviewView;
 use crate::project::document::Document;
 use crate::project::settings::GrafSettings;
 use crate::project::tree::ProjectTree;
-use crate::ui::theme;
 
 const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 160.0..=420.0;
 const PREVIEW_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 320.0..=800.0;
@@ -782,222 +783,5 @@ impl Workspace {
             editor.jump_to_line(line, cx);
         });
         cx.notify();
-    }
-
-    fn on_prompt_changed(&mut self, prompt: Entity<EditorView>, cx: &mut Context<Self>) {
-        let raw_query = prompt.read(cx).text().to_string();
-        let submitted = raw_query.contains('\n');
-        let query = raw_query.replace('\n', "");
-
-        if self.prompt_target == state::PromptTarget::Find {
-            let content = self.editor.read(cx).text().to_string();
-            self.find_state.set_query(query.clone(), &content);
-        }
-
-        if submitted {
-            if self.prompt_target == state::PromptTarget::Find
-                && let Some(matched) = self.find_state.next_match().cloned()
-            {
-                self.editor
-                    .update(cx, |editor, cx| editor.select_range(matched, cx));
-            }
-
-            match self.prompt_target {
-                state::PromptTarget::QuickOpen => {
-                    let query = query.to_lowercase();
-                    if let Some(path) = self
-                        .project_tree
-                        .quick_open_matches(&query, QUICK_OPEN_SEARCH_LIMIT)
-                        .first()
-                        .map(|entry| entry.path.clone())
-                    {
-                        self.active_modal = ActiveModal::None;
-                        self.prompt_target = state::PromptTarget::Idle;
-                        self.open_file(path, cx);
-                    }
-                }
-                state::PromptTarget::Palette => {
-                    let query = query.to_lowercase();
-                    if let Some(command) = commands::filter_commands(&query).next() {
-                        self.active_modal = ActiveModal::None;
-                        self.prompt_target = state::PromptTarget::Idle;
-                        self.dispatch_command_action(command.id, cx);
-                    }
-                }
-                state::PromptTarget::Find | state::PromptTarget::Idle => {}
-            }
-            self.prompt_editor
-                .update(cx, |input, cx| input.set_input_text(query, cx));
-        }
-
-        cx.notify();
-    }
-
-    pub fn dispatch_command_action(&mut self, id: commands::CommandId, cx: &mut Context<Self>) {
-        match id {
-            CommandId::Compile => self.trigger_compile(cx),
-            CommandId::Save => self.save_active_document(cx),
-            CommandId::FindInFile => self.toggle_find(cx),
-            CommandId::ToggleProject => self.toggle_sidebar(cx),
-            CommandId::TogglePreview => self.toggle_preview(cx),
-            CommandId::ToggleProblems => self.toggle_diagnostics(cx),
-            CommandId::CloseTab => {
-                let active = self.active_doc_idx;
-                self.close_tab(active, cx);
-            }
-            CommandId::NewVectorDiagram => self.new_canvas_diagram(cx),
-            CommandId::OpenSettings => self.open_settings(SettingsTab::Editor, cx),
-            CommandId::NewTypstDocument => self.new_typst_document(cx),
-            CommandId::AboutGraf => self.open_about(cx),
-            CommandId::InsertTable => self.insert_table_template(cx),
-            CommandId::ExportTikz => self.export_canvas_to_tikz(cx),
-            CommandId::ExportSvg => self.export_canvas_to_svg(cx),
-            CommandId::CheckWritingStyle => self.lint_academic_style(cx),
-            CommandId::SyncZotero => self.sync_zotero_library(cx),
-        }
-    }
-
-    fn on_focus_editor(&mut self, _: &FocusEditor, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.editor.read(cx).focus_handle(cx), cx);
-    }
-
-    fn on_compile(&mut self, _: &Compile, _window: &mut Window, cx: &mut Context<Self>) {
-        self.trigger_compile(cx);
-    }
-
-    fn on_open_file(&mut self, _: &OpenFile, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open_file_picker(cx);
-    }
-
-    fn on_save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
-        self.save_active_document(cx);
-    }
-
-    fn on_close_tab(&mut self, _: &CloseTab, _window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.active_doc_idx;
-        self.close_tab(active, cx);
-    }
-
-    fn on_toggle_sidebar(
-        &mut self,
-        _: &ToggleSidebar,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_sidebar(cx);
-    }
-
-    fn on_toggle_preview(
-        &mut self,
-        _: &TogglePreview,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_preview(cx);
-    }
-
-    fn on_toggle_diagnostics(
-        &mut self,
-        _: &ToggleDiagnostics,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_diagnostics(cx);
-    }
-
-    fn on_toggle_find(&mut self, _: &ToggleFind, window: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_find(cx);
-        if self.find_bar_open {
-            window.focus(&self.prompt_editor.read(cx).focus_handle(cx), cx);
-        } else {
-            window.focus(&self.editor.read(cx).focus_handle(cx), cx);
-        }
-    }
-
-    fn on_quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_quick_open(cx);
-        window.focus(&self.prompt_editor.read(cx).focus_handle(cx), cx);
-    }
-
-    fn on_command_palette(
-        &mut self,
-        _: &CommandPalette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_command_palette(cx);
-        window.focus(&self.prompt_editor.read(cx).focus_handle(cx), cx);
-    }
-
-    fn on_open_settings(&mut self, _: &OpenSettings, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open_settings(SettingsTab::Editor, cx);
-    }
-
-    fn on_open_about(&mut self, _: &OpenAbout, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open_about(cx);
-    }
-
-    fn on_close_modal(&mut self, _: &CloseModal, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_modal(cx);
-        window.focus(&self.editor.read(cx).focus_handle(cx), cx);
-    }
-
-    fn on_autocomplete(&mut self, _: &Autocomplete, _window: &mut Window, cx: &mut Context<Self>) {
-        self.trigger_autocomplete(cx);
-    }
-
-    fn on_toggle_performance_overlay(
-        &mut self,
-        _: &TogglePerformanceOverlay,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_performance_overlay(window, cx);
-    }
-}
-
-impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut root = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(theme::color(theme::BG))
-            .text_color(theme::color(theme::TEXT))
-            .text_sm()
-            .on_mouse_move(cx.listener(Self::resize_panel))
-            .on_mouse_up(
-                gpui::MouseButton::Left,
-                cx.listener(Self::finish_panel_resize),
-            )
-            .on_action(cx.listener(Self::on_focus_editor))
-            .on_action(cx.listener(Self::on_compile))
-            .on_action(cx.listener(Self::on_open_file))
-            .on_action(cx.listener(Self::on_save))
-            .on_action(cx.listener(Self::on_close_tab))
-            .on_action(cx.listener(Self::on_toggle_sidebar))
-            .on_action(cx.listener(Self::on_toggle_preview))
-            .on_action(cx.listener(Self::on_toggle_diagnostics))
-            .on_action(cx.listener(Self::on_toggle_find))
-            .on_action(cx.listener(Self::on_quick_open))
-            .on_action(cx.listener(Self::on_command_palette))
-            .on_action(cx.listener(Self::on_open_settings))
-            .on_action(cx.listener(Self::on_open_about))
-            .on_action(cx.listener(Self::on_close_modal))
-            .on_action(cx.listener(Self::on_autocomplete))
-            .on_action(cx.listener(Self::on_toggle_performance_overlay))
-            .child(self.render_top_bar(cx))
-            .child(self.render_body(cx))
-            .child(self.render_status_bar(cx));
-
-        if self.workspace_menu_open {
-            root = root.child(self.render_workspace_menu(cx));
-        }
-
-        if let Some(modal) = self.render_modal(cx) {
-            root = root.child(modal);
-        }
-
-        root
     }
 }
