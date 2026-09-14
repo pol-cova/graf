@@ -5,6 +5,7 @@ mod documents;
 mod editor_panel;
 mod find_bar;
 mod modals;
+mod render;
 mod state;
 pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
 pub(crate) use state::next_draft_title;
@@ -21,7 +22,7 @@ use log::{info, warn};
 
 use gpui::{
     Context, DebugFrameOverlayMode, Entity, FocusHandle, Focusable, KeyBinding, MouseMoveEvent,
-    MouseUpEvent, PathPromptOptions, Render, Task, Window, actions, div, prelude::*,
+    MouseUpEvent, PathPromptOptions, Task, Window, actions, prelude::*,
 };
 
 use self::commands::CommandId;
@@ -39,7 +40,6 @@ use crate::preview::view::PreviewView;
 use crate::project::document::Document;
 use crate::project::settings::GrafSettings;
 use crate::project::tree::ProjectTree;
-use crate::ui::theme;
 
 const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 160.0..=420.0;
 const PREVIEW_WIDTH_RANGE: std::ops::RangeInclusive<f32> = 320.0..=800.0;
@@ -953,51 +953,5 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.toggle_performance_overlay(window, cx);
-    }
-}
-
-impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut root = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(theme::color(theme::BG))
-            .text_color(theme::color(theme::TEXT))
-            .text_sm()
-            .on_mouse_move(cx.listener(Self::resize_panel))
-            .on_mouse_up(
-                gpui::MouseButton::Left,
-                cx.listener(Self::finish_panel_resize),
-            )
-            .on_action(cx.listener(Self::on_focus_editor))
-            .on_action(cx.listener(Self::on_compile))
-            .on_action(cx.listener(Self::on_open_file))
-            .on_action(cx.listener(Self::on_save))
-            .on_action(cx.listener(Self::on_close_tab))
-            .on_action(cx.listener(Self::on_toggle_sidebar))
-            .on_action(cx.listener(Self::on_toggle_preview))
-            .on_action(cx.listener(Self::on_toggle_diagnostics))
-            .on_action(cx.listener(Self::on_toggle_find))
-            .on_action(cx.listener(Self::on_quick_open))
-            .on_action(cx.listener(Self::on_command_palette))
-            .on_action(cx.listener(Self::on_open_settings))
-            .on_action(cx.listener(Self::on_open_about))
-            .on_action(cx.listener(Self::on_close_modal))
-            .on_action(cx.listener(Self::on_autocomplete))
-            .on_action(cx.listener(Self::on_toggle_performance_overlay))
-            .child(self.render_top_bar(cx))
-            .child(self.render_body(cx))
-            .child(self.render_status_bar(cx));
-
-        if self.workspace_menu_open {
-            root = root.child(self.render_workspace_menu(cx));
-        }
-
-        if let Some(modal) = self.render_modal(cx) {
-            root = root.child(modal);
-        }
-
-        root
     }
 }
