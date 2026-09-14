@@ -4,6 +4,8 @@ mod input;
 use self::element::{EditorElement, SingleLineInputElement};
 use std::ops::Range;
 
+use crate::editor::buffer::{TextBuffer, clamp_str_boundary};
+
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
@@ -13,7 +15,6 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::buffer::TextBuffer;
 use crate::ui::theme;
 
 pub(crate) const MIN_FONT_SIZE: f32 = 10.0;
@@ -261,22 +262,40 @@ impl EditorView {
         self.context_menu_position = None;
         self.buffer.begin_transaction(self.cursor);
 
+        // One auto-pair model for keyboard and IME alike: a pairable char
+        // either wraps the selection or inserts the closing partner.
+        if text.chars().count() == 1
+            && let Some((open, close)) = text.chars().next().and_then(auto_pair)
+        {
+            if !self.selected_range.is_empty() {
+                let selected = self.buffer.content()[self.selected_range.clone()].to_string();
+                let wrapped = format!("{open}{selected}{close}");
+                self.buffer.delete(self.selected_range.clone());
+                self.buffer.insert(self.selected_range.start, &wrapped);
+                self.cursor = self.selected_range.start + wrapped.len();
+                self.selected_range = self.cursor..self.cursor;
+                self.buffer.end_transaction(self.cursor);
+                self.goal_col = None;
+                self.ensure_cursor_visible();
+                return;
+            }
+            self.buffer.insert(self.cursor, &format!("{open}{close}"));
+            self.cursor += open.len_utf8();
+            self.selected_range = self.cursor..self.cursor;
+            self.buffer.end_transaction(self.cursor);
+            self.goal_col = None;
+            self.ensure_cursor_visible();
+            return;
+        }
+
         if !self.selected_range.is_empty() {
             self.buffer.delete(self.selected_range.clone());
             self.cursor = self.selected_range.start;
             self.selected_range = self.cursor..self.cursor;
         }
 
-        let (insert_payload, move_delta) = match text {
-            "{" => ("{}", 1),
-            "(" => ("()", 1),
-            "[" => ("[]", 1),
-            "$" => ("$$", 1),
-            _ => (text, text.len()),
-        };
-
-        self.buffer.insert(self.cursor, insert_payload);
-        self.cursor += move_delta;
+        self.buffer.insert(self.cursor, text);
+        self.cursor += text.len();
         self.selected_range = self.cursor..self.cursor;
         self.buffer.end_transaction(self.cursor);
         self.goal_col = None;
@@ -326,7 +345,8 @@ impl EditorView {
     fn previous_boundary(&self, offset: usize) -> usize {
         let content = self.buffer.content();
         let safe_offset = offset.min(content.len());
-        let window_start = char_floor(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
+        let window_start =
+            clamp_str_boundary(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
         match content[window_start..safe_offset]
             .grapheme_indices(true)
             .next_back()
@@ -361,7 +381,8 @@ impl EditorView {
     fn previous_word_boundary(&self, offset: usize) -> usize {
         let content = self.buffer.content();
         let safe_offset = offset.min(content.len());
-        let window_start = char_floor(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
+        let window_start =
+            clamp_str_boundary(content, safe_offset.saturating_sub(BOUNDARY_WINDOW_BYTES));
         let windowed = content[window_start..safe_offset]
             .split_word_bound_indices()
             .rev()
@@ -399,11 +420,7 @@ impl EditorView {
         let line = self.buffer.line_of_offset(offset);
         let line_start = self.buffer.line_start_offset(line);
         let line_str = self.buffer.line_content(line).unwrap_or("");
-        let rel_byte = offset.saturating_sub(line_start).min(line_str.len());
-        let mut safe_rel = rel_byte;
-        while safe_rel > 0 && !line_str.is_char_boundary(safe_rel) {
-            safe_rel -= 1;
-        }
+        let safe_rel = clamp_str_boundary(line_str, offset.saturating_sub(line_start));
         let char_col = line_str[..safe_rel].chars().count();
         (line, char_col)
     }
@@ -673,10 +690,7 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
         return 0..0;
     }
 
-    let mut position = offset.min(content.len());
-    while position > 0 && !content.is_char_boundary(position) {
-        position -= 1;
-    }
+    let mut position = clamp_str_boundary(content, offset);
     if position == content.len() {
         position = content
             .char_indices()
@@ -684,7 +698,6 @@ fn word_range_at(content: &str, offset: usize) -> Range<usize> {
             .map(|(index, _)| index)
             .unwrap_or(0);
     }
-
     let is_word = |character: char| character.is_alphanumeric() || character == '_';
     let selected_is_word = content[position..].chars().next().is_some_and(is_word);
 
@@ -716,13 +729,6 @@ const TEXT_PADDING: f32 = 14.0;
 /// cursor. Arrow keys and word jumps scan this window instead of the whole
 /// document; boundaries always exist well within it.
 const BOUNDARY_WINDOW_BYTES: usize = 256;
-
-fn char_floor(content: &str, mut index: usize) -> usize {
-    while index > 0 && !content.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
-}
 
 /// UTF16 offset of every line start plus the document total, one pass.
 fn compute_utf16_line_offsets(content: &str) -> Vec<usize> {
@@ -1002,5 +1008,47 @@ mod tests {
         assert_eq!(&text[word_range_at(text, 7)], "beta");
         assert_eq!(&text[word_range_at(text, 10)], ", ");
         assert_eq!(&text[word_range_at(text, text.len())], "café");
+    }
+}
+
+/// One auto-pair table+policy for typed and IME input: pairs `{ ( [ $ " ' * `_`
+/// wrap a selection or insert the closing partner; everything else passes
+/// through untouched.
+pub(crate) fn auto_pair(ch: char) -> Option<(char, char)> {
+    Some(match ch {
+        '(' => ('(', ')'),
+        '[' => ('[', ']'),
+        '{' => ('{', '}'),
+        '"' => ('"', '"'),
+        '\'' => ('\'', '\''),
+        '$' => ('$', '$'),
+        '*' => ('*', '*'),
+        '_' => ('_', '_'),
+        '`' => ('`', '`'),
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod auto_pair_tests {
+    use super::*;
+
+    #[test]
+    fn pairs_in_one_table() {
+        assert_eq!(auto_pair('('), Some(('(', ')')));
+        assert_eq!(auto_pair('"'), Some(('"', '"')));
+        assert_eq!(auto_pair('$'), Some(('$', '$')));
+        assert_eq!(auto_pair('x'), None);
+        assert_eq!(auto_pair('μ'), None);
+    }
+
+    #[test]
+    fn boundary_clamp_walks_back_to_a_character_edge() {
+        let buffer = TextBuffer::from_text("日本語");
+        // Offsetting into the middle of the second character clamps back.
+        assert_eq!(buffer.clamp_char_boundary(4), 3);
+        assert_eq!(buffer.clamp_char_boundary(9), 9);
+        assert_eq!(buffer.clamp_char_boundary(100), 9);
+        assert_eq!(clamp_str_boundary("ab", 5), 2);
     }
 }

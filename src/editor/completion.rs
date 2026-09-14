@@ -1,3 +1,4 @@
+use crate::editor::buffer::clamp_str_boundary;
 use crate::project::bibtex::{BibtexIndex, LabelIndex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,11 +34,7 @@ pub fn compute_completions(
     bib_index: &BibtexIndex,
     label_index: &LabelIndex,
 ) -> Vec<CompletionItem> {
-    let safe_offset = cursor_offset.min(buffer_content.len());
-    let mut end = safe_offset;
-    while end > 0 && !buffer_content.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = clamp_str_boundary(buffer_content, cursor_offset);
     let safe_prefix = &buffer_content[..end];
     let line_start = safe_prefix.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let prefix = &safe_prefix[line_start..];
