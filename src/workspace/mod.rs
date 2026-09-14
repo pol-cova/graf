@@ -162,6 +162,10 @@ pub struct Workspace {
     pub(crate) compile_task: Option<Task<()>>,
     pub(crate) compile_running: bool,
     pub(crate) compile_pending: bool,
+    /// Bumped on every edit that schedules a compile; the debounce timer's
+    /// captured generation must match to fire, so stale timers cannot
+    /// trigger compiles.
+    pub(crate) debounce_generation: u64,
     /// Cancel flag for the in-flight compile; flipping it kills the running
     /// compiler subprocess (and rasterization) instead of waiting it out.
     pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
@@ -304,6 +308,7 @@ impl Workspace {
             compile_task: None,
             compile_running: false,
             compile_pending: false,
+            debounce_generation: 0,
             compile_cancel: None,
             show_welcome,
             sidebar_visible: true,
