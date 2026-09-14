@@ -162,6 +162,10 @@ pub struct Workspace {
     pub(crate) compile_task: Option<Task<()>>,
     pub(crate) compile_running: bool,
     pub(crate) compile_pending: bool,
+    /// Bumped on every edit that schedules a compile; the debounce timer's
+    /// captured generation must match to fire, so stale timers cannot
+    /// trigger compiles.
+    pub(crate) debounce_generation: u64,
     /// Cancel flag for the in-flight compile; flipping it kills the running
     /// compiler subprocess (and rasterization) instead of waiting it out.
     pub(crate) compile_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
@@ -184,6 +188,9 @@ pub struct Workspace {
     /// `&self` paint) must not parse the document every paint.
     pub(crate) outline_cache:
         std::cell::RefCell<Option<(u64, Vec<crate::project::outline::OutlineItem>)>>,
+    /// Cached word count keyed by (editor revision, Typst-ness): the status
+    /// bar paints every frame but this scan must run per edit, not per frame.
+    pub(crate) word_count_cache: std::cell::RefCell<Option<(u64, bool, usize)>>,
     pub(crate) completions: Vec<crate::editor::completion::CompletionItem>,
     pub(crate) completion_open: bool,
     pub(crate) completion_selected: usize,
@@ -245,11 +252,17 @@ impl Workspace {
         let tectonic_compiler: Arc<dyn DocumentEngine> = Arc::new(TectonicEngine::new());
         let typst_compiler: Arc<dyn DocumentEngine> = Arc::new(TypstEngine::new());
 
-        // Prime the Tectonic support-file cache in the background so the
-        // first user compile is not the one waiting on downloads.
+        // Prime engines off the UI thread: resolution (a `which` spawn and
+        // path probes) and the Tectonic support-file download both happen in
+        // this background task, so the first frame and the first compile do
+        // not wait on them.
         let warm_up_engine = tectonic_compiler.clone();
+        let warm_up_typst = typst_compiler.clone();
         cx.background_executor()
-            .spawn(async move { warm_up_engine.warm_up() })
+            .spawn(async move {
+                warm_up_typst.warm_up();
+                warm_up_engine.warm_up();
+            })
             .detach();
         let pdf_renderer: Arc<dyn PdfRenderer> = Arc::new(NativePdfRenderer::new());
         let controller = CompilerController::with_debounce(std::time::Duration::from_millis(
@@ -298,6 +311,7 @@ impl Workspace {
             compile_task: None,
             compile_running: false,
             compile_pending: false,
+            debounce_generation: 0,
             compile_cancel: None,
             show_welcome,
             sidebar_visible: true,
@@ -315,6 +329,7 @@ impl Workspace {
             bib_index: crate::project::bibtex::BibtexIndex::new(),
             label_index: crate::project::bibtex::LabelIndex::default(),
             outline_cache: std::cell::RefCell::new(None),
+            word_count_cache: std::cell::RefCell::new(None),
             completions: Vec::new(),
             completion_open: false,
             completion_selected: 0,
@@ -697,13 +712,31 @@ impl Workspace {
         self.trigger_compile(cx);
     }
 
+    /// Export commands must not run while a text document is on screen: the
+    /// shared canvas holds the last-loaded .graf scene, and exporting that
+    /// would silently copy another file's diagram to the clipboard.
+    fn assert_canvas_export_target(&mut self) -> bool {
+        if self.active_view_kind != ActiveViewKind::Canvas {
+            self.workspace_error =
+                Some("Canvas export requires an active .graf document".to_string());
+            return false;
+        }
+        true
+    }
+
     pub fn export_canvas_to_tikz(&mut self, cx: &mut Context<Self>) {
+        if !self.assert_canvas_export_target() {
+            return;
+        }
         let doc = self.canvas.read(cx).document();
         let tikz_code = crate::canvas::tikz::export_to_tikz(doc);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(tikz_code));
     }
 
     pub fn export_canvas_to_svg(&mut self, cx: &mut Context<Self>) {
+        if !self.assert_canvas_export_target() {
+            return;
+        }
         let doc = self.canvas.read(cx).document();
         let svg_code = crate::canvas::svg::export_to_svg(doc);
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(svg_code));

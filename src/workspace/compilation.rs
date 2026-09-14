@@ -25,11 +25,20 @@ impl Workspace {
             self.controller.on_source_edited(rev);
             cx.notify();
 
+            // Replacing the stored task drops the previous handle, which
+            // cancels that pending timer (gpui tasks cancel on drop); the
+            // generation check below is the explicit backstop so a stale
+            // timer can never call trigger_compile even if this invariant
+            // is broken by a later refactor.
+            self.debounce_generation += 1;
             let debounce = self.controller.debounce_duration();
+            let generation = self.debounce_generation;
             self.compile_task = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(debounce).await;
                 this.update(cx, |this, cx| {
-                    this.trigger_compile(cx);
+                    if this.debounce_generation == generation {
+                        this.trigger_compile(cx);
+                    }
                 })
                 .ok();
             }));
