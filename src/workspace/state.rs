@@ -99,3 +99,27 @@ mod tests {
         assert!(next_draft_title(DraftKind::Diagram, &[]).ends_with(".graf"));
     }
 }
+
+/// Which persona the shared prompt editor serves at the moment; entering a
+/// persona is explicit, so routing in `on_prompt_changed` keys off this
+/// state instead of sniffing `active_modal` matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PromptTarget {
+    #[default]
+    Idle,
+    Find,
+    QuickOpen,
+    Palette,
+}
+
+#[cfg(test)]
+mod prompt_target_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_idle() {
+        assert_eq!(PromptTarget::default(), PromptTarget::Idle);
+        assert_ne!(PromptTarget::Idle, PromptTarget::Find);
+        assert_ne!(PromptTarget::QuickOpen, PromptTarget::Palette);
+    }
+}

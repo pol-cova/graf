@@ -133,6 +133,7 @@ impl Workspace {
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| {
                             this.find_bar_open = false;
+                            this.prompt_target = crate::workspace::state::PromptTarget::Idle;
                             cx.notify();
                         }),
                     )
