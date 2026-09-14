@@ -564,36 +564,23 @@ impl EntityInputHandler for EditorView {
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range.clone());
 
-        if !range.is_empty() && new_text.len() == 1 {
-            let ch = new_text.chars().next().unwrap_or('\0');
-            let closing = match ch {
-                '(' => Some(')'),
-                '[' => Some(']'),
-                '{' => Some('}'),
-                '"' => Some('"'),
-                '\'' => Some('\''),
-                '$' => Some('$'),
-                '*' => Some('*'),
-                '_' => Some('_'),
-                '`' => Some('`'),
-                _ => None,
-            };
-
-            if let Some(close_ch) = closing {
-                let selected_text = self.buffer.content()[range.clone()].to_string();
-                let wrapped = format!("{ch}{selected_text}{close_ch}");
-                self.buffer.begin_transaction(self.cursor);
-                self.buffer.delete(range.clone());
-                self.buffer.insert(range.start, &wrapped);
-                self.cursor = range.start + wrapped.len();
-                self.selected_range = self.cursor..self.cursor;
-                self.marked_range = None;
-                self.buffer.end_transaction(self.cursor);
-                self.goal_col = None;
-                self.ensure_cursor_visible();
-                cx.notify();
-                return;
-            }
+        if !range.is_empty()
+            && new_text.chars().count() == 1
+            && let Some((open, close)) = new_text.chars().next().and_then(super::auto_pair)
+        {
+            let selected_text = self.buffer.content()[range.clone()].to_string();
+            let wrapped = format!("{open}{selected_text}{close}");
+            self.buffer.begin_transaction(self.cursor);
+            self.buffer.delete(range.clone());
+            self.buffer.insert(range.start, &wrapped);
+            self.cursor = range.start + wrapped.len();
+            self.selected_range = self.cursor..self.cursor;
+            self.marked_range = None;
+            self.buffer.end_transaction(self.cursor);
+            self.goal_col = None;
+            self.ensure_cursor_visible();
+            cx.notify();
+            return;
         }
 
         self.buffer.begin_transaction(self.cursor);

@@ -81,6 +81,13 @@ impl TextBuffer {
         &self.content
     }
 
+    /// The largest byte offset `offset` that is a char boundary, walking
+    /// back; the canonical clamp used by every slicing caller in the module.
+    #[cfg(test)]
+    pub fn clamp_char_boundary(&self, offset: usize) -> usize {
+        clamp_str_boundary(&self.content, offset)
+    }
+
     pub fn revision(&self) -> Revision {
         self.revision
     }
@@ -340,6 +347,15 @@ impl TextBuffer {
         self.push_undo(tx);
         Some(cursor)
     }
+}
+
+/// Free-standing clamp for callers holding a `&str` without a buffer.
+pub fn clamp_str_boundary(content: &str, offset: usize) -> usize {
+    let mut offset = offset.min(content.len());
+    while offset > 0 && !content.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 /// Byte offsets of every line start in `content` (always including 0).
@@ -657,5 +673,20 @@ mod tests {
 
         buf.redo();
         assert!(!buf.content().contains(target));
+    }
+}
+
+#[cfg(test)]
+mod clamp_tests {
+    use super::*;
+
+    #[test]
+    fn clamp_walks_back_to_a_character_edge() {
+        let buffer = TextBuffer::from_text("日本語");
+        assert_eq!(buffer.clamp_char_boundary(4), 3);
+        assert_eq!(buffer.clamp_char_boundary(9), 9);
+        assert_eq!(buffer.clamp_char_boundary(100), 9);
+        assert_eq!(buffer.clamp_char_boundary(0), 0);
+        assert_eq!(clamp_str_boundary("ab", 5), 2);
     }
 }

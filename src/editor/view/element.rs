@@ -307,29 +307,36 @@ impl Element for EditorElement {
         let font = text_style.font();
 
         if show_line_numbers {
+            // One diagnostic severity per affected line, computed once per
+            // paint; the per-line double scan used to be O(lines × diags).
+            let mut severity_by_line: std::collections::HashMap<usize, GutterMark> =
+                std::collections::HashMap::new();
+            for diagnostic in &self.editor.read(cx).diagnostics {
+                let mark = match diagnostic.severity {
+                    crate::compiler::diagnostics::Severity::Error => GutterMark::Error,
+                    _ => GutterMark::Warning,
+                };
+                if let Some(line) = diagnostic.line
+                    && severity_by_line
+                        .get(&line)
+                        .is_none_or(|existing| *existing < mark)
+                {
+                    severity_by_line.insert(line, mark);
+                }
+            }
             for (i, _) in prepaint.line_layouts.iter().enumerate() {
                 let line_idx = prepaint.first_line + i;
                 let y = line_idx as f32 * lh - scroll_offset;
                 let num_str = (line_idx + 1).to_string();
                 let is_active = prepaint.is_focused && line_idx == prepaint.cursor_line;
 
-                let has_error = self.editor.read(cx).diagnostics.iter().any(|d| {
-                    d.line == Some(line_idx + 1)
-                        && d.severity == crate::compiler::diagnostics::Severity::Error
-                });
-                let has_warn = self.editor.read(cx).diagnostics.iter().any(|d| {
-                    d.line == Some(line_idx + 1)
-                        && d.severity == crate::compiler::diagnostics::Severity::Warning
-                });
+                let mark = severity_by_line.get(&(line_idx + 1)).copied();
 
-                let line_num_color = if has_error {
-                    theme::color(theme::ACCENT_RED)
-                } else if has_warn {
-                    theme::color(theme::ACCENT_ORANGE)
-                } else if is_active {
-                    theme::color(theme::TEXT)
-                } else {
-                    theme::color(theme::TEXT_MUTED)
+                let line_num_color = match mark {
+                    Some(GutterMark::Error) => theme::color(theme::ACCENT_RED),
+                    Some(GutterMark::Warning) => theme::color(theme::ACCENT_ORANGE),
+                    None if is_active => theme::color(theme::TEXT),
+                    None => theme::color(theme::TEXT_MUTED),
                 };
 
                 let run = TextRun {
@@ -391,4 +398,11 @@ impl Element for EditorElement {
             editor.last_line_height = line_height;
         });
     }
+}
+
+/// Marker shown on gutter line numbers; ordered so Error wins over Warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum GutterMark {
+    Warning,
+    Error,
 }
