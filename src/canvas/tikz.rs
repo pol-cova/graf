@@ -14,12 +14,12 @@ pub fn export_to_tikz(doc: &CanvasDocument) -> String {
         .iter()
         .map(crate::canvas::geometry::ElementBlueprint::from)
     {
-        let stroke_color = clean_hex_color(&blueprint.style.stroke_color);
+        let stroke_color = clean_hex_color(blueprint.stroke);
         let mut draw_opts = vec![
             format!("draw={}", stroke_color),
             format!("line width={:.1}pt", blueprint.style.stroke_width),
         ];
-        if let Some(filled_color) = blueprint.style.fill_color.as_deref().map(clean_hex_color) {
+        if let Some(filled_color) = blueprint.fill.map(clean_hex_color) {
             draw_opts.push(format!("fill={filled_color}"));
         }
         if let crate::canvas::scene::StrokeStyle::Dashed = blueprint.style.stroke_style {

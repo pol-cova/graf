@@ -1,6 +1,7 @@
-pub mod geometry;
+mod geometry;
 pub mod history;
+pub(crate) mod input;
 pub mod scene;
-pub mod svg;
-pub mod tikz;
+pub(crate) mod svg;
+pub(crate) mod tikz;
 pub mod view;

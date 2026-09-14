@@ -27,8 +27,13 @@ impl CanvasHistory {
         self.undo_stack.push_back(state);
         self.redo_stack.clear();
 
-        while self.undo_stack.len() > MAX_HISTORY_ENTRIES
-            || self.estimate_bytes() > MAX_HISTORY_BYTES
+        // Evict from the front until under budget, but never drop the last
+        // remaining snapshot: even a single oversized scene must stay
+        // undoable, otherwise undo silently becomes a no-op right after a
+        // big edit.
+        while self.undo_stack.len() > 1
+            && (self.undo_stack.len() > MAX_HISTORY_ENTRIES
+                || self.estimate_bytes() > MAX_HISTORY_BYTES)
         {
             if self.undo_stack.pop_front().is_none() {
                 break;
@@ -110,5 +115,58 @@ mod tests {
         let redone1 = history.redo(undone0).unwrap();
         assert_eq!(redone1.elements.len(), 1);
         assert_eq!(redone1.elements[0].id, "r1");
+    }
+
+    #[test]
+    fn byte_budget_evicts_oldest_snapshots() {
+        // One element costs ~ELEMENT_ESTIMATE_BYTES of the serialized-size
+        // budget, so a stack of huge scenes must shed its oldest entries
+        // even though the entry count stays well under MAX_HISTORY_ENTRIES.
+        let big = || {
+            let mut doc = CanvasDocument::new();
+            const BIG_ELEMENT_COUNT: usize = 20_000;
+            for i in 0..BIG_ELEMENT_COUNT {
+                doc.add_element(CanvasElement::new_rectangle(
+                    format!("r{i}"),
+                    0.0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                ));
+            }
+            doc
+        };
+
+        let mut history = CanvasHistory::new();
+        for _ in 0..3 {
+            history.push_snapshot(big());
+        }
+
+        // 3 * 20_000 * 260 bytes far exceeds MAX_HISTORY_BYTES: only the
+        // newest snapshots that fit the budget survive.
+        assert!(history.undo_len() < 3, "oversized stack must be evicted");
+        assert!(history.undo_len() > 0, "the newest snapshot must survive");
+        assert!(history.can_undo());
+    }
+
+    #[test]
+    fn push_snapshot_always_keeps_the_newest_entry() {
+        // Even a single snapshot over budget must not be dropped outright:
+        // eviction pops from the front, never discards the push.
+        let mut doc = CanvasDocument::new();
+        for i in 0..50_000 {
+            doc.add_element(CanvasElement::new_text(
+                format!("t{i}"),
+                0.0,
+                0.0,
+                "filler",
+                12.0,
+            ));
+        }
+        let mut history = CanvasHistory::new();
+        history.push_snapshot(doc);
+        assert_eq!(history.undo_len(), 1);
+        assert!(history.can_undo());
     }
 }

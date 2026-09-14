@@ -38,7 +38,7 @@ impl Workspace {
                 canvas.load_from_json(&content, history, cx)
             });
             if let Err(error) = loaded {
-                self.workspace_error = Some(error);
+                self.workspace_error = Some(error.to_string());
             }
         } else {
             self.active_view_kind = ActiveViewKind::Editor;
