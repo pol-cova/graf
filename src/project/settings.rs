@@ -94,9 +94,9 @@ impl GrafSettings {
     }
 
     pub fn load_from_path(path: &Path) -> Self {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            match Self::from_json(&content) {
-                Ok(settings) => return settings,
+        match std::fs::read_to_string(path) {
+            Ok(content) => match Self::from_json(&content) {
+                Ok(settings) => settings,
                 Err(error) => {
                     // A corrupt settings file must not be overwritten by the
                     // next save: keep the raw bytes under a unique name and
@@ -109,11 +109,24 @@ impl GrafSettings {
                          The corrupt file has been preserved.",
                         path.display()
                     );
-                    return Self::default();
+                    Self::default()
                 }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // A missing file on a first run is not an error.
+                Self::default()
+            }
+            Err(error) => {
+                // Losing a settings file the user actually owns (permissions,
+                // transient FS errors) is a degradation: log it loudly in
+                // addition to falling back to defaults.
+                log::error!(
+                    "could not read settings at {} ({error}); loading defaults",
+                    path.display()
+                );
+                Self::default()
             }
         }
-        Self::default()
     }
 
     /// Serialize is effectively infallible for this struct, but propagation
@@ -130,12 +143,14 @@ impl GrafSettings {
     }
 }
 
-/// Copies the unparsable settings file next to itself with a unique, dated
-/// name so a later save never overwrites the user's original bytes.
+/// Copies the unparsable settings file next to itself with a unique name
+/// (seconds + nanos, so two corrupt loads within one second cannot hit the
+/// same backup name) so a later save never overwrites the user's original
+/// bytes.
 fn preserve_corrupt_settings(path: &Path) -> std::io::Result<()> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     let file_stem = path
         .file_stem()
