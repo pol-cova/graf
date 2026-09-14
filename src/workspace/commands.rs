@@ -20,6 +20,8 @@ pub enum CommandId {
     CloseTab,
     NewVectorDiagram,
     NewTypstDocument,
+    NewFromTemplate,
+    NewProject,
     AboutGraf,
     OpenSettings,
     CheckWritingStyle,
@@ -83,6 +85,18 @@ pub fn all_commands() -> &'static [CommandPaletteItem] {
             id: CommandId::NewVectorDiagram,
             title: "New Vector Diagram",
             shortcut: "⌘N",
+            category: "File",
+        },
+        CommandPaletteItem {
+            id: CommandId::NewFromTemplate,
+            title: "New Document from Template",
+            shortcut: "⌘⇧N",
+            category: "File",
+        },
+        CommandPaletteItem {
+            id: CommandId::NewProject,
+            title: "New Project",
+            shortcut: "",
             category: "File",
         },
         CommandPaletteItem {

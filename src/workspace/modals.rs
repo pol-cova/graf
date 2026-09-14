@@ -18,6 +18,7 @@ impl Workspace {
         let is_restore_recovery = matches!(self.active_modal, ActiveModal::RestoreRecovery);
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
         let is_about = matches!(self.active_modal, ActiveModal::About);
+        let is_template_picker = matches!(self.active_modal, ActiveModal::TemplatePicker(_));
 
         if !is_quick_open
             && !is_cmd_palette
@@ -25,6 +26,7 @@ impl Workspace {
             && !is_restore_recovery
             && !is_settings
             && !is_about
+            && !is_template_picker
         {
             return None;
         }
@@ -41,6 +43,11 @@ impl Workspace {
             "Unsaved changes"
         } else if is_restore_recovery {
             "Restore unsaved work"
+        } else if is_template_picker {
+            match self.active_modal {
+                ActiveModal::TemplatePicker(request) if request.for_new_project => "New project",
+                _ => "New from template",
+            }
         } else {
             "Review changes"
         };
@@ -104,7 +111,7 @@ impl Workspace {
                     ),
             );
 
-        if is_quick_open || is_cmd_palette {
+        if is_quick_open || is_cmd_palette || is_template_picker {
             let input = div()
                 .flex()
                 .items_center()
@@ -717,6 +724,75 @@ impl Workspace {
                         div()
                             .text_color(theme::color(theme::TEXT_MUTED))
                             .child(shortcut),
+                    );
+                list = list.child(row);
+            }
+            modal_content = modal_content.child(list);
+        } else if is_template_picker {
+            let ActiveModal::TemplatePicker(request) = self.active_modal else {
+                return None;
+            };
+            let filter = self.prompt_editor.read(cx).text().to_lowercase();
+
+            let mut list = div()
+                .id("template-picker-list")
+                .flex()
+                .flex_col()
+                .py_1()
+                .overflow_scroll();
+
+            for template in crate::project::templates::filter_templates(&filter, request.kind) {
+                let kind_label = match template.kind {
+                    crate::project::document::DocumentKind::Latex => "TEX",
+                    _ => "TYP",
+                };
+                let template_id = template.id;
+                let row = div()
+                    .id(format!("template-row-{template_id}"))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_1p5()
+                    .text_xs()
+                    .text_color(theme::color(theme::TEXT))
+                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.accept_template(template_id, request, cx);
+                            window.focus(&this.editor.read(cx).focus_handle(cx), cx);
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(px(32.0))
+                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .child(kind_label),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(template.name),
+                            )
+                            .child(
+                                div()
+                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .child(template.description),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .child(template.file_name),
                     );
                 list = list.child(row);
             }

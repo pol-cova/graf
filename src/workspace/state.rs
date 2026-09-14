@@ -114,6 +114,30 @@ pub(crate) fn next_draft_title(kind: DraftKind, existing: &[String]) -> String {
     }
 }
 
+/// Uniquifies a template's suggested file name among the open documents:
+/// `paper.tex` stays `paper.tex` unless taken, then becomes `paper-1.tex`.
+pub(crate) fn unique_title(file_name: &str, existing: &[String]) -> String {
+    let occupied = |name: &str| existing.iter().any(|title| title == name);
+    if !occupied(file_name) {
+        return file_name.to_string();
+    }
+    let (stem, extension) = match file_name.rsplit_once('.') {
+        Some((stem, extension)) => (stem, Some(extension)),
+        None => (file_name, None),
+    };
+    let mut counter = 1;
+    loop {
+        let candidate = match extension {
+            Some(extension) => format!("{stem}-{counter}.{extension}"),
+            None => format!("{stem}-{counter}"),
+        };
+        if !occupied(&candidate) {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +243,22 @@ mod index_after_close_tests {
         assert_eq!(next_draft_title(DraftKind::Typst, &[]), "document-1.typ");
         assert!(next_draft_title(DraftKind::Diagram, &[]).ends_with(".graf"));
     }
+
+    #[test]
+    fn template_titles_pass_through_when_free() {
+        assert_eq!(unique_title("paper.tex", &[]), "paper.tex");
+        assert_eq!(unique_title("paper.tex", &["main.tex".into()]), "paper.tex");
+    }
+
+    #[test]
+    fn template_titles_uniquify_taken_names() {
+        assert_eq!(unique_title("main.tex", &["main.tex".into()]), "main-1.tex");
+        assert_eq!(
+            unique_title("main.tex", &["main.tex".into(), "main-1.tex".into()]),
+            "main-2.tex"
+        );
+        assert_eq!(unique_title("notes", &["notes".into()]), "notes-1");
+    }
 }
 
 /// Which persona the shared prompt editor serves at the moment; entering a
@@ -231,6 +271,7 @@ pub(crate) enum PromptTarget {
     Find,
     QuickOpen,
     Palette,
+    TemplatePicker,
 }
 
 #[cfg(test)]
@@ -242,5 +283,6 @@ mod prompt_target_tests {
         assert_eq!(PromptTarget::default(), PromptTarget::Idle);
         assert_ne!(PromptTarget::Idle, PromptTarget::Find);
         assert_ne!(PromptTarget::QuickOpen, PromptTarget::Palette);
+        assert_ne!(PromptTarget::Idle, PromptTarget::TemplatePicker);
     }
 }

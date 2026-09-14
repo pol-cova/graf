@@ -58,8 +58,9 @@ pub fn run() {
 fn set_app_menus(cx: &mut App) {
     use crate::editor::view::{Copy, Cut, Paste, Redo, SelectAll, Undo};
     use crate::workspace::{
-        CloseTab, CommandPalette, OpenAbout, OpenFile, OpenSettings, Save, ToggleDiagnostics,
-        ToggleFind, TogglePerformanceOverlay, TogglePreview, ToggleSidebar,
+        CloseTab, CommandPalette, NewFromTemplate, NewProject, OpenAbout, OpenFile, OpenSettings,
+        Save, ToggleDiagnostics, ToggleFind, TogglePerformanceOverlay, TogglePreview,
+        ToggleSidebar,
     };
 
     cx.set_menus([
@@ -73,6 +74,9 @@ fn set_app_menus(cx: &mut App) {
             MenuItem::action("Quit graf", Quit),
         ]),
         Menu::new("File").items([
+            MenuItem::action("New from Template...", NewFromTemplate),
+            MenuItem::action("New Project...", NewProject),
+            MenuItem::separator(),
             MenuItem::action("Open...", OpenFile),
             MenuItem::separator(),
             MenuItem::action("Save", Save),

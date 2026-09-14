@@ -44,6 +44,23 @@ impl Workspace {
                         self.dispatch_command_action(command.id, cx);
                     }
                 }
+                state::PromptTarget::TemplatePicker => {
+                    let request = match self.active_modal {
+                        ActiveModal::TemplatePicker(request) => request,
+                        _ => super::TemplatePickerRequest {
+                            kind: None,
+                            for_new_project: false,
+                        },
+                    };
+                    let query = query.to_lowercase();
+                    if let Some(template) =
+                        crate::project::templates::filter_templates(&query, request.kind).next()
+                    {
+                        self.active_modal = ActiveModal::None;
+                        self.prompt_target = state::PromptTarget::Idle;
+                        self.accept_template(template.id, request, cx);
+                    }
+                }
                 state::PromptTarget::Find | state::PromptTarget::Idle => {}
             }
             self.prompt_editor
@@ -68,6 +85,8 @@ impl Workspace {
             CommandId::NewVectorDiagram => self.new_canvas_diagram(cx),
             CommandId::OpenSettings => self.open_settings(SettingsTab::Editor, cx),
             CommandId::NewTypstDocument => self.new_typst_document(cx),
+            CommandId::NewFromTemplate => self.open_template_picker(None, false, cx),
+            CommandId::NewProject => self.new_project(cx),
             CommandId::AboutGraf => self.open_about(cx),
             CommandId::InsertTable => self.insert_table_template(cx),
             CommandId::ExportTikz => self.export_canvas_to_tikz(cx),
@@ -190,6 +209,25 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_about(cx);
+    }
+
+    pub(super) fn on_new_from_template(
+        &mut self,
+        _: &NewFromTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_template_picker(None, false, cx);
+        window.focus(&self.prompt_editor.read(cx).focus_handle(cx), cx);
+    }
+
+    pub(super) fn on_new_project(
+        &mut self,
+        _: &NewProject,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_project(cx);
     }
 
     pub(super) fn on_close_modal(
