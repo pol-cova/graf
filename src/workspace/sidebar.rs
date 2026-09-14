@@ -15,16 +15,16 @@ impl Workspace {
             .flex_none()
             .flex_col()
             .w(px(self.sidebar_width))
-            .bg(theme::color(theme::BG_SURFACE))
+            .bg(theme::BG_SURFACE)
             .border_r_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .child(
                 div()
                     .flex()
                     .items_center()
                     .h(px(32.0))
                     .border_b_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .child(
                         div()
                             .id("sidebar-tab-files")
@@ -36,17 +36,17 @@ impl Workspace {
                             .text_xs()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .bg(if is_files {
-                                theme::color(theme::BG_SURFACE)
+                                theme::BG_SURFACE
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .text_color(if is_files {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
@@ -67,17 +67,17 @@ impl Workspace {
                             .text_xs()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .bg(if !is_files {
-                                theme::color(theme::BG_SURFACE)
+                                theme::BG_SURFACE
                             } else {
-                                theme::color(theme::BG_BAR)
+                                theme::BG_BAR
                             })
                             .text_color(if !is_files {
-                                theme::color(theme::TEXT)
+                                theme::TEXT
                             } else {
-                                theme::color(theme::TEXT_MUTED)
+                                theme::TEXT_MUTED
                             })
                             .cursor_pointer()
-                            .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|s| s.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| {
@@ -141,7 +141,7 @@ impl Workspace {
                     .px_3()
                     .py_2()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT_MUTED))
+                    .text_color(theme::TEXT_MUTED)
                     .child("No headings"),
             );
         } else {
@@ -158,8 +158,8 @@ impl Workspace {
                     .pr_3()
                     .py_1()
                     .text_xs()
-                    .text_color(theme::color(theme::TEXT))
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .text_color(theme::TEXT)
+                    .hover(|s| s.bg(theme::HOVER_BG))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -169,7 +169,7 @@ impl Workspace {
                     )
                     .child(
                         div()
-                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .text_color(theme::ACCENT_BLUE)
                             .child(item.display_prefix()),
                     )
                     .child(item.title);
@@ -206,8 +206,8 @@ impl Workspace {
                         .pr_3()
                         .py_1()
                         .text_xs()
-                        .text_color(theme::color(theme::TEXT_MUTED))
-                        .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                        .text_color(theme::TEXT_MUTED)
+                        .hover(|s| s.bg(theme::HOVER_BG))
                         .cursor_pointer()
                         .on_mouse_down(
                             gpui::MouseButton::Left,
@@ -220,7 +220,7 @@ impl Workspace {
                             div()
                                 .w(px(12.0))
                                 .h(px(12.0))
-                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .text_color(theme::TEXT_MUTED)
                                 .child(icon(if *is_expanded {
                                     Icon::ChevronDown
                                 } else {
@@ -253,17 +253,17 @@ impl Workspace {
                     .pr_3()
                     .py_1()
                     .bg(if is_active {
-                        theme::color(theme::TAB_ACTIVE)
+                        theme::TAB_ACTIVE
                     } else {
-                        theme::color(theme::BG_SURFACE)
+                        theme::BG_SURFACE
                     })
                     .text_xs()
                     .text_color(if is_active {
-                        theme::color(theme::TEXT)
+                        theme::TEXT
                     } else {
-                        theme::color(theme::TEXT_MUTED)
+                        theme::TEXT_MUTED
                     })
-                    .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|s| s.bg(theme::HOVER_BG))
                     .cursor_pointer()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -274,7 +274,7 @@ impl Workspace {
                     .child(
                         div()
                             .w(px(28.0))
-                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .text_color(theme::ACCENT_BLUE)
                             .child(kind.label()),
                     )
                     .child(div().flex_1().min_w_0().truncate().child(name.clone()))

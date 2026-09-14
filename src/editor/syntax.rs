@@ -14,11 +14,11 @@ pub enum TokenKind {
 impl TokenKind {
     pub fn color(self) -> gpui::Rgba {
         match self {
-            Self::Command => theme::color(theme::SYNTAX_COMMAND),
-            Self::Math => theme::color(theme::SYNTAX_MATH),
-            Self::Comment => theme::color(theme::SYNTAX_COMMENT),
-            Self::Punctuation => theme::color(theme::SYNTAX_PUNCTUATION),
-            Self::Plain => theme::color(theme::TEXT),
+            Self::Command => theme::SYNTAX_COMMAND,
+            Self::Math => theme::SYNTAX_MATH,
+            Self::Comment => theme::SYNTAX_COMMENT,
+            Self::Punctuation => theme::SYNTAX_PUNCTUATION,
+            Self::Plain => theme::TEXT,
         }
     }
 }
@@ -328,7 +328,7 @@ pub fn plain_text_line(line: &str, font: Font) -> Vec<TextRun> {
         vec![TextRun {
             len: line.len(),
             font,
-            color: theme::color(theme::TEXT).into(),
+            color: theme::TEXT.into(),
             background_color: None,
             underline: None,
             strikethrough: None,

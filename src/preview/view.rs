@@ -104,7 +104,7 @@ impl Render for PreviewView {
             .flex_1()
             .flex_col()
             .size_full()
-            .bg(theme::color(theme::BG_SURFACE))
+            .bg(theme::BG_SURFACE)
             .child(self.render_toolbar(page_count, cx))
             .child(self.render_content())
     }
@@ -125,11 +125,11 @@ impl PreviewView {
             .justify_between()
             .h(px(32.0))
             .px_3()
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_b_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .text_xs()
-            .text_color(theme::color(theme::TEXT_MUTED))
+            .text_color(theme::TEXT_MUTED)
             .child(
                 div()
                     .flex()
@@ -138,7 +138,7 @@ impl PreviewView {
                     .child(
                         div()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(theme::color(theme::TEXT))
+                            .text_color(theme::TEXT)
                             .child("Preview"),
                     )
                     .child(page_label),
@@ -154,9 +154,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.zoom_out(cx)),
@@ -169,9 +169,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.reset_zoom(cx)),
@@ -184,9 +184,9 @@ impl PreviewView {
                             .px_2()
                             .py_0p5()
                             .rounded_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                            .hover(|style| style.bg(theme::HOVER_BG))
                             .on_mouse_down(
                                 gpui::MouseButton::Left,
                                 cx.listener(|this, _, _, cx| this.zoom_in(cx)),
@@ -226,9 +226,9 @@ impl PreviewView {
                     .px_3()
                     .py_2()
                     .rounded_sm()
-                    .bg(theme::color(theme::BG_BAR))
+                    .bg(theme::BG_BAR)
                     .border_l_2()
-                    .border_color(theme::color(theme::ACCENT_RED))
+                    .border_color(theme::ACCENT_RED)
                     .text_xs()
                     .child(
                         div()
@@ -240,7 +240,7 @@ impl PreviewView {
                             .child(
                                 div()
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(theme::color(theme::TEXT))
+                                    .text_color(theme::TEXT)
                                     .child(if has_previous_preview {
                                         "Preview out of date"
                                     } else {
@@ -250,13 +250,13 @@ impl PreviewView {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_color(theme::color(theme::TEXT_MUTED))
+                                    .text_color(theme::TEXT_MUTED)
                                     .child(error_summary.to_string()),
                             )
                             .when(has_previous_preview, |message| {
                                 message.child(
                                     div()
-                                        .text_color(theme::color(theme::TEXT_MUTED))
+                                        .text_color(theme::TEXT_MUTED)
                                         .child("Showing the last successful compile."),
                                 )
                             }),
@@ -279,16 +279,16 @@ impl PreviewView {
                     .px_3()
                     .py_2()
                     .rounded_sm()
-                    .bg(theme::color(theme::BG_BAR))
+                    .bg(theme::BG_BAR)
                     .border_l_2()
-                    .border_color(theme::color(theme::TEXT_MUTED))
+                    .border_color(theme::TEXT_MUTED)
                     .text_xs()
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .child(notice.to_string()),
                     ),
             );
@@ -301,7 +301,7 @@ impl PreviewView {
                     .flex_1()
                     .items_center()
                     .justify_center()
-                    .text_color(theme::color(theme::TEXT_MUTED))
+                    .text_color(theme::TEXT_MUTED)
                     .child(if self.is_rendering {
                         "Rendering preview..."
                     } else if self.is_retained_stale {
@@ -322,7 +322,7 @@ impl PreviewView {
                     .h(px(page_h))
                     .bg(gpui::white())
                     .border_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .rounded_xs()
                     .shadow_lg()
                     .overflow_hidden()

@@ -169,4 +169,35 @@ mod tests {
         assert!(svg.contains("Transformer Encoder"));
         assert!(svg.ends_with("</svg>\n"));
     }
+
+    #[test]
+    fn text_content_is_xml_escaped() {
+        let mut doc = CanvasDocument::new();
+        doc.add_element(CanvasElement::new_text(
+            "t1",
+            10.0,
+            10.0,
+            "<script>alert(\"x\") & 'tag'</script>",
+            12.0,
+        ));
+
+        let svg = export_to_svg(&doc);
+        // No raw markup sneaks into the document body...
+        assert!(!svg.contains("<script"));
+        assert!(!svg.contains("alert(\"x\")"));
+        // ...and every special character is escaped exactly once.
+        assert!(
+            svg.contains("&lt;script&gt;alert(&quot;x&quot;) &amp; &apos;tag&apos;&lt;/script&gt;")
+        );
+    }
+
+    #[test]
+    fn escape_xml_round_trips_all_specials() {
+        assert_eq!(
+            escape_xml(r#"a & b < c > d " e ' f"#),
+            "a &amp; b &lt; c &gt; d &quot; e &apos; f"
+        );
+        // Already-escaped input must not double-escape (the & of an entity).
+        assert_eq!(escape_xml("&amp;"), "&amp;amp;");
+    }
 }

@@ -50,10 +50,6 @@ pub(crate) enum Shape<'a> {
 /// One element walked once, ready for either emitter to render.
 #[derive(Debug, Clone)]
 pub(crate) struct ElementBlueprint<'a> {
-    /// The element's id, exposed for emitters that key per-shape resources
-    /// (e.g. SVG's arrow markers); geometry consumers share the style.
-    #[allow(dead_code)] // one of the emitter pair may not need it
-    pub id: &'a str,
     pub style: &'a ElementStyle,
     pub shape: Shape<'a>,
 }
@@ -108,7 +104,6 @@ impl<'a> From<&'a CanvasElement> for ElementBlueprint<'a> {
             },
         };
         ElementBlueprint {
-            id: &elem.id,
             style: &elem.style,
             shape,
         }

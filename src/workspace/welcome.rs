@@ -32,12 +32,12 @@ impl Workspace {
                                     .justify_center()
                                     .size(px(58.0))
                                     .rounded_lg()
-                                    .bg(theme::color(theme::BG_SURFACE))
+                                    .bg(theme::BG_SURFACE)
                                     .border_1()
-                                    .border_color(theme::color(theme::BORDER))
+                                    .border_color(theme::BORDER)
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_size(px(20.0))
-                                    .text_color(theme::color(theme::TEXT))
+                                    .text_color(theme::TEXT)
                                     .child("\\ I"),
                             )
                             .child(
@@ -54,7 +54,7 @@ impl Workspace {
                                     .child(
                                         div()
                                             .text_sm()
-                                            .text_color(theme::color(theme::TEXT_MUTED))
+                                            .text_color(theme::TEXT_MUTED)
                                             .child("A native workspace for LaTeX and Typst"),
                                     ),
                             ),
@@ -63,7 +63,7 @@ impl Workspace {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .mb_2()
                             .child("GET STARTED"),
                     )
@@ -76,7 +76,7 @@ impl Workspace {
             .flex()
             .flex_col()
             .border_t_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .child(
                 div()
                     .id("welcome-template")
@@ -87,7 +87,7 @@ impl Workspace {
                     .gap_3()
                     .role(Role::Button)
                     .cursor_pointer()
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|style| style.bg(theme::HOVER_BG))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.open_template_picker(None, false, cx)),
@@ -96,16 +96,11 @@ impl Workspace {
                         div()
                             .w(px(34.0))
                             .text_xs()
-                            .text_color(theme::color(theme::ACCENT_BLUE))
+                            .text_color(theme::ACCENT_BLUE)
                             .child("T"),
                     )
                     .child(div().flex_1().child("New from template"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("⌘⇧N"),
-                    ),
+                    .child(div().text_xs().text_color(theme::TEXT_MUTED).child("⌘⇧N")),
             )
             .child(
                 div()
@@ -117,7 +112,7 @@ impl Workspace {
                     .gap_3()
                     .role(Role::Button)
                     .cursor_pointer()
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|style| style.bg(theme::HOVER_BG))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.new_project(cx)),
@@ -126,7 +121,7 @@ impl Workspace {
                         div()
                             .w(px(34.0))
                             .text_lg()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .child("+"),
                     )
                     .child(div().flex_1().child("New project")),
@@ -141,7 +136,7 @@ impl Workspace {
                     .gap_3()
                     .role(Role::Button)
                     .cursor_pointer()
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|style| style.bg(theme::HOVER_BG))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.open_file_picker(cx)),
@@ -150,16 +145,11 @@ impl Workspace {
                         div()
                             .w(px(34.0))
                             .text_lg()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .child("+"),
                     )
                     .child(div().flex_1().child("Open document"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("⌘O"),
-                    ),
+                    .child(div().text_xs().text_color(theme::TEXT_MUTED).child("⌘O")),
             )
             .child(
                 div()
@@ -171,7 +161,7 @@ impl Workspace {
                     .gap_3()
                     .role(Role::Button)
                     .cursor_pointer()
-                    .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
+                    .hover(|style| style.bg(theme::HOVER_BG))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.open_command_palette(cx)),
@@ -180,16 +170,11 @@ impl Workspace {
                         div()
                             .w(px(34.0))
                             .text_sm()
-                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .text_color(theme::TEXT_MUTED)
                             .child(">"),
                     )
                     .child(div().flex_1().child("Open command palette"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme::color(theme::TEXT_MUTED))
-                            .child("⌘⇧P"),
-                    ),
+                    .child(div().text_xs().text_color(theme::TEXT_MUTED).child("⌘⇧P")),
             )
     }
 }

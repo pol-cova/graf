@@ -157,4 +157,25 @@ mod tests {
         assert!(tikz.contains("Neural Architecture"));
         assert!(tikz.ends_with("\\end{tikzpicture}\n"));
     }
+
+    #[test]
+    fn text_content_is_latex_escaped() {
+        let mut doc = CanvasDocument::new();
+        doc.add_element(CanvasElement::new_text(
+            "t1",
+            10.0,
+            10.0,
+            "Percent % Money $95 \\cmd #tag &_pair_{i}",
+            12.0,
+        ));
+
+        let tikz = export_to_tikz(&doc);
+        // Every LaTeX-significant character is neutralized: no raw %, $ or
+        // brace pair can terminate the node body early.
+        assert!(tikz.contains("\\%"), "{tikz}");
+        assert!(tikz.contains("\\$95"), "{tikz}");
+        assert!(tikz.contains("\\textbackslash{}cmd"), "{tikz}");
+        assert!(tikz.contains("\\#tag"), "{tikz}");
+        assert!(tikz.contains("\\&\\_pair\\_\\{i\\}"), "{tikz}");
+    }
 }

@@ -142,7 +142,7 @@ impl Element for EditorElement {
         let gutter_width = editor.gutter_width();
         let gutter_offset = px(gutter_width + TEXT_PADDING);
 
-        let text_color = theme::color(theme::TEXT);
+        let text_color = theme::TEXT;
         let mut line_layouts = Vec::with_capacity(visible_count);
         for line_idx in first_line..last_line {
             let content = editor.buffer.line_content(line_idx).unwrap_or("");
@@ -182,7 +182,7 @@ impl Element for EditorElement {
                     point(bounds.left(), bounds.top() + px(y)),
                     size(bounds.size.width, px(line_height)),
                 ),
-                theme::color(theme::LINE_HIGHLIGHT),
+                theme::LINE_HIGHLIGHT,
             ))
         } else {
             None
@@ -193,7 +193,7 @@ impl Element for EditorElement {
                 point(bounds.left() + px(gutter_width), bounds.top()),
                 size(px(1.0), bounds.size.height),
             ),
-            theme::color(theme::BG),
+            theme::BG,
         );
 
         let cursor_quad = if editor.selected_range.is_empty() && is_focused {
@@ -208,7 +208,7 @@ impl Element for EditorElement {
                         point(bounds.left() + gutter_offset + x, bounds.top() + px(y)),
                         size(px(2.0), px(line_height)),
                     ),
-                    theme::color(theme::TEXT),
+                    theme::TEXT,
                 ))
             } else {
                 None
@@ -250,7 +250,7 @@ impl Element for EditorElement {
                                 bounds.top() + px(y + line_height),
                             ),
                         ),
-                        rgba(theme::SELECTION),
+                        theme::SELECTION,
                     ));
                 }
             }
@@ -333,10 +333,10 @@ impl Element for EditorElement {
                 let mark = severity_by_line.get(&(line_idx + 1)).copied();
 
                 let line_num_color = match mark {
-                    Some(GutterMark::Error) => theme::color(theme::ACCENT_RED),
-                    Some(GutterMark::Warning) => theme::color(theme::ACCENT_ORANGE),
-                    None if is_active => theme::color(theme::TEXT),
-                    None => theme::color(theme::TEXT_MUTED),
+                    Some(GutterMark::Error) => theme::ACCENT_RED,
+                    Some(GutterMark::Warning) => theme::ACCENT_ORANGE,
+                    None if is_active => theme::TEXT,
+                    None => theme::TEXT_MUTED,
                 };
 
                 let run = TextRun {

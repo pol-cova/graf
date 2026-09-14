@@ -12,8 +12,8 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme::color(theme::BG))
-            .text_color(theme::color(theme::TEXT))
+            .bg(theme::BG)
+            .text_color(theme::TEXT)
             .text_sm()
             .on_mouse_move(cx.listener(Self::resize_panel))
             .on_mouse_up(

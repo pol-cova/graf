@@ -49,9 +49,9 @@ impl Workspace {
             .flex_none()
             .w(px(3.0))
             .h_full()
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .cursor(CursorStyle::ResizeLeftRight)
-            .hover(|style| style.bg(theme::color(theme::ACCENT_BLUE)))
+            .hover(|style| style.bg(theme::ACCENT_BLUE))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.begin_panel_resize(panel, cx)),
@@ -59,21 +59,16 @@ impl Workspace {
     }
 
     pub fn render_editor_and_diagnostics(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut area = div()
-            .flex()
-            .flex_1()
-            .flex_col()
-            .min_w_0()
-            .bg(theme::color(theme::BG));
+        let mut area = div().flex().flex_1().flex_col().min_w_0().bg(theme::BG);
 
         let mut tab_bar = div()
             .flex()
             .flex_none()
             .items_center()
             .h(px(34.0))
-            .bg(theme::color(theme::BG_BAR))
+            .bg(theme::BG_BAR)
             .border_b_1()
-            .border_color(theme::color(theme::BORDER));
+            .border_color(theme::BORDER);
 
         for (idx, doc) in self.documents.iter().enumerate() {
             let is_active = idx == self.active_doc_idx;
@@ -91,25 +86,25 @@ impl Workspace {
                 .min_w_0()
                 .px_3()
                 .bg(if is_active {
-                    theme::color(theme::TAB_ACTIVE)
+                    theme::TAB_ACTIVE
                 } else {
-                    theme::color(theme::BG_BAR)
+                    theme::BG_BAR
                 })
                 .border_r_1()
                 .border_t_1()
                 .border_color(if is_active {
-                    theme::color(theme::ACCENT_BLUE)
+                    theme::ACCENT_BLUE
                 } else {
-                    theme::color(theme::BORDER)
+                    theme::BORDER
                 })
                 .text_xs()
                 .text_color(if is_active {
-                    theme::color(theme::TEXT)
+                    theme::TEXT
                 } else {
-                    theme::color(theme::TEXT_MUTED)
+                    theme::TEXT_MUTED
                 })
                 .cursor_pointer()
-                .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                .hover(|s| s.bg(theme::HOVER_BG))
                 .on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |this, _, _, cx| {
@@ -118,7 +113,7 @@ impl Workspace {
                 )
                 .child(
                     div()
-                        .text_color(theme::color(theme::ACCENT_BLUE))
+                        .text_color(theme::ACCENT_BLUE)
                         .child(FileKind::from_path(Path::new(&title)).label()),
                 )
                 .child(div().flex_1().min_w_0().truncate().child(title))
@@ -136,7 +131,7 @@ impl Workspace {
                                 .w(px(6.0))
                                 .h(px(6.0))
                                 .rounded_full()
-                                .bg(theme::color(theme::TEXT_MUTED))
+                                .bg(theme::TEXT_MUTED)
                                 .group_hover("document-tab", |style| style.invisible()),
                         )
                         .child(
@@ -151,8 +146,8 @@ impl Workspace {
                                 .justify_center()
                                 .role(Role::Button)
                                 .aria_label("Close modified document")
-                                .text_color(theme::color(theme::TEXT_MUTED))
-                                .hover(|style| style.text_color(theme::color(theme::TEXT)))
+                                .text_color(theme::TEXT_MUTED)
+                                .hover(|style| style.text_color(theme::TEXT))
                                 .on_mouse_down(
                                     gpui::MouseButton::Left,
                                     cx.listener(move |this, _, _, cx| {
@@ -168,8 +163,8 @@ impl Workspace {
                         .text_center()
                         .role(Role::Button)
                         .aria_label("Close document")
-                        .text_color(theme::color(theme::TEXT_MUTED))
-                        .hover(|style| style.text_color(theme::color(theme::TEXT)))
+                        .text_color(theme::TEXT_MUTED)
+                        .hover(|style| style.text_color(theme::TEXT))
                         .on_mouse_down(
                             gpui::MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
@@ -212,9 +207,9 @@ impl Workspace {
                     .w(px(320.0))
                     .max_h(px(220.0))
                     .rounded_md()
-                    .bg(theme::color(theme::BG_SURFACE))
+                    .bg(theme::BG_SURFACE)
                     .border_1()
-                    .border_color(theme::color(theme::BORDER))
+                    .border_color(theme::BORDER)
                     .shadow_lg()
                     .overflow_scroll();
 
@@ -231,18 +226,18 @@ impl Workspace {
                         .py_1()
                         .text_xs()
                         .border_l_2()
-                        .border_color(theme::color(if index == self.completion_selected {
+                        .border_color(if index == self.completion_selected {
                             theme::ACCENT_BLUE
                         } else {
                             theme::BG_SURFACE
-                        }))
-                        .bg(if index == self.completion_selected {
-                            theme::color(theme::HOVER_BG)
-                        } else {
-                            theme::color(theme::BG_SURFACE)
                         })
-                        .text_color(theme::color(theme::TEXT))
-                        .hover(|s| s.bg(theme::color(theme::HOVER_BG)))
+                        .bg(if index == self.completion_selected {
+                            theme::HOVER_BG
+                        } else {
+                            theme::BG_SURFACE
+                        })
+                        .text_color(theme::TEXT)
+                        .hover(|s| s.bg(theme::HOVER_BG))
                         .cursor_pointer()
                         .on_mouse_down(
                             gpui::MouseButton::Left,
@@ -261,7 +256,7 @@ impl Workspace {
                                     div()
                                         .w(px(30.0))
                                         .flex_none()
-                                        .text_color(theme::color(theme::TEXT_MUTED))
+                                        .text_color(theme::TEXT_MUTED)
                                         .child(item.kind.label()),
                                 )
                                 .child(
@@ -276,7 +271,7 @@ impl Workspace {
                             div()
                                 .max_w(px(120.0))
                                 .truncate()
-                                .text_color(theme::color(theme::TEXT_MUTED))
+                                .text_color(theme::TEXT_MUTED)
                                 .child(item.detail.clone()),
                         );
 
@@ -303,9 +298,9 @@ impl Workspace {
             .flex_col()
             .w(px(self.preview_width))
             .min_w(px(320.0))
-            .bg(theme::color(theme::BG_SURFACE))
+            .bg(theme::BG_SURFACE)
             .border_l_1()
-            .border_color(theme::color(theme::BORDER))
+            .border_color(theme::BORDER)
             .child(self.preview.clone())
     }
 }

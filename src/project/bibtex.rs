@@ -51,6 +51,7 @@ pub struct BibtexIndex {
 }
 
 impl BibtexIndex {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),

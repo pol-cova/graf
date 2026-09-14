@@ -27,7 +27,7 @@ impl Workspace {
                     let query = query.to_lowercase();
                     if let Some(path) = self
                         .project_tree
-                        .quick_open_matches(&query, QUICK_OPEN_SEARCH_LIMIT)
+                        .quick_open_matches(&query, state::QUICK_OPEN_LIMIT)
                         .first()
                         .map(|entry| entry.path.clone())
                     {
