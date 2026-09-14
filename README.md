@@ -37,21 +37,6 @@ Linux users can build from source. Release automation also publishes a Linux arc
 - [Tectonic](https://tectonic-typesetting.github.io/) and [Typst](https://typst.app/), bundled in release builds. Source builds use system installs when present.
 - [`pdftoppm`](https://poppler.freedesktop.org/) from Poppler for multi-page PDF preview (`sips` provides a single-page fallback on macOS)
 
-AI uses a local Agent Client Protocol process by default. Configure `ai.acp.command` and `ai.acp.args` in `settings.json`, or set `GRAF_ACP_COMMAND` and `GRAF_ACP_ARGS` (a JSON argument array). Graf sends only the active document text and does not grant filesystem or terminal capabilities to ACP agents. OpenAI-compatible HTTP remains available with `ai.provider` set to `openai_compatible`, `GRAF_AI_API_KEY`, and optionally `GRAF_AI_BASE_URL` or `GRAF_AI_MODEL`.
-
-```json
-{
-  "ai": {
-    "provider": "acp",
-    "acp": {
-      "command": "/path/to/agent",
-      "args": ["--acp"],
-      "timeout_seconds": 120
-    }
-  }
-}
-```
-
 ## Build from source
 
 Install stable Rust, then run:
