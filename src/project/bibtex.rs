@@ -91,7 +91,7 @@ impl BibtexIndex {
 pub fn parse_bibtex_entries(content: &str) -> Vec<BibEntry> {
     let mut entries = Vec::new();
 
-    for block in content.split('@') {
+    for block in delimit_entries(content) {
         let trimmed = block.trim();
         if trimmed.is_empty() || trimmed.starts_with('%') {
             continue;
@@ -204,6 +204,37 @@ pub fn parse_latex_labels(source: &str) -> Vec<String> {
     labels
 }
 
+/// Splits a bib file into entry blocks whose boundaries are `@` characters
+/// *outside* any brace-delimited value, so an `@` in an author email or a
+/// note string can no longer fabricate bogus entries.
+fn delimit_entries(content: &str) -> Vec<&str> {
+    let bytes = content.as_bytes();
+    let mut boundaries = Vec::new();
+    let mut brace_depth = 0usize;
+    let mut in_quotes = false;
+    for (index, &byte) in bytes.iter().enumerate() {
+        // Track quoting of the string-style field layout too: "@" inside a
+        // quoted value is data.
+        match byte {
+            b'"' => in_quotes = !in_quotes,
+            b'{' if !in_quotes => brace_depth += 1,
+            b'}' if !in_quotes => brace_depth = brace_depth.saturating_sub(1),
+            b'@' if brace_depth == 0 && !in_quotes => boundaries.push(index),
+            _ => {}
+        }
+    }
+    boundaries
+        .iter()
+        .zip(
+            boundaries
+                .iter()
+                .skip(1)
+                .chain(std::iter::once(&bytes.len())),
+        )
+        .map(|(&start, &end)| &content[start..end])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +304,32 @@ See Figure~\ref{fig:arch}.
         let matches = labels.search("eq:");
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0], "eq:einstein");
+    }
+    #[test]
+    fn email_at_in_value_does_not_fabricate_entries() {
+        let source = r#"@article{withmail,
+  title = {EmailHaiku},
+  author = {Smith, Jane <jane@example.com> and Roe, John (mailto:john@org.io)}
+}"#;
+        // The `@`s inside the author value used to split entries.
+        let entries = parse_bibtex_entries(source);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, "withmail");
+        assert!(
+            entries[0]
+                .author
+                .as_deref()
+                .is_some_and(|a| a.contains("john@org.io"))
+        );
+    }
+
+    #[test]
+    fn at_in_a_quoted_value_is_data() {
+        let source = r#"@misc{quoted,
+  title = "someone@host"
+}"#;
+        let entries = parse_bibtex_entries(source);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title.as_deref(), Some("someone@host"));
     }
 }

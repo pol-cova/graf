@@ -835,7 +835,11 @@ mod stroke_tests {
     fn arrowhead_flanks_beside_the_segment() {
         // Sanity on the geometry: flank origins are the end point, both
         // flanks point backwards along the direction.
-        let spec = StrokeSpec { start: (0.0, 0.0), end: (100.0, 0.0), arrowhead: true };
+        let spec = StrokeSpec {
+            start: (0.0, 0.0),
+            end: (100.0, 0.0),
+            arrowhead: true,
+        };
         let angle = 0.0f32;
         let head_x = spec.end.0 - ARROWHEAD_LENGTH_PX * (angle + 30.0f32.to_radians()).cos();
         assert!(head_x < spec.end.0);
