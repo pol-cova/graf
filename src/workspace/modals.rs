@@ -10,6 +10,20 @@ use crate::ui::theme;
 
 impl Workspace {
     pub fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        // One dispatch point decides which modal renders and its title; no
+        // flag chorus to extend by hand when a modal kind is added, and no
+        // dead else branch.
+        let title = match &self.active_modal {
+            ActiveModal::QuickOpen => "Open file",
+            ActiveModal::CommandPalette => "Commands",
+            ActiveModal::Settings(_) => "Settings",
+            ActiveModal::About => "About graf",
+            ActiveModal::ConfirmClose(_) => "Unsaved changes",
+            ActiveModal::RestoreRecovery => "Restore unsaved work",
+            ActiveModal::TemplatePicker(request) if request.for_new_project => "New project",
+            ActiveModal::TemplatePicker(_) => "New from template",
+            ActiveModal::None => return None,
+        };
         let is_quick_open = matches!(self.active_modal, ActiveModal::QuickOpen);
         let is_cmd_palette = matches!(self.active_modal, ActiveModal::CommandPalette);
         let is_confirm_close = matches!(self.active_modal, ActiveModal::ConfirmClose(_));
@@ -17,38 +31,6 @@ impl Workspace {
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
         let is_about = matches!(self.active_modal, ActiveModal::About);
         let is_template_picker = matches!(self.active_modal, ActiveModal::TemplatePicker(_));
-
-        if !is_quick_open
-            && !is_cmd_palette
-            && !is_confirm_close
-            && !is_restore_recovery
-            && !is_settings
-            && !is_about
-            && !is_template_picker
-        {
-            return None;
-        }
-
-        let title = if is_quick_open {
-            "Open file"
-        } else if is_cmd_palette {
-            "Commands"
-        } else if is_settings {
-            "Settings"
-        } else if is_about {
-            "About graf"
-        } else if is_confirm_close {
-            "Unsaved changes"
-        } else if is_restore_recovery {
-            "Restore unsaved work"
-        } else if is_template_picker {
-            match self.active_modal {
-                ActiveModal::TemplatePicker(request) if request.for_new_project => "New project",
-                _ => "New from template",
-            }
-        } else {
-            "Review changes"
-        };
 
         let mut modal_content = div()
             .flex()
