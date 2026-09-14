@@ -9,6 +9,7 @@ pub mod recovery;
 pub mod settings;
 #[allow(dead_code)]
 pub mod stats;
+pub mod templates;
 pub mod tree;
 #[allow(dead_code)]
 pub mod zotero;

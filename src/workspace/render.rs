@@ -33,6 +33,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_open_settings))
             .on_action(cx.listener(Self::on_open_about))
+            .on_action(cx.listener(Self::on_new_from_template))
+            .on_action(cx.listener(Self::on_new_project))
             .on_action(cx.listener(Self::on_close_modal))
             .on_action(cx.listener(Self::on_autocomplete))
             .on_action(cx.listener(Self::on_toggle_performance_overlay))

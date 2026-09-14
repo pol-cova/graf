@@ -10,9 +10,11 @@ mod render;
 mod state;
 pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
 pub(crate) use state::next_draft_title;
+pub(crate) use state::unique_title;
 pub(crate) use state::{DraftKind, active_index_after_close};
 mod sidebar;
 mod status_bar;
+mod templates;
 mod top_bar;
 mod welcome;
 
@@ -63,6 +65,8 @@ actions!(
         Autocomplete,
         OpenSettings,
         OpenAbout,
+        NewFromTemplate,
+        NewProject,
         TogglePerformanceOverlay,
         FocusEditor,
     ]
@@ -92,6 +96,7 @@ pub fn register_bindings(cx: &mut gpui::App) {
             ("cmd-p", QuickOpen),
             ("cmd-k", CommandPalette),
             ("cmd-,", OpenSettings),
+            ("cmd-shift-n", NewFromTemplate),
             ("cmd-shift-d", TogglePerformanceOverlay),
             ("ctrl-space", Autocomplete),
             ("cmd-shift-e", ToggleSidebar),
@@ -143,6 +148,16 @@ pub enum ActiveModal {
     RestoreRecovery,
     Settings(SettingsTab),
     About,
+    TemplatePicker(TemplatePickerRequest),
+}
+
+/// What the template picker should do when a template is accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TemplatePickerRequest {
+    /// Scaffold a project in `pending_project_dir` instead of opening a tab.
+    pub for_new_project: bool,
+    /// Restrict the list to one document kind (used by the welcome screen).
+    pub kind: Option<crate::project::document::DocumentKind>,
 }
 
 pub struct Workspace {
@@ -196,6 +211,9 @@ pub struct Workspace {
     /// Undo history for `.graf` documents, owned per document so the shared
     /// `CanvasView` keeps each document's trail across tab switches.
     pub(crate) history_store: state::CanvasHistoryStore,
+    /// Directory chosen for a project that is being created; set by the
+    /// directory picker and consumed when a template is accepted.
+    pub(crate) pending_project_dir: Option<PathBuf>,
 }
 
 impl Workspace {
@@ -203,7 +221,7 @@ impl Workspace {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let project_tree = ProjectTree::scan(&current_dir);
 
-        let initial_text = "\\documentclass{article}\n\\title{Untitled}\n\\author{}\n\n\\begin{document}\n\\maketitle\n\n\\section{Introduction}\nStart writing here.\n\n\\end{document}\n";
+        let initial_text = crate::project::templates::DEFAULT_LATEX_STARTER;
 
         let show_welcome = project_tree.root_document().is_none();
         let (initial_doc, open_error) = if let Some(root_doc) = project_tree.root_document() {
@@ -324,6 +342,7 @@ impl Workspace {
             active_modal: ActiveModal::None,
             pending_recovery: None,
             history_store: state::CanvasHistoryStore::default(),
+            pending_project_dir: None,
         };
 
         let recovery_dir = workspace
@@ -628,12 +647,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn start_latex_document(&mut self, cx: &mut Context<Self>) {
-        self.show_welcome = false;
-        cx.notify();
-        self.trigger_compile(cx);
-    }
-
     pub fn new_typst_document(&mut self, cx: &mut Context<Self>) {
         let initial_typst = "= Untitled\n\nStart writing here.\n";
         let titles: Vec<String> = self
@@ -774,6 +787,9 @@ impl Workspace {
             .update(cx, |editor, cx| editor.dismiss_context_menu(cx));
         if self.active_modal != ActiveModal::None {
             self.active_modal = ActiveModal::None;
+            // A cancelled project scaffold must not leave a stale folder
+            // behind for the next template acceptance.
+            self.pending_project_dir = None;
         } else if self.completion_open {
             self.completion_open = false;
             self.editor

@@ -79,7 +79,7 @@ impl Workspace {
             .border_color(theme::color(theme::BORDER))
             .child(
                 div()
-                    .id("welcome-latex")
+                    .id("welcome-template")
                     .flex()
                     .items_center()
                     .h(px(44.0))
@@ -90,20 +90,26 @@ impl Workspace {
                     .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(|this, _, _, cx| this.start_latex_document(cx)),
+                        cx.listener(|this, _, _, cx| this.open_template_picker(None, false, cx)),
                     )
                     .child(
                         div()
                             .w(px(34.0))
                             .text_xs()
                             .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child("TEX"),
+                            .child("T"),
                     )
-                    .child(div().flex_1().child("Start a LaTeX document")),
+                    .child(div().flex_1().child("New from template"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .child("⌘⇧N"),
+                    ),
             )
             .child(
                 div()
-                    .id("welcome-typst")
+                    .id("welcome-new-project")
                     .flex()
                     .items_center()
                     .h(px(44.0))
@@ -114,16 +120,16 @@ impl Workspace {
                     .hover(|style| style.bg(theme::color(theme::HOVER_BG)))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(|this, _, _, cx| this.new_typst_document(cx)),
+                        cx.listener(|this, _, _, cx| this.new_project(cx)),
                     )
                     .child(
                         div()
                             .w(px(34.0))
-                            .text_xs()
-                            .text_color(theme::color(theme::ACCENT_BLUE))
-                            .child("TYP"),
+                            .text_lg()
+                            .text_color(theme::color(theme::TEXT_MUTED))
+                            .child("+"),
                     )
-                    .child(div().flex_1().child("Start a Typst document")),
+                    .child(div().flex_1().child("New project")),
             )
             .child(
                 div()
