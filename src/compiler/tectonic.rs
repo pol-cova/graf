@@ -181,19 +181,18 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut diag_id = 1u64;
-    let mut lines = stdout
-        .chain(stderr)
-        .map(str::trim)
-        .take(MAX_DIAGNOSTICS * 4)
-        .peekable();
+    // Same cap policy as the typst backend: stop once the cap is reached
+    // inside the loop, without truncating the stream up front (a truncated
+    // prefix could miss errors that arrive later in the stream).
+    let mut lines = stdout.chain(stderr).peekable();
 
-    while let Some(line) = lines.next() {
-        if diagnostics.len() >= MAX_DIAGNOSTICS {
-            break;
-        }
-        if let Some(msg) = line
+    while diagnostics.len() < MAX_DIAGNOSTICS
+        && let Some(line) = lines.next()
+    {
+        let trimmed = line.trim();
+        if let Some(msg) = trimmed
             .strip_prefix("error:")
-            .or_else(|| line.strip_prefix("fatal:"))
+            .or_else(|| trimmed.strip_prefix("fatal:"))
         {
             diagnostics.push(Diagnostic::new(
                 diag_id,
@@ -204,7 +203,7 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
                 msg.trim(),
             ));
             diag_id += 1;
-        } else if let Some(msg) = line.strip_prefix("warning:") {
+        } else if let Some(msg) = trimmed.strip_prefix("warning:") {
             diagnostics.push(Diagnostic::new(
                 diag_id,
                 Severity::Warning,
@@ -214,10 +213,13 @@ pub fn parse_tectonic_diagnostics_from_streams<'a>(
                 msg.trim(),
             ));
             diag_id += 1;
-        } else if let Some(msg) = line.strip_prefix('!') {
+        } else if let Some(msg) = trimmed.strip_prefix('!') {
+            // The line number trails immediately after the bang line.
             let line_num = lines
                 .peek()
-                .and_then(|next| next.strip_prefix("l."))
+                .map(|next| next.trim())
+                .unwrap_or_default()
+                .strip_prefix("l.")
                 .and_then(|rest| rest.split_whitespace().next())
                 .and_then(|num_str| num_str.parse::<usize>().ok());
 

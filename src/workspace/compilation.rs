@@ -170,9 +170,9 @@ impl Workspace {
                         .await;
 
                     match &render_result {
-                        Ok(pages) => info!(
+                        Ok(outcome) => info!(
                             "preview rendered for revision {output_rev} with {} page(s)",
-                            pages.len()
+                            outcome.pages.len()
                         ),
                         Err(error) => {
                             warn!("preview render failed for revision {output_rev}: {error}")
@@ -195,10 +195,9 @@ impl Workspace {
                             editor.set_diagnostics(diags, cx);
                         });
 
-                        if let Ok(pages) = render_result {
-                            let notice = this.pdf_renderer.render_notice();
+                        if let Ok(outcome) = render_result {
                             this.preview.update(cx, |preview, cx| {
-                                preview.set_rendered_pages(pages, notice, cx);
+                                preview.set_rendered_pages(outcome.pages, outcome.notice, cx);
                             });
                         }
                         this.finish_compile(cx);

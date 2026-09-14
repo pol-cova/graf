@@ -40,10 +40,18 @@ impl CompileState {
                 "ready (rev {revision}, {:.0}ms)",
                 duration.as_secs_f64() * 1000.0
             )),
-            Self::Failed { diagnostics, .. } => match diagnostics.len() {
-                0 => Cow::Borrowed("failed"),
-                1 => Cow::Borrowed("1 error"),
-                n => Cow::Owned(format!("{n} errors")),
+            Self::Failed {
+                id: _,
+                revision,
+                diagnostics,
+                duration,
+            } => match diagnostics.len() {
+                0 => Cow::Owned(format!(
+                    "failed (rev {revision}, {:.0}ms)",
+                    duration.as_secs_f64() * 1000.0
+                )),
+                1 => Cow::Owned(format!("1 error (rev {revision})")),
+                n => Cow::Owned(format!("{n} errors (rev {revision})")),
             },
         }
     }
@@ -375,7 +383,7 @@ mod tests {
         let res = controller.handle_error(err);
         assert!(res.is_ok());
         assert!(matches!(controller.state(), CompileState::Failed { .. }));
-        assert_eq!(controller.status_text(), "1 error");
+        assert_eq!(controller.status_text(), "1 error (rev 1)");
     }
 
     #[test]
@@ -411,6 +419,6 @@ mod tests {
 
         let res = controller.handle_error(err);
         assert!(res.is_ok());
-        assert_eq!(controller.status_text(), "2 errors");
+        assert_eq!(controller.status_text(), "2 errors (rev 1)");
     }
 }

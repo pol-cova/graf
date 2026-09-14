@@ -108,6 +108,10 @@ impl Document {
                 "Cannot save document without a path",
             ));
         };
+        // External-change guard: this re-reads the file (a small TOCTOU
+        // window remains: a change that lands between the read and the
+        // atomic write is missed). Fingerprinting mtime+size at open could
+        // be added later if that window becomes a real concern.
         let disk_content = fs::read_to_string(path)?;
         if disk_content != self.saved_content {
             return Err(std::io::Error::other(

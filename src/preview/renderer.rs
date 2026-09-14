@@ -21,20 +21,24 @@ pub struct RenderedPage {
     pub image_path: PathBuf,
 }
 
+/// What one successful render produced. The user-facing notice travels with
+/// the result itself, so the renderer holds no cross-render state: two
+/// overlapping renders cannot make notice state ambiguous.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderOutcome {
+    pub pages: Vec<RenderedPage>,
+    /// Degraded-render note (e.g. the `sips` single-page fallback), or None
+    /// when the full pipeline produced these pages.
+    pub notice: Option<String>,
+}
+
 pub trait PdfRenderer: Send + Sync {
     fn render_document(
         &self,
         render_id: u64,
         pdf_bytes: &[u8],
         cancel: Option<&Arc<AtomicBool>>,
-    ) -> Result<Vec<RenderedPage>, String>;
-
-    /// A user-facing note about degraded rendering from the most recent
-    /// `render_document`, if any (e.g. the `sips` single-page fallback).
-    /// `None` once a subsequent render goes through the full pipeline.
-    fn render_notice(&self) -> Option<String> {
-        None
-    }
+    ) -> Result<RenderOutcome, String>;
 }
 
 const RENDER_RUNS_TO_KEEP: usize = 2;
@@ -53,8 +57,6 @@ pub struct NativePdfRenderer {
     /// entirely; the flag keeps the fallback notice honest for hits, since
     /// both the full pipeline and the degraded sips path cache here.
     raster_cache: std::sync::Mutex<RasterCache>,
-    /// Set when the last completed render degraded to the `sips` fallback.
-    used_fallback: AtomicBool,
 }
 
 impl Default for NativePdfRenderer {
@@ -67,8 +69,7 @@ impl NativePdfRenderer {
     pub fn new() -> Self {
         Self {
             cache_dir: crate::util::TemporarySessionDir::new("graf_pdf"),
-            raster_cache: std::sync::Mutex::new(std::collections::VecDeque::new()),
-            used_fallback: AtomicBool::new(false),
+            raster_cache: std::sync::Mutex::new(RasterCache::new()),
         }
     }
 
@@ -103,6 +104,10 @@ impl NativePdfRenderer {
         }
     }
 }
+
+/// The note shown when pages came from the degraded one-page `sips` path.
+const FALLBACK_NOTICE: &str = "Install poppler (pdftoppm) for a multipage preview. \
+     Falling back to one page via sips.";
 
 fn hash_pdf_bytes(pdf_bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -192,19 +197,20 @@ impl PdfRenderer for NativePdfRenderer {
         render_id: u64,
         pdf_bytes: &[u8],
         cancel: Option<&Arc<AtomicBool>>,
-    ) -> Result<Vec<RenderedPage>, String> {
+    ) -> Result<RenderOutcome, String> {
         if pdf_bytes.is_empty() || !pdf_bytes.starts_with(b"%PDF-") {
             return Err("Invalid or empty PDF data".to_string());
         }
 
         let hash = hash_pdf_bytes(pdf_bytes);
         if let Some((pages, degraded)) = self.cache_hit(hash) {
-            // The cache must not clear a notice by assumption: sips-path
-            // results are cached too, so restore the notice state that
-            // produced these exact pages.
-            self.used_fallback
-                .store(degraded, std::sync::atomic::Ordering::Relaxed);
-            return Ok((*pages).clone());
+            // The cache must not drop a notice by assumption: sips-path
+            // results are cached too, so the notice that matches these
+            // exact pages travels with them.
+            return Ok(RenderOutcome {
+                pages: (*pages).clone(),
+                notice: degraded.then(|| FALLBACK_NOTICE.to_string()),
+            });
         }
 
         // Each render gets a fresh directory, so the cache would grow by a
@@ -218,9 +224,6 @@ impl PdfRenderer for NativePdfRenderer {
             PRUNE_MIN_IDLE,
         );
 
-        self.used_fallback
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-
         let run_dir = self.cache_dir.path().join(format!("render_{render_id}"));
         fs::create_dir_all(&run_dir)
             .map_err(|error| format!("Failed to create preview directory: {error}"))?;
@@ -231,14 +234,7 @@ impl PdfRenderer for NativePdfRenderer {
         let failure = if pdftoppm_available() {
             self.rasterize_with_pdftoppm(&pdf_file, &run_dir, cancel)
         } else {
-            // Only a *successful* sips render was a degraded render; a
-            // failed one is an error, not a fallback the archive kept.
-            let failure = self.rasterize_with_sips(&pdf_file, cancel);
-            if failure.is_none() {
-                self.used_fallback
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-            failure
+            self.rasterize_with_sips(&pdf_file, cancel)
         };
 
         if let Some(message) = failure {
@@ -267,28 +263,14 @@ impl PdfRenderer for NativePdfRenderer {
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        self.cache_insert(
-            hash,
-            Arc::new(pages.clone()),
-            self.used_fallback
-                .load(std::sync::atomic::Ordering::Relaxed),
-        );
-        Ok(pages)
-    }
-
-    fn render_notice(&self) -> Option<String> {
-        if self
-            .used_fallback
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            Some(
-                "Install poppler (pdftoppm) for a multipage preview. \
-                 Falling back to one page via sips."
-                    .to_string(),
-            )
-        } else {
-            None
-        }
+        // Only the degraded path produced a notice for these pages; the
+        // full pipeline's notice is None by construction.
+        let degraded = !pdftoppm_available();
+        self.cache_insert(hash, Arc::new(pages.clone()), degraded);
+        Ok(RenderOutcome {
+            pages,
+            notice: degraded.then(|| FALLBACK_NOTICE.to_string()),
+        })
     }
 }
 
@@ -381,7 +363,8 @@ mod tests {
         let result = renderer.render_document(1, &compile_output.artifact, None);
         assert!(result.is_ok(), "Rasterization failed: {:?}", result.err());
 
-        let pages = result.unwrap();
+        let outcome = result.unwrap();
+        let pages = outcome.pages;
         assert!(!pages.is_empty());
         assert_eq!(pages[0].page_index, 0);
         assert!(pages[0].width > 0);
@@ -410,7 +393,8 @@ Page three.
         let renderer = NativePdfRenderer::new();
         let pages = renderer
             .render_document(3, &compile_output.artifact, None)
-            .expect("rasterization must succeed");
+            .expect("rasterization must succeed")
+            .pages;
 
         let has_pdftoppm = Command::new("pdftoppm").arg("-v").output().is_ok();
         let expected = if has_pdftoppm { 3 } else { 1 };
@@ -433,7 +417,8 @@ Page three.
         let renderer = NativePdfRenderer::new();
         let pages = renderer
             .render_document(2, &compile_output.artifact, None)
-            .expect("rasterization must succeed");
+            .expect("rasterization must succeed")
+            .pages;
 
         let (width, height) = png_dimensions(&pages[0].image_path).expect("valid PNG");
         assert_eq!((width, height), (pages[0].width, pages[0].height));
@@ -461,12 +446,14 @@ Page three.
         let renderer = NativePdfRenderer::new();
         let first = renderer
             .render_document(1, &bytes, None)
-            .expect("first render");
+            .expect("first render")
+            .pages;
         // Different render id, same bytes: must hit the cache and return the
         // same page images.
         let second = renderer
             .render_document(2, &bytes, None)
-            .expect("cached render");
+            .expect("cached render")
+            .pages;
         assert_eq!(first, second);
     }
 
@@ -481,7 +468,7 @@ Page three.
         let bytes = compile_output.artifact;
 
         let renderer = NativePdfRenderer::new();
-        renderer.render_document(1, &bytes, None).expect("render");
+        renderer.render_document(1, &bytes, None).ok();
         // Push RASTER_CACHE_CAPACITY + 1 distinct PDFs through; the original
         // entry must fall out. Padding byte suffixes keep hashes distinct...
         // but PDF validity requires the header only, so vary the tail.
@@ -550,8 +537,8 @@ Page three.
             true,
         );
 
-        renderer.render_document(1, bytes, None).expect("hit");
-        assert!(renderer.render_notice().is_some());
+        let outcome = renderer.render_document(1, bytes, None).expect("hit");
+        assert!(outcome.notice.is_some());
     }
 
     #[test]
@@ -559,9 +546,6 @@ Page three.
         let directory = tempfile::tempdir().expect("tempdir");
         std::fs::write(directory.path().join("page-1.png"), b"png").expect("page image");
         let renderer = NativePdfRenderer::new();
-        renderer
-            .used_fallback
-            .store(true, std::sync::atomic::Ordering::Relaxed);
         let bytes = b"%PDF-cache-hit full";
         renderer.cache_insert(
             hash_pdf_bytes(bytes),
@@ -569,8 +553,8 @@ Page three.
             false,
         );
 
-        renderer.render_document(1, bytes, None).expect("hit");
-        assert!(renderer.render_notice().is_none());
+        let outcome = renderer.render_document(1, bytes, None).expect("hit");
+        assert!(outcome.notice.is_none());
     }
 
     #[test]
