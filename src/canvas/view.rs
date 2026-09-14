@@ -9,6 +9,11 @@ use crate::canvas::svg::export_to_svg;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
+/// Zoom clamp bounds for the toolbar controls.
+const ZOOM_STEP: f32 = 0.1;
+const ZOOM_MIN: f32 = 0.25;
+const ZOOM_MAX: f32 = 4.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasTool {
     Select,
@@ -164,12 +169,12 @@ impl CanvasView {
     }
 
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
-        self.document.viewport.zoom = (self.document.viewport.zoom + 0.1).min(4.0);
+        self.document.viewport.zoom = (self.document.viewport.zoom + ZOOM_STEP).min(ZOOM_MAX);
         cx.notify();
     }
 
     pub fn zoom_out(&mut self, cx: &mut Context<Self>) {
-        self.document.viewport.zoom = (self.document.viewport.zoom - 0.1).max(0.25);
+        self.document.viewport.zoom = (self.document.viewport.zoom - ZOOM_STEP).max(ZOOM_MIN);
         cx.notify();
     }
 

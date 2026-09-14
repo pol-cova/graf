@@ -71,11 +71,15 @@ pub struct CompilerController {
 
 impl Default for CompilerController {
     fn default() -> Self {
-        Self::new()
+        Self::with_debounce(Duration::from_millis(150))
     }
 }
 
 impl CompilerController {
+    /// Test-only convenience. Production always builds via
+    /// `with_debounce(settings.compile_debounce_ms)` — there is no second
+    /// debounce default that can drift from the settings default.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::with_debounce(Duration::from_millis(150))
     }

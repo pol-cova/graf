@@ -13,6 +13,10 @@ use crate::util::prune_numbered_dirs;
 const PREVIEW_RASTER_WIDTH: &str = "1224";
 const PAGE_PREFIX: &str = "page";
 
+/// The rasterizer binary name, shared by the spawn, the probe, and the
+/// failure labels so the three never drift to different binaries.
+const PDFTOPPM: &str = "pdftoppm";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPage {
     pub page_index: usize,
@@ -149,7 +153,7 @@ impl NativePdfRenderer {
         cancel: Option<&Arc<AtomicBool>>,
     ) -> Option<String> {
         let output_root = run_dir.join(PAGE_PREFIX);
-        let mut command = Command::new("pdftoppm");
+        let mut command = Command::new(PDFTOPPM);
         command
             .arg("-png")
             .arg("-scale-to-x")
@@ -158,7 +162,7 @@ impl NativePdfRenderer {
             .arg("-1")
             .arg(pdf_file)
             .arg(&output_root);
-        rasterization_failure(run_with_cancel(command, cancel), "pdftoppm")
+        rasterization_failure(run_with_cancel(command, cancel), PDFTOPPM)
     }
 
     #[cfg(target_os = "macos")]
@@ -290,7 +294,7 @@ fn pdftoppm_available() -> bool {
     {
         return *available;
     }
-    let available = Command::new("pdftoppm")
+    let available = Command::new(PDFTOPPM)
         .arg("-v")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
