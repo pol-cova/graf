@@ -27,7 +27,6 @@ pub enum CommandId {
     ExportTikz,
     ExportSvg,
     InsertTable,
-    ReloadPlugins,
 }
 
 pub fn all_commands() -> &'static [CommandPaletteItem] {
@@ -73,12 +72,6 @@ pub fn all_commands() -> &'static [CommandPaletteItem] {
             title: "Export Canvas as SVG",
             shortcut: "",
             category: "Export",
-        },
-        CommandPaletteItem {
-            id: CommandId::ReloadPlugins,
-            title: "Reload Plugins",
-            shortcut: "",
-            category: "Extensions",
         },
         CommandPaletteItem {
             id: CommandId::NewTypstDocument,
