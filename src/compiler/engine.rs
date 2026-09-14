@@ -517,3 +517,210 @@ pub(crate) fn finalize_output(
         duration: start.elapsed(),
     })
 }
+
+#[cfg(test)]
+mod core_logic_tests {
+    use super::*;
+
+    fn request() -> CompileRequest {
+        CompileRequest::simple("hello", 3)
+    }
+
+    #[test]
+    fn prepare_job_writes_source_without_a_root_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let build_root = crate::util::TemporarySessionDir::from_path(temp.path());
+        let identity = EngineIdentity {
+            label: "tectonic",
+            diagnostic_source: super::super::diagnostics::DiagnosticSource::Tectonic,
+        };
+
+        let job = prepare_job(
+            &JobDirs {
+                build_root: &build_root,
+                keep_dirs: 2,
+                prune_min_idle: Duration::from_secs(60),
+            },
+            &request(),
+            "input",
+            "tex",
+            identity,
+        )
+        .expect("job prepared");
+
+        // The source lands in the per-job build dir and the pdf target
+        // follows the input stem.
+        assert!(
+            std::fs::read_to_string(&job.input_file)
+                .expect("source written")
+                .contains("hello")
+        );
+        assert_eq!(job.output_pdf.file_name().unwrap(), "input.pdf");
+        assert_eq!(job.cwd, job.build_path);
+    }
+
+    #[test]
+    fn prepare_job_uses_the_root_document_for_projected_compiles() {
+        let project = tempfile::tempdir().unwrap();
+        let main_tex = project.path().join("chapters").join("paper.tex");
+        std::fs::create_dir_all(main_tex.parent().unwrap()).unwrap();
+        std::fs::write(&main_tex, "real doc").expect("root doc");
+        let build_root = crate::util::TemporarySessionDir::from_path(project.path());
+        let identity = EngineIdentity {
+            label: "tectonic",
+            diagnostic_source: super::super::diagnostics::DiagnosticSource::Tectonic,
+        };
+
+        let mut with_root = request();
+        with_root.project_root = Some(project.path().to_path_buf());
+        with_root.root_document = Some(main_tex.clone());
+        let job = prepare_job(
+            &JobDirs {
+                build_root: &build_root,
+                keep_dirs: 2,
+                prune_min_idle: Duration::from_secs(60),
+            },
+            &with_root,
+            "input",
+            "tex",
+            identity,
+        )
+        .expect("job prepared");
+
+        // The engine compiles the on-disk root doc, not an injected temp
+        // copy, with the project as cwd and the doc stem as the pdf name.
+        assert_eq!(job.input_file, main_tex);
+        assert_eq!(job.output_pdf.file_name().unwrap(), "paper.pdf");
+        assert_eq!(job.cwd, project.path());
+        assert!(!job.input_file.starts_with(job.build_path.join("job_0")));
+    }
+
+    #[test]
+    fn finalize_output_requires_success_no_errors_and_a_pdf() {
+        let temp = tempfile::tempdir().unwrap();
+        let build_root = crate::util::TemporarySessionDir::from_path(temp.path());
+        let identity = EngineIdentity {
+            label: "tectonic",
+            diagnostic_source: super::super::diagnostics::DiagnosticSource::Tectonic,
+        };
+        let job = prepare_job(
+            &JobDirs {
+                build_root: &build_root,
+                keep_dirs: 2,
+                prune_min_idle: Duration::from_secs(60),
+            },
+            &request(),
+            "input",
+            "tex",
+            identity,
+        )
+        .unwrap();
+
+        let success_status = std::process::Command::new("echo")
+            .output()
+            .expect("echo")
+            .status;
+        let no_pdf = finalize_output(
+            &request(),
+            &job,
+            std::time::Instant::now(),
+            identity,
+            RunOutcome {
+                status: success_status,
+                diagnostics: Vec::new(),
+                raw_failure_message: None,
+            },
+        );
+
+        // No output file: a shaped failure even with a green exit status —
+        // the renderer must never be handed a nonexistent pdf.
+        let error = no_pdf.expect_err("missing pdf must fail");
+        assert_eq!(error.message, "tectonic compilation failed");
+        assert_eq!(error.revision, 3);
+        assert_eq!(error.diagnostics.len(), 1);
+
+        // With the pdf on disk and a green status, the artifact is read.
+        std::fs::write(&job.output_pdf, b"%PDF-1.7 test").expect("pdf");
+        let output = finalize_output(
+            &request(),
+            &job,
+            std::time::Instant::now(),
+            identity,
+            RunOutcome {
+                status: success_status,
+                diagnostics: Vec::new(),
+                raw_failure_message: None,
+            },
+        )
+        .expect("pdf exists");
+        assert_eq!(output.artifact.as_ref(), b"%PDF-1.7 test");
+        assert_eq!(output.revision, 3);
+
+        // Error-grade diagnostics reject the pdf even when it exists.
+        let with_errors = RunOutcome {
+            status: success_status,
+            diagnostics: vec![super::super::diagnostics::Diagnostic::new(
+                1,
+                super::super::diagnostics::Severity::Error,
+                super::super::diagnostics::DiagnosticSource::Tectonic,
+                None,
+                None,
+                "boom",
+            )],
+            raw_failure_message: None,
+        };
+        let error = finalize_output(&request(), &job, Instant::now(), identity, with_errors)
+            .expect_err("error diagnostics must fail");
+        assert_eq!(error.message, "boom");
+        assert!(!error.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn finalize_output_uses_raw_failure_when_no_diagnostics_parsed() {
+        let temp = tempfile::tempdir().unwrap();
+        let build_root = crate::util::TemporarySessionDir::from_path(temp.path());
+        let identity = EngineIdentity {
+            label: "Typst",
+            diagnostic_source: super::super::diagnostics::DiagnosticSource::Typst,
+        };
+        let job = prepare_job(
+            &JobDirs {
+                build_root: &build_root,
+                keep_dirs: 2,
+                prune_min_idle: Duration::from_secs(60),
+            },
+            &request(),
+            "document",
+            "typ",
+            identity,
+        )
+        .unwrap();
+
+        let failed_status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("exit 1")
+            .output()
+            .expect("sh")
+            .status;
+        let error = finalize_output(
+            &request(),
+            &job,
+            std::time::Instant::now(),
+            identity,
+            RunOutcome {
+                status: failed_status,
+                diagnostics: Vec::new(),
+                raw_failure_message: Some("fatal stderr line".to_string()),
+            },
+        )
+        .expect_err("failed status must fail");
+
+        // The raw subprocess message survives into the shaped error.
+        assert_eq!(error.message, "fatal stderr line");
+        assert_eq!(error.diagnostics[0].message, "fatal stderr line");
+        assert_eq!(
+            error.diagnostics[0].source,
+            super::super::diagnostics::DiagnosticSource::Typst
+        );
+    }
+}
