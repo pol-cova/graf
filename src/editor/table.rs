@@ -28,7 +28,12 @@ pub struct TableData {
 }
 
 impl TableData {
+    #[cfg(test)]
     pub fn new(num_rows: usize, num_cols: usize) -> Self {
+        Self::empty_grid(num_rows, num_cols)
+    }
+
+    fn empty_grid(num_rows: usize, num_cols: usize) -> Self {
         let rows = vec![vec![String::new(); num_cols]; num_rows];
         let alignments = vec![TableAlignment::Left; num_cols];
         Self {
@@ -39,6 +44,17 @@ impl TableData {
             caption: None,
             label: None,
         }
+    }
+
+    /// The 3x3 seeded table the "Insert Table" command starts from.
+    pub fn sample() -> Self {
+        let mut table = Self::empty_grid(3, 3);
+        table.rows[0] = vec![
+            "Column 1".to_string(),
+            "Column 2".to_string(),
+            "Column 3".to_string(),
+        ];
+        table
     }
 
     pub fn to_latex(&self) -> String {

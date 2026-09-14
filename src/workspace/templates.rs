@@ -112,7 +112,8 @@ impl Workspace {
         // Never overwrite existing files: if the name is taken, open the
         // folder as-is so the user keeps whatever is already there.
         if !target.exists()
-            && let Err(error) = crate::project::atomic_write(&target, template.content.as_bytes())
+            && let Err(error) =
+                crate::project::persistence::atomic_write(&target, template.content.as_bytes())
         {
             self.workspace_error = Some(format!("Could not create {}: {error}", target.display()));
             cx.notify();

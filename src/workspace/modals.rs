@@ -1,19 +1,17 @@
 use super::commands::filter_commands;
-use super::{ActiveModal, SettingsTab, Workspace};
+use super::{ActiveModal, SettingsTab, Workspace, state};
 use gpui::{
     ClipboardItem, Context, Focusable, IntoElement, ParentElement, Role, Styled, div, prelude::*,
     px,
 };
 
-/// Visible QuickOpen rows; results are capped so rendering stays cheap.
-pub(crate) const QUICK_OPEN_LIMIT: usize = 50;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::theme;
 
 impl Workspace {
     pub fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let is_quick_open = matches!(self.active_modal, ActiveModal::QuickOpen(_));
-        let is_cmd_palette = matches!(self.active_modal, ActiveModal::CommandPalette(_));
+        let is_quick_open = matches!(self.active_modal, ActiveModal::QuickOpen);
+        let is_cmd_palette = matches!(self.active_modal, ActiveModal::CommandPalette);
         let is_confirm_close = matches!(self.active_modal, ActiveModal::ConfirmClose(_));
         let is_restore_recovery = matches!(self.active_modal, ActiveModal::RestoreRecovery);
         let is_settings = matches!(self.active_modal, ActiveModal::Settings(_));
@@ -802,7 +800,7 @@ impl Workspace {
             // filtered handful is cloned per render.
             for entry in self
                 .project_tree
-                .quick_open_matches(filter, QUICK_OPEN_LIMIT)
+                .quick_open_matches(filter, state::QUICK_OPEN_LIMIT)
             {
                 let title = entry.relative.clone();
                 let path = entry.path.clone();

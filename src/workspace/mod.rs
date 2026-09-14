@@ -8,7 +8,6 @@ mod find_bar;
 mod modals;
 mod render;
 mod state;
-pub(crate) use modals::QUICK_OPEN_LIMIT as QUICK_OPEN_SEARCH_LIMIT;
 pub(crate) use state::next_draft_title;
 pub(crate) use state::unique_title;
 pub(crate) use state::{DraftKind, active_index_after_close};
@@ -142,8 +141,8 @@ pub enum ResizingPanel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
-    QuickOpen(String),
-    CommandPalette(String),
+    QuickOpen,
+    CommandPalette,
     ConfirmClose(usize),
     RestoreRecovery,
     Settings(SettingsTab),
@@ -197,8 +196,8 @@ pub struct Workspace {
     pub(crate) workspace_menu_open: bool,
     pub(crate) latest_diagnostics: Vec<Diagnostic>,
     pub(crate) workspace_error: Option<String>,
-    pub(crate) bib_index: crate::project::bibtex::BibtexIndex,
-    pub(crate) label_index: crate::project::bibtex::LabelIndex,
+    /// Project-scoped reference indexes; the workspace only routes reloads.
+    pub(crate) project_state: crate::project::state::ProjectState,
     /// Outline items keyed by editor revision; sidebar render (which is a
     /// `&self` paint) must not parse the document every paint.
     pub(crate) outline_cache:
@@ -344,8 +343,7 @@ impl Workspace {
             workspace_menu_open: false,
             latest_diagnostics: Vec::new(),
             workspace_error: open_error,
-            bib_index: crate::project::bibtex::BibtexIndex::new(),
-            label_index: crate::project::bibtex::LabelIndex::default(),
+            project_state: crate::project::state::ProjectState::new(),
             outline_cache: std::cell::RefCell::new(None),
             word_count_cache: std::cell::RefCell::new(None),
             completions: Vec::new(),
@@ -381,21 +379,23 @@ impl Workspace {
     }
 
     pub fn active_engine(&self) -> EngineKind {
-        self.documents
-            .get(self.active_doc_idx)
+        self.active_document()
             .and_then(|document| document.kind().as_engine())
             .unwrap_or(EngineKind::Latex)
     }
 
-    pub(super) fn active_document_kind(&self) -> Option<crate::project::document::DocumentKind> {
-        self.documents
-            .get(self.active_doc_idx)
-            .map(|document| document.kind())
+    /// One accessor over the active-tab lookup so the dozens of call sites
+    /// never re-walk `documents.get(active_doc_idx)` themselves.
+    pub(crate) fn active_document(&self) -> Option<&crate::project::document::Document> {
+        self.documents.get(self.active_doc_idx)
+    }
+
+    pub(crate) fn active_document_kind(&self) -> Option<crate::project::document::DocumentKind> {
+        self.active_document().map(|document| document.kind())
     }
 
     pub fn active_document_is_compilable(&self) -> bool {
-        self.documents
-            .get(self.active_doc_idx)
+        self.active_document()
             .is_some_and(|document| document.kind().is_compilable())
     }
 
@@ -416,8 +416,8 @@ impl Workspace {
         self.completions = crate::editor::completion::compute_completions(
             &text,
             cursor,
-            &self.bib_index,
-            &self.label_index,
+            &self.project_state.bib_index,
+            &self.project_state.label_index,
         );
         self.completions.truncate(8);
         self.completion_open = !self.completions.is_empty();
@@ -663,7 +663,7 @@ impl Workspace {
     }
 
     pub fn new_typst_document(&mut self, cx: &mut Context<Self>) {
-        let initial_typst = "= Untitled\n\nStart writing here.\n";
+        let initial_typst = crate::project::templates::DEFAULT_TYPST_STARTER;
         let titles: Vec<String> = self
             .documents
             .iter()
@@ -705,12 +705,7 @@ impl Workspace {
     pub fn insert_table_template(&mut self, cx: &mut Context<Self>) {
         let is_typst =
             self.active_document_kind() == Some(crate::project::document::DocumentKind::Typst);
-        let mut table = crate::editor::table::TableData::new(3, 3);
-        table.rows[0] = vec![
-            "Column 1".to_string(),
-            "Column 2".to_string(),
-            "Column 3".to_string(),
-        ];
+        let table = crate::editor::table::TableData::sample();
 
         let table_code = if is_typst {
             table.to_typst()
@@ -794,7 +789,7 @@ impl Workspace {
     pub fn sync_zotero_library(&mut self, cx: &mut Context<Self>) {
         let zotero_lib = crate::project::zotero::ZoteroLibrary::scan_local_storage();
         for item in zotero_lib.items {
-            self.bib_index.add_entry(item.to_bib_entry());
+            self.project_state.bib_index.add_entry(item.to_bib_entry());
         }
         cx.notify();
     }
@@ -802,7 +797,7 @@ impl Workspace {
     pub fn open_quick_open(&mut self, cx: &mut Context<Self>) {
         self.prompt_editor
             .update(cx, |input, cx| input.set_input_text("", cx));
-        self.active_modal = ActiveModal::QuickOpen(String::new());
+        self.active_modal = ActiveModal::QuickOpen;
         self.prompt_target = state::PromptTarget::QuickOpen;
         cx.notify();
     }
@@ -810,7 +805,7 @@ impl Workspace {
     pub fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.prompt_editor
             .update(cx, |input, cx| input.set_input_text("", cx));
-        self.active_modal = ActiveModal::CommandPalette(String::new());
+        self.active_modal = ActiveModal::CommandPalette;
         self.prompt_target = state::PromptTarget::Palette;
         cx.notify();
     }

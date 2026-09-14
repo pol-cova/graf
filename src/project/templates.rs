@@ -17,6 +17,7 @@ pub struct DocumentTemplate {
 }
 
 pub const DEFAULT_LATEX_STARTER: &str = "\\documentclass{article}\n\\title{Untitled}\n\\author{}\n\n\\begin{document}\n\\maketitle\n\n\\section{Introduction}\nStart writing here.\n\n\\end{document}\n";
+pub const DEFAULT_TYPST_STARTER: &str = "= Untitled\n\nStart writing here.\n";
 
 const LATEX_ARTICLE: &str = DEFAULT_LATEX_STARTER;
 
@@ -86,7 +87,7 @@ One idea per frame; keep slides scannable.
 \end{document}
 ";
 
-const TYPST_BLANK: &str = "= Untitled\n\nStart writing here.\n";
+const TYPST_BLANK: &str = DEFAULT_TYPST_STARTER;
 
 const TYPST_ARTICLE: &str = r#"#set document(title: "Article Title", author: "Author Name")
 

@@ -180,7 +180,7 @@ impl Workspace {
                         None => Ok(()),
                         Some(svg) => {
                             let sidecar = path.with_extension("svg");
-                            crate::project::atomic_write(&sidecar, svg.as_bytes())
+                            crate::project::persistence::atomic_write(&sidecar, svg.as_bytes())
                                 .map_err(|error| error.to_string())
                         }
                     })
@@ -357,28 +357,14 @@ impl Workspace {
         }
     }
 
-    pub fn reload_bib_files(&mut self) {
-        let root = self.project_tree.root_path();
-        if let Ok(entries) = std::fs::read_dir(root) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.extension().is_some_and(|ext| ext == "bib") {
-                    let content_res = std::fs::read_to_string(&p);
-                    if let Ok(content) = content_res {
-                        self.bib_index.parse_and_load(&content);
-                    }
-                }
-            }
-        }
-    }
-
     pub fn reload_editor_labels(&mut self, cx: &Context<Self>) {
-        let editor_text = self.editor.read(cx).text();
-        self.label_index.parse_and_load(editor_text);
+        let editor_text = self.editor.read(cx).text().to_string();
+        self.project_state.reload_editor_labels(&editor_text);
     }
 
     pub fn reload_bibtex_and_labels(&mut self, cx: &Context<Self>) {
-        self.reload_bib_files();
+        let root = self.project_tree.root_path().to_path_buf();
+        self.project_state.reload_bib_files(&root);
         self.reload_editor_labels(cx);
     }
 }

@@ -61,6 +61,9 @@ impl CanvasHistoryStore {
     }
 }
 
+/// Visible QuickOpen rows; results are capped so rendering stays cheap.
+pub(crate) const QUICK_OPEN_LIMIT: usize = 50;
+
 /// Index of the active tab after removing `removed_idx` from a list that had
 /// `len_before` tabs. Mirrors `force_close_tab`.
 pub(crate) fn active_index_after_close(
