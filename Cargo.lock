@@ -928,7 +928,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "gpui_util",
  "indexmap",
@@ -1299,7 +1299,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2052,6 +2052,8 @@ dependencies = [
  "log",
  "lyon",
  "num_cpus",
+ "objc2-core-foundation",
+ "objc2-core-video",
  "parking",
  "parking_lot",
  "pin-project",
@@ -2075,7 +2077,6 @@ dependencies = [
  "sum_tree",
  "taffy",
  "thiserror 2.0.20",
- "tracing",
  "ttf-parser",
  "url",
  "usvg",
@@ -2086,19 +2087,17 @@ dependencies = [
  "windows 0.62.2",
  "zed-font-kit",
  "zed-scap",
- "ztracing",
 ]
 
 [[package]]
 name = "gpui_apple"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "block",
  "cbindgen",
  "cocoa 0.26.0",
- "collections",
  "core-foundation 0.10.1",
  "core-video",
  "derive_more",
@@ -2116,7 +2115,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2144,13 +2143,12 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "accesskit",
  "accesskit_macos",
  "anyhow",
  "async-task",
- "block",
  "block2 0.6.2",
  "cocoa 0.26.0",
  "collections",
@@ -2170,11 +2168,11 @@ dependencies = [
  "libc",
  "log",
  "mach2",
- "media",
- "metal",
  "objc",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
+ "objc2-core-media",
  "objc2-foundation 0.3.2",
  "objc2-screen-capture-kit",
  "objc2-user-notifications",
@@ -2191,7 +2189,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2202,7 +2200,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
@@ -2215,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "schemars",
  "serde",
@@ -2225,7 +2223,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "log",
@@ -2235,7 +2233,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2263,7 +2261,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2288,7 +2286,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2478,7 +2476,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -3109,20 +3107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "media"
-version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
-dependencies = [
- "anyhow",
- "bindgen",
- "core-foundation 0.10.1",
- "core-video",
- "foreign-types",
- "metal",
- "objc",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3488,6 +3472,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-core-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
+dependencies = [
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-core-audio-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
+dependencies = [
+ "bitflags 2.13.1",
+ "objc2 0.6.4",
+]
+
+[[package]]
 name = "objc2-core-data"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3543,6 +3549,34 @@ checksum = "ca347214e24bc973fc025fd0d36ebb179ff30536ed1f80252706db19ee452009"
 dependencies = [
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-media"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
+dependencies = [
+ "bitflags 2.13.1",
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-core-video",
+]
+
+[[package]]
+name = "objc2-core-video"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
+dependencies = [
+ "bitflags 2.13.1",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -3644,8 +3678,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74b7c5390f477482f001bc354d6571a70db7e4f8d5288e860c45521fbce11394"
 dependencies = [
  "block2 0.6.2",
+ "dispatch2",
  "objc2 0.6.4",
  "objc2-core-graphics",
+ "objc2-core-media",
  "objc2-foundation 0.3.2",
 ]
 
@@ -3840,7 +3876,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "collections",
  "serde",
@@ -4422,7 +4458,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "derive_refineable",
 ]
@@ -4585,7 +4621,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "async-task",
  "backtrace",
@@ -5014,7 +5050,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "heapless",
  "log",
@@ -5677,7 +5713,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "perf",
  "quote",
@@ -6879,7 +6915,7 @@ dependencies = [
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6896,7 +6932,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -6907,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed#7960b2a7c9568e90fbe0727332149e5b2a5fd57a"
+source = "git+https://github.com/zed-industries/zed#395def7a067b32ed598fcb3f048969ada9b54942"
 
 [[package]]
 name = "zune-core"
