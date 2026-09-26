@@ -2,25 +2,27 @@
 
 ## Project
 
-Graf is a local-first technical writing workspace for macOS. It is written in Rust and rendered with GPUI. The main interaction is `write -> compile -> preview -> revise`.
+Graf is a local-first technical writing workspace for macOS. The main interaction is `write -> compile -> preview -> revise`. The design goal is zero cognitive load: the writer thinks about the argument, and Graf handles syntax, build state, files, references, and saving.
 
-The repository is in M7, Distribution and Polish. Prefer reliability, accessibility, packaging, documentation, and performance fixes over new product areas.
+Graf is moving to a native Swift front end on top of a Rust core (ADR 0001). The GPUI front end has been removed. Current work is Phase 1 of `.docs/Graf-swift-plan.md`: the `graf-ffi` bridge, then the Swift shell, editor, and preview. Until the Swift app ships, there is no runnable app in the repository.
 
 ## Read before changing code
 
-1. Read `.docs/Graf-spec.md` before major work.
+1. Read `.docs/Graf-spec.md`, `.docs/Graf-design-principles.md`, and `.docs/Graf-swift-plan.md` before major work.
 2. Inspect the existing module and its callers before adding an abstraction.
 3. Check the current Git diff and keep unrelated user changes intact.
-4. Confirm that the work belongs to M7 or is required to fix an existing feature.
+4. Confirm that the work belongs to the current phase of the Swift plan or is required to fix an existing feature.
 5. Never stage or commit `.docs/` or `docs/`; they are local planning material.
 
 ## Product constraints
 
 - Keep project content in ordinary local files.
 - Never upload document content without an explicit user action.
-- Use native GPUI rendering. Do not add Electron, a WebView, React, or browser UI.
-- Run compilation, PDF rendering, project scans, and other expensive work off the UI thread.
-- Keep compiler-specific behavior inside `src/compiler/`.
+- Use native Apple UI: SwiftUI with AppKit where it matters (TextKit 2 for text, PDFKit for preview). Do not add Electron, a WebView, React, or browser UI.
+- Keep logic in `graf-core`. The Swift front end renders and routes input; it does not reimplement compiling, parsing, or persistence.
+- Swift owns the live text. Pass snapshots to Rust when compiling, saving, linting, or building the outline, never on every keystroke.
+- Run compilation, project scans, and other expensive work off the main thread on both sides of the bridge.
+- Keep compiler-specific behavior inside `crates/graf-core/src/compiler/`.
 - Keep persistent document state separate from temporary view state.
 - Preserve the last valid preview when a compile fails.
 - Reject stale background results by revision.
@@ -39,11 +41,12 @@ The repository is in M7, Distribution and Polish. Prefer reliability, accessibil
 
 ## UI rules
 
-- Match a compact native editor, with Zed as the main visual reference.
-- Use the shared colors in `src/ui/theme.rs`; do not hardcode colors in views.
-- Prefer text labels or monochrome symbols over emoji.
+- Follow `.docs/Graf-design-principles.md`. Every feature must remove a question from the writer's head, not add one.
+- The default screen shows the text and nothing else. Chrome appears when asked for and leaves on its own.
+- Use one accent color (hyperlink blue) only for links between source and output, and red only for the broken token and its hint.
+- Prefer system controls, SF Symbols, and standard macOS behavior (menus, text services, VoiceOver) over custom widgets.
 - Keep controls restrained, keyboard accessible, and visible at narrow window sizes.
-- Avoid gradients, glass effects, oversized controls, and decorative animation.
+- Motion must explain where something came from or went. No decorative animation.
 
 ## Required checks
 
@@ -56,19 +59,17 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-Do not introduce warnings from Graf code. The known `block` future-compatibility warning comes from an upstream GPUI dependency.
+Do not introduce warnings from Graf code. Swift build and test commands will be added here when the Xcode project lands.
 
 ## Architecture
 
-- `src/app.rs`: GPUI application and native window setup
-- `src/workspace/`: shell, tabs, panels, commands, modals, and task coordination
-- `src/editor/`: text buffer, input, rendering, syntax, completion, and search
-- `src/project/`: documents, project tree, persistence, settings, templates, recovery, and references
-- `src/compiler/`: engine interface, diagnostics, Tectonic, Typst, and compile controller
-- `src/preview/`: PDF rasterization and preview state
-- `src/canvas/`: `.graf` scene model, editor, undo history, and exporters
-- `src/ui/`: shared theme values
+- `crates/graf-core/src/compiler/`: engine interface, diagnostics, Tectonic, Typst, and compile controller
+- `crates/graf-core/src/project/`: documents, project tree, persistence, settings, templates, recovery, bibliography, outline, linting, and stats
+- `crates/graf-core/src/text/`: text buffer, completion, find and replace, and table formatting
+- `crates/graf-core/src/util.rs`: app data paths and temporary directories
+- `crates/graf-ffi/` (planned): UniFFI bridge that exposes a coarse API to Swift
+- `apple/` (planned): the SwiftUI and AppKit application
 
 ## Platform notes
 
-The primary target is Apple Silicon macOS. Avoid macOS assumptions in core data models, but platform-specific UI and PDF code may live behind internal interfaces. Tectonic and Typst currently run as external commands. PDF rasterization currently uses the macOS `sips` tool.
+The primary target is Apple Silicon macOS. Keep `graf-core` free of macOS assumptions in data models so other front ends remain possible. Tectonic and Typst run as external commands. PDF display belongs to PDFKit in the Swift front end.

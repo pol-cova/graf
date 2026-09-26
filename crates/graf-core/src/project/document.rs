@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::editor::buffer::TextBuffer;
+use crate::text::buffer::TextBuffer;
 
 use super::persistence::atomic_write;
 
@@ -198,7 +198,6 @@ mod tests {
 pub enum DocumentKind {
     Latex,
     Typst,
-    Canvas,
     PlainText,
 }
 
@@ -212,7 +211,6 @@ pub fn kind_for_title(title: &str) -> DocumentKind {
     match super::kinds::FileKind::from_path(Path::new(title)) {
         super::kinds::FileKind::Latex => DocumentKind::Latex,
         super::kinds::FileKind::Typst => DocumentKind::Typst,
-        super::kinds::FileKind::GrafCanvas => DocumentKind::Canvas,
         _ => DocumentKind::PlainText,
     }
 }
@@ -223,15 +221,11 @@ impl DocumentKind {
         matches!(self, Self::Latex | Self::Typst)
     }
 
-    pub fn is_canvas(self) -> bool {
-        matches!(self, Self::Canvas)
-    }
-
     pub fn as_engine(self) -> Option<crate::compiler::EngineKind> {
         match self {
             Self::Latex => Some(crate::compiler::EngineKind::Latex),
             Self::Typst => Some(crate::compiler::EngineKind::Typst),
-            Self::Canvas | Self::PlainText => None,
+            Self::PlainText => None,
         }
     }
 }
@@ -244,7 +238,6 @@ mod kind_tests {
     fn title_kinds() {
         assert_eq!(kind_for_title("paper.tex"), DocumentKind::Latex);
         assert_eq!(kind_for_title("notes.typ"), DocumentKind::Typst);
-        assert_eq!(kind_for_title("diagram-1.graf"), DocumentKind::Canvas);
         assert_eq!(kind_for_title("README.md"), DocumentKind::PlainText);
         assert_eq!(kind_for_title("makefile"), DocumentKind::PlainText);
         assert_eq!(kind_for_title("dotted.name.typ"), DocumentKind::Typst);
@@ -256,12 +249,11 @@ mod kind_tests {
     fn compilability_and_engine_mapping() {
         assert!(DocumentKind::Latex.is_compilable());
         assert!(DocumentKind::Typst.is_compilable());
-        assert!(!DocumentKind::Canvas.is_compilable());
         assert!(!DocumentKind::PlainText.is_compilable());
         assert_eq!(
             DocumentKind::Typst.as_engine(),
             Some(crate::compiler::EngineKind::Typst)
         );
-        assert_eq!(DocumentKind::Canvas.as_engine(), None);
+        assert_eq!(DocumentKind::PlainText.as_engine(), None);
     }
 }

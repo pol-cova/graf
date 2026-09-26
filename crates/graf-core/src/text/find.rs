@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 #[cfg(test)]
-use crate::editor::buffer::TextBuffer;
+use crate::text::buffer::TextBuffer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindState {

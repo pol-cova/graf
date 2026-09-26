@@ -96,7 +96,6 @@ impl TextBuffer {
         self.content.len()
     }
 
-    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }

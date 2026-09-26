@@ -25,5 +25,5 @@ body:
     attributes:
       label: Scope
       options:
-        - label: This request preserves native GPUI rendering and local-first behavior.
+        - label: This request preserves the native macOS interface and local-first behavior.
           required: true

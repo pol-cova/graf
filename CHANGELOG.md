@@ -2,6 +2,12 @@
 
 Notable changes to graf are documented here.
 
+## Unreleased
+
+- Moved compiling, projects, and text logic into the `graf-core` library crate.
+- Removed the GPUI front end, including the `.graf` canvas editor, ahead of the native Swift app.
+- Removed the GPUI app bundle, profiling, and release scripts. Releases resume with the Swift app.
+
 ## 1.0.0-alpha - 2026-08-24
 
 - Added the native LaTeX and Typst editing workspace.

@@ -313,10 +313,6 @@ mod tests {
         assert_eq!(FileKind::from_path(Path::new("fig.png")), FileKind::Image);
         assert_eq!(FileKind::from_path(Path::new("doc.pdf")), FileKind::Pdf);
         assert_eq!(
-            FileKind::from_path(Path::new("chart.graf")),
-            FileKind::GrafCanvas
-        );
-        assert_eq!(
             FileKind::from_path(Path::new("readme.txt")),
             FileKind::Other
         );

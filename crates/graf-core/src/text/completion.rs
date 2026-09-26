@@ -1,5 +1,5 @@
-use crate::editor::buffer::clamp_str_boundary;
 use crate::project::bibtex::{BibtexIndex, LabelIndex};
+use crate::text::buffer::clamp_str_boundary;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionItem {

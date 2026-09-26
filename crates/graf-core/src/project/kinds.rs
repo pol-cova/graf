@@ -12,7 +12,6 @@ pub enum FileKind {
     Style,
     Image,
     Pdf,
-    GrafCanvas,
     Other,
 }
 
@@ -25,7 +24,6 @@ impl FileKind {
             Some("sty") | Some("cls") => Self::Style,
             Some("png") | Some("jpg") | Some("jpeg") | Some("svg") => Self::Image,
             Some("pdf") => Self::Pdf,
-            Some("graf") => Self::GrafCanvas,
             _ => Self::Other,
         }
     }
@@ -38,7 +36,6 @@ impl FileKind {
             Self::Style => "STY",
             Self::Image => "IMG",
             Self::Pdf => "PDF",
-            Self::GrafCanvas => "GRF",
             Self::Other => "",
         }
     }
@@ -66,9 +63,5 @@ mod tests {
         );
         assert_eq!(FileKind::from_path(Path::new("refs.bib")).as_engine(), None);
         assert_eq!(FileKind::from_path(Path::new("fig.png")).as_engine(), None);
-        assert_eq!(
-            FileKind::from_path(Path::new("chart.graf")).as_engine(),
-            None
-        );
     }
 }
