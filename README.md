@@ -23,7 +23,7 @@ brew install --cask pol-cova/tap/graf
 ## Repository layout
 
 - `crates/graf-core`: the Rust core. It handles compiling with Tectonic and Typst, diagnostics, project files, settings, templates, crash recovery, bibliography and label indexing, outline, linting, stats, and plain-text editing logic. It has no UI dependencies.
-- `crates/graf-ffi` (planned): the bridge that exposes the core to Swift.
+- `crates/graf-ffi`: the bridge that exposes the core to Swift through [UniFFI](https://mozilla.github.io/uniffi-rs/). Run `./scripts/build_core_xcframework.sh` to build `target/apple/GrafCore.xcframework` and the generated Swift bindings.
 - `apple/` (planned): the SwiftUI and AppKit app, using TextKit 2 for the editor and PDFKit for the preview.
 
 ## Requirements
@@ -48,6 +48,7 @@ graf's core is written in [Rust](https://www.rust-lang.org/).
 
 - [Tectonic](https://tectonic-typesetting.github.io/) (MIT) compiles LaTeX. Bundled into release builds.
 - [Typst](https://typst.app/) (Apache-2.0) compiles Typst. Bundled into release builds.
+- [UniFFI](https://mozilla.github.io/uniffi-rs/) (MPL-2.0) generates the Swift bindings.
 - [Serde](https://serde.rs/), [log](https://crates.io/crates/log), and [tempfile](https://crates.io/crates/tempfile). See [Cargo.lock](Cargo.lock) for the complete dependency list.
 
 License texts for the bundled compilers live in [`bundle/licenses/`](bundle/licenses) and ship inside the app under `Resources/bin/LICENSES`.

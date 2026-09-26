@@ -1,0 +1,16 @@
+[package]
+name = "graf-ffi"
+description = "UniFFI bridge that exposes graf-core to the Swift front end"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib", "staticlib"]
+name = "graf_ffi"
+
+[dependencies]
+graf-core = { path = "../graf-core" }
+uniffi = "0.32.2"

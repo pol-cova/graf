@@ -4,7 +4,7 @@
 
 Graf is a local-first technical writing workspace for macOS. The main interaction is `write -> compile -> preview -> revise`. The design goal is zero cognitive load: the writer thinks about the argument, and Graf handles syntax, build state, files, references, and saving.
 
-Graf is moving to a native Swift front end on top of a Rust core (ADR 0001). The GPUI front end has been removed. Current work is Phase 1 of `.docs/Graf-swift-plan.md`: the `graf-ffi` bridge, then the Swift shell, editor, and preview. Until the Swift app ships, there is no runnable app in the repository.
+Graf is moving to a native Swift front end on top of a Rust core (ADR 0001). The GPUI front end has been removed, and the `graf-ffi` bridge is in place. Current work is Phase 2 of `.docs/Graf-swift-plan.md`: the Swift shell and editor, then compile and preview. Until the Swift app ships, there is no runnable app in the repository.
 
 ## Read before changing code
 
@@ -67,7 +67,9 @@ Do not introduce warnings from Graf code. Swift build and test commands will be 
 - `crates/graf-core/src/project/`: documents, project tree, persistence, settings, templates, recovery, bibliography, outline, linting, and stats
 - `crates/graf-core/src/text/`: text buffer, completion, find and replace, and table formatting
 - `crates/graf-core/src/util.rs`: app data paths and temporary directories
-- `crates/graf-ffi/` (planned): UniFFI bridge that exposes a coarse API to Swift
+- `crates/graf-ffi/`: UniFFI bridge with a coarse API for Swift (`Compiler`, outline, stats, bibliography, labels, lint, templates, project creation). Keep it a thin mapping layer; logic belongs in `graf-core`.
+- `crates/uniffi-bindgen-swift/`: build tool that generates the Swift bindings
+- `scripts/build_core_xcframework.sh`: builds `target/apple/GrafCore.xcframework` and the generated `target/apple/Sources/graf_ffi.swift`. Never commit generated bindings.
 - `apple/` (planned): the SwiftUI and AppKit application
 
 ## Platform notes

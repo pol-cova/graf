@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/graf-core"]
+members = ["crates/graf-core", "crates/graf-ffi", "crates/uniffi-bindgen-swift"]
+# The bindgen tool is only needed when packaging the XCFramework.
+default-members = ["crates/graf-core", "crates/graf-ffi"]
 
 [workspace.package]
 version = "1.0.0-alpha"

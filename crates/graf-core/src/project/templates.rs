@@ -2,6 +2,9 @@
 //! the welcome screen, and project scaffolding all render from one registry
 //! instead of hardcoded string literals scattered through the workspace.
 
+use std::io;
+use std::path::{Path, PathBuf};
+
 use super::document::DocumentKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,6 +204,18 @@ pub fn template_by_id(id: &str) -> Option<&'static DocumentTemplate> {
         .find(|template| template.id == id)
 }
 
+/// Creates `dir` (and parents) and writes the template's root file into it,
+/// returning the file's path. An existing file with that name is never
+/// overwritten: the folder is opened as-is so the user keeps their work.
+pub fn scaffold_project(dir: &Path, template: &DocumentTemplate) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(template.file_name);
+    if !target.exists() {
+        super::persistence::atomic_write(&target, template.content.as_bytes())?;
+    }
+    Ok(target)
+}
+
 /// Templates matching `query` (case-insensitive substring on name and
 /// description) and, when `kind` is given, only that document kind. Shared
 /// by the picker view and Enter-accept so the visible list and the accepted
@@ -222,6 +237,31 @@ pub fn filter_templates(
 mod tests {
     use super::*;
     use crate::project::document::kind_for_title;
+
+    #[test]
+    fn scaffold_creates_folder_and_root_file() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let dir = temp.path().join("nested").join("paper");
+        let template = template_by_id("latex-paper").expect("builtin template");
+
+        let root = scaffold_project(&dir, template).expect("scaffold");
+
+        assert_eq!(root, dir.join("paper.tex"));
+        assert_eq!(std::fs::read_to_string(&root).unwrap(), template.content);
+    }
+
+    #[test]
+    fn scaffold_never_overwrites_an_existing_root_file() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let existing = temp.path().join("main.tex");
+        std::fs::write(&existing, "my thesis").expect("seed file");
+        let template = template_by_id("latex-article").expect("builtin template");
+
+        let root = scaffold_project(temp.path(), template).expect("scaffold");
+
+        assert_eq!(root, existing);
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "my thesis");
+    }
 
     #[test]
     fn template_ids_and_file_names_are_unique() {

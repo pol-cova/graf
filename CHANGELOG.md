@@ -7,6 +7,8 @@ Notable changes to graf are documented here.
 - Moved compiling, projects, and text logic into the `graf-core` library crate.
 - Removed the GPUI front end, including the `.graf` canvas editor, ahead of the native Swift app.
 - Removed the GPUI app bundle, profiling, and release scripts. Releases resume with the Swift app.
+- Added the `graf-ffi` UniFFI bridge and a script that packages it as `GrafCore.xcframework` with Swift bindings.
+- Moved project scaffolding from a template into `graf-core`.
 
 ## 1.0.0-alpha - 2026-08-24
 
