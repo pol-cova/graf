@@ -8,12 +8,13 @@ For substantial changes, open an issue first so the approach can be discussed. B
 
 ## Development setup
 
-You need stable Rust and the tools listed in the README. The Swift app will also need Xcode once it lands in `apple/`.
+You need Xcode 16 or later and stable Rust with the `aarch64-apple-darwin` target.
 
 ```bash
 git clone https://github.com/pol-cova/graf.git
 cd graf
-cargo test
+./scripts/build_core_xcframework.sh
+swift build --package-path apple
 ```
 
 ## Making changes
@@ -32,6 +33,7 @@ cargo fmt --check
 cargo check
 cargo clippy --all-targets -- -D warnings
 cargo test
+swift test --package-path apple
 ```
 
 ## Pull requests

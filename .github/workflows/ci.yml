@@ -1,4 +1,4 @@
-name: Core checks
+name: Checks
 
 on:
   push:
@@ -25,3 +25,16 @@ jobs:
       - run: cargo check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the core XCFramework and Swift bindings
+        run: GRAF_CORE_PROFILE=dev ./scripts/build_core_xcframework.sh
+      - run: swift build --package-path apple
+      - run: swift test --package-path apple

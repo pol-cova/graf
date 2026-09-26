@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>graf</string>
     <key>CFBundleExecutable</key>
-    <string>graf</string>
+    <string>Graf</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
@@ -19,7 +19,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>15.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
@@ -53,12 +53,12 @@
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>graf vector diagram</string>
+            <string>Project Folder</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
-            <key>CFBundleTypeExtensions</key>
+            <key>LSItemContentTypes</key>
             <array>
-                <string>graf</string>
+                <string>public.folder</string>
             </array>
         </dict>
     </array>

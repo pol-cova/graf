@@ -4,7 +4,7 @@
 
 Graf is a local-first technical writing workspace for macOS. The main interaction is `write -> compile -> preview -> revise`. The design goal is zero cognitive load: the writer thinks about the argument, and Graf handles syntax, build state, files, references, and saving.
 
-Graf is moving to a native Swift front end on top of a Rust core (ADR 0001). The GPUI front end has been removed, and the `graf-ffi` bridge is in place. Current work is Phase 2 of `.docs/Graf-swift-plan.md`: the Swift shell and editor, then compile and preview. Until the Swift app ships, there is no runnable app in the repository.
+Graf is a native Swift app (SwiftUI, AppKit, TextKit 2, PDFKit) on top of a Rust core, connected by a UniFFI bridge (ADR 0001). The migration from GPUI is complete. New work comes from the "After the first build" list in `.docs/Graf-swift-plan.md` and must pass the feature test in `.docs/Graf-design-principles.md`.
 
 ## Read before changing code
 
@@ -43,7 +43,7 @@ Graf is moving to a native Swift front end on top of a Rust core (ADR 0001). The
 
 - Follow `.docs/Graf-design-principles.md`. Every feature must remove a question from the writer's head, not add one.
 - The default screen shows the text and nothing else. Chrome appears when asked for and leaves on its own.
-- Use one accent color (hyperlink blue) only for links between source and output, and red only for the broken token and its hint.
+- Use one accent color (hyperlink blue) only for links between source and output, and red only for the broken token and its hint. Colors and fonts come from `apple/Sources/Graf/Theme.swift`, never literals in views.
 - Prefer system controls, SF Symbols, and standard macOS behavior (menus, text services, VoiceOver) over custom widgets.
 - Keep controls restrained, keyboard accessible, and visible at narrow window sizes.
 - Motion must explain where something came from or went. No decorative animation.
@@ -57,9 +57,22 @@ cargo fmt --check
 cargo check
 cargo clippy --all-targets -- -D warnings
 cargo test
+
+./scripts/build_core_xcframework.sh     # after any change to graf-core or graf-ffi
+swift build --package-path apple
+swift test --package-path apple
 ```
 
-Do not introduce warnings from Graf code. Swift build and test commands will be added here when the Xcode project lands.
+Do not introduce warnings from Graf code, in Rust or Swift. The Swift package builds in the Swift 6 language mode with strict concurrency checking.
+
+To see a change in the real app, build a debug bundle and open a project with it:
+
+```bash
+GRAF_CONFIGURATION=debug ./scripts/build_app.sh --no-dmg
+open -a target/debug/bundle/Graf.app path/to/project
+```
+
+Debug builds can render their own window to a PNG, which needs no screen-recording permission: pass `--env GRAF_SNAPSHOT=/tmp/shot.png` to `open`, plus optionally `GRAF_SNAPSHOT_DELAY`, `GRAF_SNAPSHOT_KEY=p` (presses ⌘P), and `GRAF_SNAPSHOT_TYPE=text` (types at the caret). Launch through `open`, not the bare executable: a path on the command line is not delivered as an open event.
 
 ## Architecture
 
@@ -69,8 +82,11 @@ Do not introduce warnings from Graf code. Swift build and test commands will be 
 - `crates/graf-core/src/util.rs`: app data paths and temporary directories
 - `crates/graf-ffi/`: UniFFI bridge with a coarse API for Swift (`Compiler`, outline, stats, bibliography, labels, lint, templates, project creation). Keep it a thin mapping layer; logic belongs in `graf-core`.
 - `crates/uniffi-bindgen-swift/`: build tool that generates the Swift bindings
-- `scripts/build_core_xcframework.sh`: builds `target/apple/GrafCore.xcframework` and the generated `target/apple/Sources/graf_ffi.swift`. Never commit generated bindings.
-- `apple/` (planned): the SwiftUI and AppKit application
+- `scripts/build_core_xcframework.sh`: builds `apple/Frameworks/GrafCore.xcframework` and the generated `apple/Sources/GrafCore/graf_ffi.swift`. Both are gitignored; never commit generated bindings.
+- `apple/Package.swift`: the Swift package. Open it in Xcode or build it with `swift build`.
+- `apple/Sources/GrafKit/`: front-end logic with no AppKit or SwiftUI (markup scanner, paragraphs, debouncer, recents). Unit tested in `apple/Tests/GrafKitTests/`.
+- `apple/Sources/Graf/`: the app. `Workspace` owns the text and the save-then-compile pipeline; `EditorView` is the TextKit 2 editor; `PreviewView` is PDFKit and the page peek; `Theme` holds every color and font.
+- `scripts/build_app.sh`: assembles `Graf.app` with the bundled Tectonic and Typst, then signs, packages the DMG, and notarizes when credentials are set.
 
 ## Platform notes
 
