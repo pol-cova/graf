@@ -85,7 +85,8 @@ Debug builds can render their own window to a PNG, which needs no screen-recordi
 - `scripts/build_core_xcframework.sh`: builds `apple/Frameworks/GrafCore.xcframework` and the generated `apple/Sources/GrafCore/graf_ffi.swift`. Both are gitignored; never commit generated bindings.
 - `apple/Package.swift`: the Swift package. Open it in Xcode or build it with `swift build`.
 - `apple/Sources/GrafKit/`: front-end logic with no AppKit or SwiftUI (markup scanner, paragraphs, debouncer, recents). Unit tested in `apple/Tests/GrafKitTests/`.
-- `apple/Sources/Graf/`: the app. `Workspace` owns the text and the save-then-compile pipeline; `EditorView` is the TextKit 2 editor; `PreviewView` is PDFKit and the page peek; `Theme` holds every color and font.
+- `apple/Sources/Graf/`: the app. `Workspace` owns the text, the recovery journal, and the save-then-compile pipeline; `EditorView` is the TextKit 2 editor, including completion; `PreviewView` is PDFKit and the page peek; `QuickOpenView` is Go to… (⌘K); `AppSettings` is the Settings window; `Theme` holds every color and font.
+- `apple/Sources/Graf/RootView.swift`: windows and tabs. Menu commands read the key window from `WindowRegistry`, because SwiftUI focused values do not reach the menu while an AppKit text view has focus. A file is never open in two windows: `WindowRegistry.focusWindow(showing:)` brings the existing tab forward.
 - `scripts/build_app.sh`: assembles `Graf.app` with the bundled Tectonic and Typst, then signs, packages the DMG, and notarizes when credentials are set.
 
 ## Platform notes

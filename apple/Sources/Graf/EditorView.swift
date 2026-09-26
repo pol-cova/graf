@@ -30,20 +30,70 @@ struct EditorView: NSViewRepresentable {
             focusMode: workspace.focusMode,
             diagnostics: workspace.diagnosticsForCurrentFile,
             fileURL: workspace.fileURL,
-            jump: workspace.jumpRequest
+            jump: workspace.jumpRequest,
+            proseSize: AppSettings.shared.proseSize
         )
     }
 }
 
 /// A text view that keeps its text in a readable column centered in the
-/// window, however wide the window gets.
+/// window, however wide the window gets, and finishes markup completions
+/// with the text the core supplies.
 final class WritingTextView: NSTextView {
+    /// The core's completions for the current partial, by label.
+    var pendingCompletions: [String: Completion] = [:]
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         let horizontal = max(32, (newSize.width - Theme.columnWidth) / 2)
         if abs(textContainerInset.width - horizontal) > 0.5 {
             textContainerInset = NSSize(width: horizontal, height: 72)
         }
+    }
+
+    /// The partial being completed: after `{` for keys, labels, and
+    /// environments, or from `\` for commands. Colons count as part of a
+    /// label (`fig:recall`), unlike the default word boundary.
+    override var rangeForUserCompletion: NSRange {
+        let text = string as NSString
+        let caret = selectedRange().location
+        var start = caret
+        while start > 0 {
+            let character = text.character(at: start - 1)
+            if character == 0x7B || character == 0x20 || character == 0x0A || character == 0x7D { break }
+            if character == 0x5C {
+                start -= 1
+                break
+            }
+            start -= 1
+        }
+        return NSRange(location: start, length: caret - start)
+    }
+
+    /// Browsing shows the label; the final choice inserts the core's text,
+    /// which closes the brace or expands the environment.
+    override func insertCompletion(_ word: String, forPartialWordRange charRange: NSRange, movement: Int, isFinal flag: Bool) {
+        guard flag, let completion = pendingCompletions[word] else {
+            super.insertCompletion(word, forPartialWordRange: charRange, movement: movement, isFinal: flag)
+            return
+        }
+        let typed = (string as NSString).substring(with: charRange)
+        super.insertCompletion(typed + completion.insertText, forPartialWordRange: charRange, movement: movement, isFinal: true)
+        pendingCompletions = [:]
+    }
+
+    /// Opening a project leaves the caret ready to type, which also makes
+    /// Find and completion work without a click first.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        DispatchQueue.main.async { window.makeFirstResponder(self) }
+    }
+
+    /// Tab inserts spaces, the width set in Settings.
+    override func insertTab(_ sender: Any?) {
+        let width = Int(AppSettings.shared.values.tabSize)
+        insertText(String(repeating: " ", count: max(width, 1)), replacementRange: selectedRange())
     }
 }
 
@@ -60,6 +110,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     /// so that load is not mistaken for an edit.
     private var isLoading = false
     private var handledJump: UUID?
+    private var proseSize = Theme.defaultProseSize
 
     init(workspace: Workspace) {
         self.workspace = workspace
@@ -77,7 +128,8 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         textView.backgroundColor = Theme.background
         textView.insertionPointColor = Theme.link
         textView.textColor = Theme.ink
-        textView.font = Theme.prose()
+        proseSize = AppSettings.shared.proseSize
+        textView.font = Theme.prose(size: proseSize)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -103,9 +155,22 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         )
     }
 
-    func update(focusMode: Bool, diagnostics: [GrafCore.Diagnostic], fileURL: URL, jump: (line: Int, id: UUID)?) {
+    func update(
+        focusMode: Bool,
+        diagnostics: [GrafCore.Diagnostic],
+        fileURL: URL,
+        jump: (line: Int, id: UUID)?,
+        proseSize: CGFloat
+    ) {
         if shownFile != fileURL {
             loadCurrentFile()
+        }
+        if proseSize != self.proseSize {
+            self.proseSize = proseSize
+            isLoading = true
+            restyle(NSRange(location: 0, length: workspace.textStorage.length))
+            isLoading = false
+            if !hintViews.isEmpty { showDiagnostics() }
         }
         if let jump, jump.id != handledJump {
             handledJump = jump.id
@@ -168,7 +233,52 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             // Errors wait their turn: hide hints while the writer types.
             clearHints()
             workspace.didEdit()
+            if delta > 0 { offerCompletionIfTriggered() }
         }
+    }
+
+    // MARK: Completion
+
+    /// Opening a citation, reference, or environment brings up the list
+    /// right away, since a key is what the writer needs next.
+    private static let completionTriggers = [
+        "\\cite{", "\\ref{", "\\eqref{", "\\autoref{", "\\pageref{", "\\begin{",
+    ]
+
+    /// Checks once the edit has settled and the caret sits after the typed
+    /// text; the range reported while the storage processes an edit is not
+    /// reliably the insertion point.
+    private func offerCompletionIfTriggered() {
+        guard workspace.syntax == .latex else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let textView = self.textView else { return }
+            let text = textView.string as NSString
+            let caret = textView.selectedRange().location
+            guard textView.selectedRange().length == 0, caret <= text.length else { return }
+            let start = text.lineRange(for: NSRange(location: caret, length: 0)).location
+            let before = text.substring(with: NSRange(location: start, length: caret - start))
+            guard Self.completionTriggers.contains(where: before.hasSuffix) else { return }
+            textView.complete(nil)
+        }
+    }
+
+    func textView(
+        _ textView: NSTextView,
+        completions words: [String],
+        forPartialWordRange charRange: NSRange,
+        indexOfSelectedItem index: UnsafeMutablePointer<Int>?
+    ) -> [String] {
+        guard workspace.syntax == .latex else { return [] }
+        let text = textView.string as NSString
+        let caret = textView.selectedRange().location
+        let lineStart = text.lineRange(for: NSRange(location: caret, length: 0)).location
+        let before = text.substring(with: NSRange(location: lineStart, length: caret - lineStart))
+        let completions = workspace.completer.complete(lineBeforeCaret: before)
+        (textView as? WritingTextView)?.pendingCompletions = Dictionary(
+            completions.map { ($0.label, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        index?.pointee = completions.isEmpty ? -1 : 0
+        return completions.map(\.label)
     }
 
     // MARK: NSTextViewDelegate
@@ -204,7 +314,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
 
         guard let syntax = workspace.syntax else {
             storage.setAttributes([
-                .font: Theme.markupFont(size: 14),
+                .font: Theme.markupFont(prose: proseSize, emphasis: true),
                 .foregroundColor: Theme.ink,
                 .paragraphStyle: Theme.plainParagraph,
             ], range: range)
@@ -212,23 +322,27 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         }
 
         storage.setAttributes([
-            .font: Theme.prose(),
+            .font: Theme.prose(size: proseSize),
             .foregroundColor: Theme.ink,
             .paragraphStyle: Theme.proseParagraph,
         ], range: range)
 
+        let markup = Theme.markupFont(prose: proseSize)
         for token in MarkupScanner.scan(storage.string as NSString, in: range, syntax: syntax) {
             switch token {
             case let .command(tokenRange), let .delimiter(tokenRange):
-                storage.addAttributes([.font: Theme.markupFont(), .foregroundColor: Theme.markup], range: tokenRange)
+                storage.addAttributes([.font: markup, .foregroundColor: Theme.markup], range: tokenRange)
             case let .comment(tokenRange):
-                storage.addAttributes([.font: Theme.markupFont(), .foregroundColor: Theme.comment], range: tokenRange)
+                storage.addAttributes([.font: markup, .foregroundColor: Theme.comment], range: tokenRange)
             case let .reference(tokenRange):
-                storage.addAttributes([.font: Theme.markupFont(size: 14), .foregroundColor: Theme.link], range: tokenRange)
+                storage.addAttributes([
+                    .font: Theme.markupFont(prose: proseSize, emphasis: true),
+                    .foregroundColor: Theme.link,
+                ], range: tokenRange)
             case let .math(tokenRange):
-                storage.addAttributes([.font: Theme.prose(italic: true)], range: tokenRange)
+                storage.addAttributes([.font: Theme.prose(size: proseSize, italic: true)], range: tokenRange)
             case let .heading(tokenRange, level):
-                storage.addAttributes([.font: Theme.headingFont(level: level)], range: tokenRange)
+                storage.addAttributes([.font: Theme.headingFont(level: level, prose: proseSize)], range: tokenRange)
             }
         }
     }

@@ -5,7 +5,8 @@ import Foundation
 /// pauses, never per keystroke.
 @MainActor
 public final class Debouncer {
-    public let delay: Duration
+    /// Applies to the next `schedule` call.
+    public var delay: Duration
     private var pending: Task<Void, Never>?
 
     public init(delay: Duration) {

@@ -14,7 +14,16 @@ struct GrafApp: App {
         .handlesExternalEvents(matching: ["*"])
         .defaultSize(width: 1180, height: 820)
         .windowToolbarStyle(.unifiedCompact(showsTitle: true))
-        .commands { GrafCommands() }
+        .commands {
+            // Find, Find and Replace, Find Next, Use Selection, Spelling:
+            // the system versions, routed to the text view's find bar.
+            TextEditingCommands()
+            GrafCommands()
+        }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
@@ -46,14 +55,23 @@ enum DebugSnapshot {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delay / 2))
             // Menu commands act on the key window, as they would for a user.
-            NSApp.activate()
+            // Cooperative activation yields to whatever app is in front, so
+            // this debug harness takes focus the old way.
+            NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first { $0.isVisible && $0.frame.width > 300 }?.makeKeyAndOrderFront(nil)
             try? await Task.sleep(for: .milliseconds(300))
             if let text = environment["GRAF_SNAPSHOT_TYPE"] {
                 type(text)
             }
-            if let key = environment["GRAF_SNAPSHOT_KEY"] {
-                pressCommand(key)
+            if let keys = environment["GRAF_SNAPSHOT_KEY"] {
+                // Space-separated shortcuts run in order, a beat apart.
+                for shortcut in keys.split(separator: " ") {
+                    press(String(shortcut))
+                    try? await Task.sleep(for: .milliseconds(400))
+                }
+            }
+            if let text = environment["GRAF_SNAPSHOT_TYPE_AFTER"] {
+                type(text)
             }
             try? await Task.sleep(for: .seconds(delay / 2))
             capture(to: URL(fileURLWithPath: path))
@@ -61,19 +79,29 @@ enum DebugSnapshot {
         }
     }
 
-    /// Presses ⌘ plus `key` through the main menu, exactly as the keyboard
-    /// shortcut would.
-    private static func pressCommand(_ key: String) {
-        guard let window = NSApp.keyWindow,
-              let event = NSEvent.keyEvent(
-                  with: .keyDown, location: .zero, modifierFlags: .command,
-                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                  context: nil, characters: key, charactersIgnoringModifiers: key,
-                  isARepeat: false, keyCode: 0
-              )
-        else { return }
+    /// Presses a shortcut such as `p`, `shift+cmd+f`, or `opt+cmd+f` through
+    /// the main menu, exactly as the keyboard would. A bare key means ⌘key.
+    private static func press(_ shortcut: String) {
+        var parts = shortcut.split(separator: "+").map(String.init)
+        guard let key = parts.popLast(), let window = NSApp.keyWindow else { return }
+        var flags: NSEvent.ModifierFlags = parts.isEmpty ? .command : []
+        for part in parts {
+            switch part {
+            case "cmd": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "opt": flags.insert(.option)
+            case "ctrl": flags.insert(.control)
+            default: break
+            }
+        }
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: flags,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: key, charactersIgnoringModifiers: key,
+            isARepeat: false, keyCode: 0
+        ) else { return }
         let handled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
-        FileHandle.standardError.write(Data("snapshot: ⌘\(key) handled=\(handled)\n".utf8))
+        FileHandle.standardError.write(Data("snapshot: \(shortcut) handled=\(handled)\n".utf8))
     }
 
     private static func type(_ text: String) {
@@ -84,22 +112,29 @@ enum DebugSnapshot {
         textView.insertText(text, replacementRange: textView.selectedRange())
     }
 
+    /// Writes the main window to `url`, and every other visible window
+    /// (Settings, a completion list) next to it as `name-1.png`, `name-2.png`.
     private static func capture(to url: URL) {
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 300 }) else {
-            FileHandle.standardError.write(Data("snapshot: no visible window among \(NSApp.windows.map(\.frame))\n".utf8))
+        let windows = NSApp.windows
+            .filter { $0.isVisible && $0.frame.width > 40 }
+            .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
+        guard !windows.isEmpty else {
+            FileHandle.standardError.write(Data("snapshot: no visible window\n".utf8))
             return
         }
-        guard let view = window.contentView?.superview ?? window.contentView,
-              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-        else {
-            FileHandle.standardError.write(Data("snapshot: could not allocate a bitmap\n".utf8))
-            return
-        }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        do {
-            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
-        } catch {
-            FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8))
+        for (index, window) in windows.enumerated() {
+            let name = url.deletingPathExtension().lastPathComponent
+            let target = index == 0 ? url : url.deletingLastPathComponent().appending(path: "\(name)-\(index).png")
+            guard let view = window.contentView?.superview ?? window.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            do {
+                try bitmap.representation(using: .png, properties: [:])?.write(to: target)
+                FileHandle.standardError.write(Data("snapshot: \(target.lastPathComponent) \(String(describing: Swift.type(of: window))) \(Int(window.frame.width))x\(Int(window.frame.height))\n".utf8))
+            } catch {
+                FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8))
+            }
         }
     }
 }
@@ -128,6 +163,9 @@ struct GrafCommands: Commands {
                 .keyboardShortcut("n")
             Button("Open…") { window?.chooseAndOpen() }
                 .keyboardShortcut("o")
+            Divider()
+            Button("Go to…") { window?.quickOpenRequest += 1 }
+                .keyboardShortcut("k")
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save and Compile") {

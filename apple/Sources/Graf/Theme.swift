@@ -29,10 +29,11 @@ enum Theme {
 
     // MARK: Type
 
-    static let proseSize: CGFloat = 19
+    /// Prose size when no setting applies (the setting defaults to this too).
+    static let defaultProseSize: CGFloat = 19
     static let columnWidth: CGFloat = 660
 
-    static func prose(size: CGFloat = proseSize, weight: NSFont.Weight = .regular, italic: Bool = false) -> NSFont {
+    static func prose(size: CGFloat, weight: NSFont.Weight = .regular, italic: Bool = false) -> NSFont {
         var descriptor = NSFont.systemFont(ofSize: size, weight: weight).fontDescriptor
         descriptor = descriptor.withDesign(.serif) ?? descriptor
         if italic {
@@ -41,15 +42,18 @@ enum Theme {
         return NSFont(descriptor: descriptor, size: size) ?? .systemFont(ofSize: size, weight: weight)
     }
 
-    static func markupFont(size: CGFloat = 13) -> NSFont {
-        .monospacedSystemFont(ofSize: size, weight: .regular)
+    /// Markup is set smaller than prose so it steps back, scaled from the
+    /// prose size (13pt beside 19pt prose).
+    static func markupFont(prose: CGFloat, emphasis: Bool = false) -> NSFont {
+        .monospacedSystemFont(ofSize: (prose * (emphasis ? 0.74 : 0.68)).rounded(), weight: .regular)
     }
 
-    /// Heading sizes by level: title/chapter, section, subsection, deeper.
-    static func headingFont(level: Int) -> NSFont {
-        let sizes: [CGFloat] = [30, 26, 22]
-        let size = level < sizes.count ? sizes[level] : proseSize
-        return prose(size: size, weight: .semibold)
+    /// Heading sizes by level, relative to prose: title or chapter, section,
+    /// subsection, then prose size.
+    static func headingFont(level: Int, prose: CGFloat) -> NSFont {
+        let scales: [CGFloat] = [1.58, 1.37, 1.16]
+        let size = level < scales.count ? prose * scales[level] : prose
+        return self.prose(size: size.rounded(), weight: .semibold)
     }
 
     // Built per use: NSParagraphStyle is not Sendable, so it cannot be a

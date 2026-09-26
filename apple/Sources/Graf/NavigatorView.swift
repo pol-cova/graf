@@ -1,3 +1,4 @@
+import AppKit
 import GrafCore
 import SwiftUI
 
@@ -5,6 +6,7 @@ import SwiftUI
 /// Hidden by default; the writer asks for it.
 struct NavigatorView: View {
     let workspace: Workspace
+    @Environment(\.openWindow) private var openWindow
     @State private var filter = ""
     @State private var filesExpanded = false
 
@@ -37,14 +39,23 @@ struct NavigatorView: View {
 
             Section("Files", isExpanded: $filesExpanded) {
                 ForEach(visibleFiles, id: \.path) { file in
+                    let url = URL(fileURLWithPath: file.path)
                     Button {
-                        Task { await workspace.openFile(URL(fileURLWithPath: file.path)) }
+                        // A file open in another tab is brought forward, never
+                        // opened twice.
+                        guard !WindowRegistry.shared.focusWindow(showing: url) else { return }
+                        Task { await workspace.openFile(url) }
                     } label: {
                         Label(file.relative, systemImage: icon(for: file.kind))
                             .lineLimit(1)
                             .foregroundStyle(isCurrent(file) ? Color.grafLink : .primary)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Open in New Tab") { openInNewTab(url, using: openWindow) }
+                            .disabled(isCurrent(file))
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    }
                 }
             }
         }

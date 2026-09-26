@@ -15,13 +15,16 @@ final class WindowModel {
     var sidebar: NavigationSplitViewVisibility = .detailOnly
     var isOpening = false
     var openError: String?
+    /// Bumped by Go to… (⌘K); the workspace view shows quick open.
+    var quickOpenRequest = 0
 
     func open(_ url: URL) async {
         workspace?.saveBeforeQuit()
         isOpening = true
         defer { isOpening = false }
         do {
-            workspace = try await Workspace.open(url)
+            let root = WindowRegistry.shared.projectRoot(containing: url)
+            workspace = try await Workspace.open(url, projectRoot: root)
             openError = nil
             WindowRegistry.shared.windowContentChanged()
         } catch {
@@ -53,6 +56,24 @@ final class WindowRegistry: ObservableObject {
     static let shared = WindowRegistry()
     @Published private(set) var keyModel: WindowModel?
     private var models: [ObjectIdentifier: WindowModel] = [:]
+    private var windows: [ObjectIdentifier: NSWindow] = [:]
+
+    /// The window already editing `url`, so a file is never open twice.
+    /// Two editors on one file would each save over the other.
+    func window(showing url: URL) -> NSWindow? {
+        let target = url.standardizedFileURL
+        return models.first { _, model in
+            model.workspace?.fileURL.standardizedFileURL == target
+        }.flatMap { windows[$0.key] }
+    }
+
+    /// Brings the tab or window editing `url` forward, if there is one.
+    @discardableResult
+    func focusWindow(showing url: URL) -> Bool {
+        guard let window = window(showing: url) else { return false }
+        window.makeKeyAndOrderFront(nil)
+        return true
+    }
 
     /// Refreshes menu state after a window opens or closes a project.
     func windowContentChanged() {
@@ -76,7 +97,28 @@ final class WindowRegistry: ObservableObject {
 
     func register(_ model: WindowModel, for window: NSWindow) {
         models[ObjectIdentifier(window)] = model
+        windows[ObjectIdentifier(window)] = window
+        // Project windows share one native tab bar. The tabbing mode only
+        // applies to windows shown later, so a window opened for a new tab
+        // joins its host explicitly.
+        window.tabbingIdentifier = "graf.project"
+        window.tabbingMode = .preferred
+        if let host = OpenRequests.shared.takeTabHost(for: window), window.tabbedWindows == nil {
+            host.addTabbedWindow(window, ordered: .above)
+            window.makeKeyAndOrderFront(nil)
+        }
         if window.isKeyWindow { keyModel = model }
+    }
+
+    /// The root of an open project that contains `url`, so a file from that
+    /// project opens in it instead of becoming a project of its own folder.
+    func projectRoot(containing url: URL) -> URL? {
+        let path = url.standardizedFileURL.path
+        return models.values
+            .compactMap { $0.workspace?.project.root }
+            .filter { path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }
+            .max(by: { $0.count < $1.count })
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
     private func windowBecameKey(_ window: NSWindow?) {
@@ -87,6 +129,7 @@ final class WindowRegistry: ObservableObject {
     private func windowWillClose(_ window: NSWindow?) {
         guard let window else { return }
         let model = models.removeValue(forKey: ObjectIdentifier(window))
+        windows.removeValue(forKey: ObjectIdentifier(window))
         model?.workspace?.saveBeforeQuit()
         if keyModel === model { keyModel = nil }
     }
@@ -120,6 +163,8 @@ private struct WindowReader: NSViewRepresentable {
 final class OpenRequests {
     static let shared = OpenRequests()
     private(set) var pending: [URL] = []
+    /// The window the next new window should join as a tab.
+    @ObservationIgnored private weak var tabHost: NSWindow?
 
     func enqueue(_ urls: [URL]) {
         pending.append(contentsOf: urls.map(\.standardizedFileURL))
@@ -128,6 +173,26 @@ final class OpenRequests {
     func take() -> URL? {
         pending.isEmpty ? nil : pending.removeFirst()
     }
+
+    func joinNextWindow(to host: NSWindow?) {
+        tabHost = host
+    }
+
+    /// Hands out the tab host once, to the window created for the request.
+    func takeTabHost(for window: NSWindow) -> NSWindow? {
+        guard let host = tabHost, host !== window else { return nil }
+        tabHost = nil
+        return host
+    }
+}
+
+/// Opens `url` in its own tab, or brings forward the tab already showing it.
+@MainActor
+func openInNewTab(_ url: URL, using openWindow: OpenWindowAction) {
+    guard !WindowRegistry.shared.focusWindow(showing: url) else { return }
+    OpenRequests.shared.joinNextWindow(to: NSApp.keyWindow ?? NSApp.mainWindow)
+    OpenRequests.shared.enqueue([url])
+    openWindow(id: "project")
 }
 
 struct RootView: View {
@@ -138,7 +203,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if let workspace = model.workspace {
-                WorkspaceView(workspace: workspace, sidebar: $model.sidebar)
+                WorkspaceView(workspace: workspace, sidebar: $model.sidebar, quickOpenRequest: model.quickOpenRequest)
                     .id(ObjectIdentifier(workspace))
             } else {
                 LaunchView(model: model)
@@ -157,18 +222,20 @@ struct RootView: View {
             model.workspace?.saveBeforeQuit()
         }
         .onOpenURL { url in
-            requests.enqueue([url])
+            if model.workspace == nil {
+                requests.enqueue([url])
+            } else {
+                // This window is busy: the file gets its own tab.
+                openInNewTab(url, using: openWindow)
+            }
         }
         // Prefer an empty window for new requests; any window may accept.
         .handlesExternalEvents(preferring: model.workspace == nil ? ["*"] : [], allowing: ["*"])
         .onChange(of: requests.pending, initial: true) {
-            guard !requests.pending.isEmpty else { return }
-            if model.workspace == nil, !model.isOpening, let url = requests.take() {
-                Task { await model.open(url) }
-            } else if model.workspace != nil {
-                // This window is busy; a new one will take the request.
-                openWindow(id: "project")
-            }
+            // Only an empty window takes a waiting request.
+            guard model.workspace == nil, !model.isOpening, let url = requests.take() else { return }
+            if WindowRegistry.shared.focusWindow(showing: url) { return }
+            Task { await model.open(url) }
         }
     }
 }

@@ -5,6 +5,9 @@ import SwiftUI
 struct WorkspaceView: View {
     @Bindable var workspace: Workspace
     @Binding var sidebar: NavigationSplitViewVisibility
+    /// Bumped by the Go to… command (⌘K) to show the quick open bar.
+    let quickOpenRequest: Int
+    @State private var quickOpen = false
     @Namespace private var page
 
     var body: some View {
@@ -43,6 +46,20 @@ struct WorkspaceView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if !workspace.recovered.isEmpty {
+                    RecoveryBar(workspace: workspace)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .overlay {
+                if quickOpen {
+                    QuickOpenView(workspace: workspace, isPresented: $quickOpen)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                }
+            }
+            .animation(.easeOut(duration: 0.12), value: quickOpen)
+            .onChange(of: quickOpenRequest) { quickOpen = true }
     }
 
     private var footer: some View {
@@ -109,5 +126,41 @@ struct WorkspaceView: View {
         case .compiling: .grafLink.opacity(0.5)
         case .idle, .edited: Color(nsColor: .tertiaryLabelColor)
         }
+    }
+}
+
+/// One quiet line offering unsaved text a previous session left behind.
+private struct RecoveryBar: View {
+    let workspace: Workspace
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(Color.grafLink)
+            Text(message)
+                .lineLimit(1)
+            Spacer()
+            Button("Discard") { withAnimation { workspace.discardRecovered() } }
+                .buttonStyle(.borderless)
+            Button("Restore") { Task { await workspace.restoreRecovered() } }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var message: String {
+        let changes = workspace.recovered
+        guard let newest = changes.max(by: { $0.timestamp < $1.timestamp }) else { return "" }
+        let time = Date(timeIntervalSince1970: TimeInterval(newest.timestamp))
+            .formatted(date: .omitted, time: .shortened)
+        if changes.count == 1 {
+            return "Recovered unsaved changes to \(URL(fileURLWithPath: newest.path).lastPathComponent) from \(time)"
+        }
+        return "Recovered unsaved changes to \(changes.count) files, latest from \(time)"
     }
 }
