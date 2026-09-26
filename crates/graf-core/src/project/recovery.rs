@@ -174,11 +174,96 @@ impl RecoveryJournal {
         }
         Ok(())
     }
+
+    /// The recovery folder of a project: `.graf/recovery` under its root.
+    pub fn project_dir(project_root: &Path) -> PathBuf {
+        project_root.join(".graf").join("recovery")
+    }
+
+    /// Records unsaved `content` for `path`, replacing any older entry for
+    /// the same file and keeping entries other windows wrote. Several
+    /// windows can share one project without overwriting each other.
+    pub fn record(dir: &Path, path: &Path, content: &str) -> std::io::Result<()> {
+        let mut journal = Self::load_from_dir(dir).unwrap_or_default();
+        journal
+            .entries
+            .retain(|entry| entry.path.as_deref() != Some(path));
+        let title = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        journal
+            .entries
+            .push(RecoveryEntry::new(title, Some(path.to_path_buf()), content));
+        journal.save_to_dir(dir).map(|_| ())
+    }
+
+    /// Drops the entry for `path` once it is safely saved. Removes the
+    /// journal file when nothing is left to recover.
+    pub fn forget(dir: &Path, path: &Path) -> std::io::Result<()> {
+        let Some(mut journal) = Self::load_from_dir(dir) else {
+            return Ok(());
+        };
+        let before = journal.entries.len();
+        journal
+            .entries
+            .retain(|entry| entry.path.as_deref() != Some(path));
+        if journal.entries.is_empty() {
+            Self::clear_dir(dir)
+        } else if journal.entries.len() != before {
+            journal.save_to_dir(dir).map(|_| ())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_replaces_the_entry_for_the_same_file_and_keeps_others() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = RecoveryJournal::project_dir(temp.path());
+        let main = temp.path().join("main.tex");
+        let intro = temp.path().join("intro.tex");
+
+        RecoveryJournal::record(&dir, &main, "first").unwrap();
+        RecoveryJournal::record(&dir, &intro, "intro draft").unwrap();
+        RecoveryJournal::record(&dir, &main, "second").unwrap();
+
+        let journal = RecoveryJournal::load_from_dir(&dir).unwrap();
+        assert_eq!(journal.entries.len(), 2);
+        let main_entry = journal
+            .entries
+            .iter()
+            .find(|entry| entry.path.as_deref() == Some(main.as_path()))
+            .unwrap();
+        assert_eq!(main_entry.content, "second");
+        assert_eq!(main_entry.title, "main.tex");
+    }
+
+    #[test]
+    fn forget_removes_one_entry_then_the_journal() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = RecoveryJournal::project_dir(temp.path());
+        let main = temp.path().join("main.tex");
+        let intro = temp.path().join("intro.tex");
+        RecoveryJournal::record(&dir, &main, "a").unwrap();
+        RecoveryJournal::record(&dir, &intro, "b").unwrap();
+
+        RecoveryJournal::forget(&dir, &main).unwrap();
+        assert_eq!(
+            RecoveryJournal::load_from_dir(&dir).unwrap().entries.len(),
+            1
+        );
+
+        RecoveryJournal::forget(&dir, &intro).unwrap();
+        assert!(RecoveryJournal::load_from_dir(&dir).is_none());
+        // Forgetting with no journal at all is not an error.
+        RecoveryJournal::forget(&dir, &intro).unwrap();
+    }
 
     #[test]
     fn restore_target_prefers_existing_files() {

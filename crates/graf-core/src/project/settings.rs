@@ -195,6 +195,12 @@ pub struct EditorSettings {
     #[serde(alias = "auto_compile_on_save")]
     pub auto_compile: bool,
     pub compile_debounce_ms: u64,
+    /// Size of prose in the writing column. Markup scales with it.
+    pub prose_font_size: f32,
+    /// Whether new windows dim everything but the paragraph being written.
+    pub focus_mode: bool,
+    /// Whether citations include the local Zotero library export.
+    pub use_zotero: bool,
 }
 
 impl Default for EditorSettings {
@@ -204,7 +210,11 @@ impl Default for EditorSettings {
             tab_size: 2,
             line_numbers: true,
             auto_compile: true,
-            compile_debounce_ms: 300,
+            // Builds run when the writer pauses, not between keystrokes.
+            compile_debounce_ms: 800,
+            prose_font_size: 19.0,
+            focus_mode: true,
+            use_zotero: true,
         }
     }
 }

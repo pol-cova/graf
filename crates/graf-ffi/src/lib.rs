@@ -15,7 +15,13 @@ use graf_core::compiler::diagnostics::{self, Diagnostic as CoreDiagnostic};
 use graf_core::compiler::engine::{CompileRequest, DocumentEngine};
 use graf_core::compiler::tectonic::TectonicEngine;
 use graf_core::compiler::typst::TypstEngine;
-use graf_core::project::{bibtex, linter, outline, persistence, stats, templates, tree};
+use graf_core::project::recovery::RecoveryJournal;
+use graf_core::project::settings::GrafSettings;
+use graf_core::project::state::ProjectState;
+use graf_core::project::{
+    bibtex, linter, outline, persistence, stats, templates, text_search, tree, zotero,
+};
+use graf_core::text::completion;
 
 uniffi::setup_scaffolding!();
 
@@ -483,9 +489,276 @@ pub fn save_text(path: String, text: String) -> Result<(), FileError> {
     persistence::atomic_write(&path, text.as_bytes()).map_err(|error| FileError::io(&path, error))
 }
 
+// MARK: - Settings
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Settings {
+    pub prose_font_size: f32,
+    pub tab_size: u32,
+    pub focus_mode: bool,
+    pub auto_compile: bool,
+    pub compile_delay_ms: u64,
+    pub use_zotero: bool,
+}
+
+/// Loads the user's settings, or the defaults when there are none yet.
+#[uniffi::export]
+pub fn load_settings() -> Settings {
+    let settings = GrafSettings::load_default();
+    let editor = settings.editor;
+    Settings {
+        prose_font_size: editor.prose_font_size,
+        tab_size: u32::try_from(editor.tab_size).unwrap_or(u32::MAX),
+        focus_mode: editor.focus_mode,
+        auto_compile: editor.auto_compile,
+        compile_delay_ms: editor.compile_debounce_ms,
+        use_zotero: editor.use_zotero,
+    }
+}
+
+/// Saves `settings` atomically, keeping fields the Swift app does not edit.
+#[uniffi::export]
+pub fn save_settings(settings: Settings) -> Result<(), FileError> {
+    let Some(path) = GrafSettings::default_path() else {
+        return Err(FileError::Io {
+            path: "settings".to_string(),
+            message: "no settings folder is available".to_string(),
+        });
+    };
+    let mut stored = GrafSettings::load_from_path(&path);
+    stored.editor.prose_font_size = settings.prose_font_size;
+    stored.editor.tab_size = settings.tab_size as usize;
+    stored.editor.focus_mode = settings.focus_mode;
+    stored.editor.auto_compile = settings.auto_compile;
+    stored.editor.compile_debounce_ms = settings.compile_delay_ms;
+    stored.editor.use_zotero = settings.use_zotero;
+    stored
+        .save_to_path(&path)
+        .map_err(|error| FileError::io(&path, error))
+}
+
+// MARK: - Crash recovery
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RecoveredChange {
+    pub path: String,
+    pub content: String,
+    /// Seconds since 1970 when the change was journaled.
+    pub timestamp: u64,
+}
+
+/// Unsaved changes from an earlier session that differ from what is on
+/// disk. Entries whose text already matches the file are dropped.
+#[uniffi::export]
+pub fn pending_recovery(project_root: String) -> Vec<RecoveredChange> {
+    let dir = RecoveryJournal::project_dir(Path::new(&project_root));
+    let Some(journal) = RecoveryJournal::load_from_dir(&dir) else {
+        return Vec::new();
+    };
+    journal
+        .entries
+        .into_iter()
+        .filter_map(|entry| {
+            let path = entry.path?;
+            let on_disk = std::fs::read_to_string(&path).unwrap_or_default();
+            (on_disk != entry.content).then(|| RecoveredChange {
+                path: path.display().to_string(),
+                content: entry.content,
+                timestamp: entry.timestamp,
+            })
+        })
+        .collect()
+}
+
+/// Journals unsaved text for `path` so a crash cannot lose it.
+#[uniffi::export]
+pub fn record_unsaved(
+    project_root: String,
+    path: String,
+    content: String,
+) -> Result<(), FileError> {
+    let dir = RecoveryJournal::project_dir(Path::new(&project_root));
+    RecoveryJournal::record(&dir, Path::new(&path), &content)
+        .map_err(|error| FileError::io(&dir, error))
+}
+
+/// Drops the journal entry for `path` once it is saved or discarded.
+#[uniffi::export]
+pub fn forget_unsaved(project_root: String, path: String) -> Result<(), FileError> {
+    let dir = RecoveryJournal::project_dir(Path::new(&project_root));
+    RecoveryJournal::forget(&dir, Path::new(&path)).map_err(|error| FileError::io(&dir, error))
+}
+
+// MARK: - Completion
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CompletionKind {
+    Citation,
+    Reference,
+    Environment,
+    Command,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Completion {
+    /// What the list shows, such as a citation key.
+    pub label: String,
+    /// Secondary text: title, author, and year for a citation.
+    pub detail: String,
+    /// Text to insert at the caret to finish the item, closing brace included.
+    pub insert_text: String,
+    pub kind: CompletionKind,
+}
+
+/// Citation keys, labels, environments, and commands for one project.
+#[derive(uniffi::Object)]
+pub struct Completer {
+    state: Mutex<ProjectState>,
+}
+
+#[uniffi::export]
+impl Completer {
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(ProjectState::new()),
+        })
+    }
+
+    /// Reloads the project's `.bib` files and, when asked, the local Zotero
+    /// export. Blocks on the file system; call off the main actor.
+    pub fn reload_bibliography(&self, project_root: String, use_zotero: bool) {
+        let mut state = ProjectState::new();
+        state.reload_bib_files(Path::new(&project_root));
+        if use_zotero {
+            state.add_zotero_library(&zotero::ZoteroLibrary::scan_local_storage());
+        }
+        lock(&self.state).bib_index = state.bib_index;
+    }
+
+    /// Reloads `\label` keys from every LaTeX file in the project.
+    pub fn reload_labels(&self, project_root: String) {
+        let mut state = ProjectState::new();
+        state.reload_project_labels(Path::new(&project_root));
+        lock(&self.state).label_index = state.label_index;
+    }
+
+    /// Completions for the text of the current line up to the caret.
+    pub fn complete(&self, line_before_caret: String) -> Vec<Completion> {
+        let state = lock(&self.state);
+        completion::compute_completions(
+            &line_before_caret,
+            line_before_caret.len(),
+            &state.bib_index,
+            &state.label_index,
+        )
+        .into_iter()
+        .map(|item| Completion {
+            label: item.label,
+            detail: item.detail,
+            insert_text: item.insert_text,
+            kind: match item.kind {
+                completion::CompletionKind::Citation => CompletionKind::Citation,
+                completion::CompletionKind::Reference => CompletionKind::Reference,
+                completion::CompletionKind::Environment => CompletionKind::Environment,
+                completion::CompletionKind::Command => CompletionKind::Command,
+            },
+        })
+        .collect()
+    }
+}
+
+// MARK: - Quick open
+
+/// Indexes of `candidates` that match `query`, case-insensitively, in their
+/// original order. An empty query matches everything.
+#[uniffi::export]
+pub fn filter_matches(query: String, candidates: Vec<String>) -> Vec<u32> {
+    let query = text_search::fold(query.trim());
+    candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| text_search::matches(&text_search::fold(candidate), &query))
+        .map(|(index, _)| index as u32)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completer_offers_citations_and_project_labels() {
+        let temp = std::env::temp_dir().join(format!("graf-ffi-complete-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).expect("project folder");
+        std::fs::write(
+            temp.join("refs.bib"),
+            "@article{rayner2016, title={So much to read}, author={Rayner}, year={2016}}",
+        )
+        .expect("bib");
+        std::fs::write(temp.join("main.tex"), "\\label{fig:recall}").expect("tex");
+
+        let completer = Completer::new();
+        completer.reload_bibliography(temp.display().to_string(), false);
+        completer.reload_labels(temp.display().to_string());
+
+        let citations = completer.complete("as shown by \\cite{ray".to_string());
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].label, "rayner2016");
+        assert_eq!(citations[0].insert_text, "ner2016}");
+        assert_eq!(citations[0].kind, CompletionKind::Citation);
+
+        let references = completer.complete("see \\ref{fig".to_string());
+        assert_eq!(references[0].label, "fig:recall");
+        std::fs::remove_dir_all(&temp).expect("clean up");
+    }
+
+    #[test]
+    fn recovery_reports_only_changes_that_differ_from_disk() {
+        let temp = std::env::temp_dir().join(format!("graf-ffi-recovery-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).expect("project folder");
+        let root = temp.display().to_string();
+        let main = temp.join("main.tex");
+        let saved = temp.join("saved.tex");
+        std::fs::write(&main, "on disk").expect("main");
+        std::fs::write(&saved, "same").expect("saved");
+
+        record_unsaved(
+            root.clone(),
+            main.display().to_string(),
+            "unsaved words".to_string(),
+        )
+        .unwrap();
+        record_unsaved(
+            root.clone(),
+            saved.display().to_string(),
+            "same".to_string(),
+        )
+        .unwrap();
+
+        let pending = pending_recovery(root.clone());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].content, "unsaved words");
+
+        forget_unsaved(root.clone(), main.display().to_string()).unwrap();
+        forget_unsaved(root.clone(), saved.display().to_string()).unwrap();
+        assert!(pending_recovery(root).is_empty());
+        std::fs::remove_dir_all(&temp).expect("clean up");
+    }
+
+    #[test]
+    fn filter_matches_folds_case_and_keeps_order() {
+        let candidates = vec![
+            "sections/Method.tex".to_string(),
+            "main.tex".to_string(),
+            "figures/method-diagram.pdf".to_string(),
+        ];
+        assert_eq!(
+            filter_matches("METHOD".to_string(), candidates.clone()),
+            [0, 2]
+        );
+        assert_eq!(filter_matches("  ".to_string(), candidates), [0, 1, 2]);
+    }
 
     #[test]
     fn open_project_finds_the_root_document_and_files() {
