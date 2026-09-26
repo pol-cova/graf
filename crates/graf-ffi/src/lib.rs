@@ -15,7 +15,7 @@ use graf_core::compiler::diagnostics::{self, Diagnostic as CoreDiagnostic};
 use graf_core::compiler::engine::{CompileRequest, DocumentEngine};
 use graf_core::compiler::tectonic::TectonicEngine;
 use graf_core::compiler::typst::TypstEngine;
-use graf_core::project::{bibtex, linter, outline, stats, templates};
+use graf_core::project::{bibtex, linter, outline, persistence, stats, templates, tree};
 
 uniffi::setup_scaffolding!();
 
@@ -399,9 +399,123 @@ pub fn create_project(directory: String, template_id: String) -> Result<String, 
         .map_err(|error| FileError::io(&directory, error))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FileKind {
+    Latex,
+    Typst,
+    Bibtex,
+    Style,
+    Image,
+    Pdf,
+    Other,
+}
+
+impl From<tree::FileKind> for FileKind {
+    fn from(kind: tree::FileKind) -> Self {
+        match kind {
+            tree::FileKind::Latex => Self::Latex,
+            tree::FileKind::Typst => Self::Typst,
+            tree::FileKind::Bibtex => Self::Bibtex,
+            tree::FileKind::Style => Self::Style,
+            tree::FileKind::Image => Self::Image,
+            tree::FileKind::Pdf => Self::Pdf,
+            tree::FileKind::Other => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProjectFile {
+    /// Path relative to the project root, for display.
+    pub relative: String,
+    pub path: String,
+    pub kind: FileKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProjectInfo {
+    pub root: String,
+    pub name: String,
+    /// The document that drives compiles (`main.tex`, `main.typ`, or the
+    /// first file that declares a document), if the folder has one.
+    pub root_document: Option<String>,
+    /// Every project file in tree order, skipping hidden and build output.
+    pub files: Vec<ProjectFile>,
+}
+
+/// Scans a project folder. Blocks on the file system; call off the main actor.
+#[uniffi::export]
+pub fn open_project(directory: String) -> ProjectInfo {
+    let project = tree::ProjectTree::scan(PathBuf::from(&directory));
+    let name = project
+        .root_path()
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| directory.clone());
+    ProjectInfo {
+        root: project.root_path().display().to_string(),
+        name,
+        root_document: project
+            .root_document()
+            .map(|path| path.display().to_string()),
+        files: project
+            .quick_open_matches("", usize::MAX)
+            .into_iter()
+            .map(|entry| ProjectFile {
+                relative: entry.relative.clone(),
+                path: entry.path.display().to_string(),
+                kind: entry.kind.into(),
+            })
+            .collect(),
+    }
+}
+
+#[uniffi::export]
+pub fn read_text(path: String) -> Result<String, FileError> {
+    let path = PathBuf::from(path);
+    std::fs::read_to_string(&path).map_err(|error| FileError::io(&path, error))
+}
+
+/// Saves `text` atomically: a crash mid-save never leaves a half-written file.
+#[uniffi::export]
+pub fn save_text(path: String, text: String) -> Result<(), FileError> {
+    let path = PathBuf::from(path);
+    persistence::atomic_write(&path, text.as_bytes()).map_err(|error| FileError::io(&path, error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_project_finds_the_root_document_and_files() {
+        let temp = std::env::temp_dir().join(format!("graf-ffi-open-{}", std::process::id()));
+        std::fs::create_dir_all(temp.join("sections")).expect("project folder");
+        save_text(
+            temp.join("main.tex").display().to_string(),
+            "\\documentclass{article}".to_string(),
+        )
+        .expect("write main");
+        save_text(
+            temp.join("sections/intro.tex").display().to_string(),
+            "Intro".to_string(),
+        )
+        .expect("write section");
+
+        let project = open_project(temp.display().to_string());
+
+        assert_eq!(
+            project.root_document.as_deref(),
+            Some(temp.join("main.tex").display().to_string().as_str())
+        );
+        let relative: Vec<_> = project.files.iter().map(|f| f.relative.as_str()).collect();
+        assert_eq!(relative, ["sections/intro.tex", "main.tex"]);
+        assert_eq!(
+            read_text(temp.join("sections/intro.tex").display().to_string()).unwrap(),
+            "Intro"
+        );
+        std::fs::remove_dir_all(&temp).expect("clean up");
+    }
 
     #[test]
     fn outline_reports_latex_sections() {

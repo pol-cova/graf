@@ -1,7 +1,9 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
+/// Writes `contents` to a temporary file beside `path`, syncs it, and renames
+/// it into place, so a crash never leaves a half-written document.
+pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(contents)?;

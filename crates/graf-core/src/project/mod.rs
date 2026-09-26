@@ -3,7 +3,7 @@ pub mod document;
 pub mod kinds;
 pub mod linter;
 pub mod outline;
-pub(crate) mod persistence;
+pub mod persistence;
 pub mod recovery;
 pub mod settings;
 pub mod state;

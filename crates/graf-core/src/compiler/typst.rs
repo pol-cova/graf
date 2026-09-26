@@ -142,7 +142,9 @@ pub fn parse_typst_diagnostics_from_streams<'a>(
             break;
         }
         let trimmed = line.trim();
-        if trimmed.starts_with("error:") || trimmed.starts_with("warning:") {
+        if let Some(diagnostic) = parse_short_diagnostic(trimmed) {
+            diagnostics.push(diagnostic);
+        } else if trimmed.starts_with("error:") || trimmed.starts_with("warning:") {
             let is_error = trimmed.starts_with("error:");
             let severity = if is_error {
                 Severity::Error
@@ -183,6 +185,36 @@ pub fn parse_typst_diagnostics_from_streams<'a>(
     diagnostics
 }
 
+/// Parses Typst's `--diagnostic-format short` line, which the engine
+/// requests: `path:line:column: error: message`.
+fn parse_short_diagnostic(line: &str) -> Option<Diagnostic> {
+    let (location, severity, message) = [
+        (": error: ", Severity::Error),
+        (": warning: ", Severity::Warning),
+    ]
+    .into_iter()
+    .find_map(|(marker, severity)| {
+        line.split_once(marker)
+            .map(|(location, message)| (location, severity, message))
+    })?;
+    // Split from the right: the path itself may contain colons.
+    let mut parts = location.rsplitn(3, ':');
+    let _column: usize = parts.next()?.trim().parse().ok()?;
+    let line_number: usize = parts.next()?.trim().parse().ok()?;
+    let file = parts.next()?.trim();
+    if file.is_empty() {
+        return None;
+    }
+    Some(Diagnostic {
+        id: super::engine::next_diagnostic_id(),
+        severity,
+        source: DiagnosticSource::Typst,
+        file: Some(PathBuf::from(file)),
+        line: Some(line_number),
+        message: message.trim().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +222,24 @@ mod tests {
     use std::fs;
 
     use std::path::Path;
+
+    #[test]
+    fn short_format_diagnostics_carry_file_and_line() {
+        // Exact output of `typst compile --diagnostic-format short` (0.15).
+        let log = "main.typ:4:53: error: cannot reference heading without numbering\n\
+                   sections/intro.typ:12:1: warning: unknown font family: foo";
+        let diags = parse_typst_diagnostics(log);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert_eq!(diags[0].file.as_deref(), Some(Path::new("main.typ")));
+        assert_eq!(diags[0].line, Some(4));
+        assert_eq!(
+            diags[0].message,
+            "cannot reference heading without numbering"
+        );
+        assert_eq!(diags[1].severity, Severity::Warning);
+        assert_eq!(diags[1].line, Some(12));
+    }
 
     #[test]
     fn test_typst_diagnostic_parsing() {
