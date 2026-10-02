@@ -1,6 +1,4 @@
 import AppKit
-import GrafCore
-import GrafKit
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -59,8 +57,9 @@ final class WindowRegistry: ObservableObject {
     private var windows: [ObjectIdentifier: NSWindow] = [:]
 
     /// The window already editing `url`, so a file is never open twice.
-    /// Two editors on one file would each save over the other.
-    func window(showing url: URL) -> NSWindow? {
+    /// Two editors on one file would each save over the other. Only
+    /// `focusWindow(showing:)` looks this up.
+    private func window(showing url: URL) -> NSWindow? {
         let target = url.standardizedFileURL
         return models.first { _, model in
             model.workspace?.fileURL.standardizedFileURL == target

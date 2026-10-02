@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Testing
 @testable import GrafKit
@@ -48,26 +47,28 @@ import Testing
         #expect(found.contains { $0.0 == "#set" && $0.1 == .markup })
     }
 
-    @Test func unknownSyntaxLeavesNothingToStyle() {
-        let string = "\\section{Hi}" as NSString
-        let tokens = MarkupStyler.styledTokens(
-            in: string,
-            syntax: nil,
-            over: NSRange(location: 0, length: string.length)
-        )
-        #expect(tokens.isEmpty)
-    }
-
-    @Test func distinctTokensDropsSpansThatRenderAsProse() {
-        let string = "\\section{Hi}" as NSString
-        let all = MarkupStyler.styledTokens(in: string, syntax: .latex, over: NSRange(location: 0, length: string.length))
-        let distinct = MarkupStyler.distinctTokens(in: string, syntax: .latex, over: NSRange(location: 0, length: string.length))
-        // Every resolved token is non-prose here, so filtering changes
-        // nothing today; what matters is that the two entry points agree
-        // rather than the applier re-deriving the judgement.
-        #expect(all.count == distinct.count)
-        #expect(distinct.allSatisfy { $0.style != .prose })
-    }
+    @Test func everyTokenIsAStyleTheApplierCanApply() {
+    // Prose is what a span has *before* any token is applied, so every style
+    // the styler returns is a departure from it. The applier's switch is
+    // exhaustive over `Style` with no `.prose` branch, so this is the list of
+    // what it must handle: if a case is ever added here, the applier stops
+    // compiling until it deals with it.
+    let string = "\\section{Hi}\n\\cite{key} $x$\n% note" as NSString
+    let tokens = MarkupStyler.styledTokens(
+        in: string,
+        syntax: .latex,
+        over: NSRange(location: 0, length: string.length)
+    )
+    let styles: [MarkupStyler.Style] = tokens.map(\.style)
+    #expect(!styles.isEmpty)
+    // Each kind that appears is one the applier handles; markup covers both
+    // command and delimiter, and heading carries its level.
+    #expect(styles.contains(.reference))
+    #expect(styles.contains(.math))
+    #expect(styles.contains(.comment))
+    #expect(styles.contains(.markup))
+    #expect(styles.contains(.heading(level: 1)))
+}
 
     @Test func aCommentDoesNotExtendItsHeadingToEndOfLine() {
         // Pins real scanner behaviour rather than the behaviour I assumed:

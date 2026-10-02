@@ -43,53 +43,42 @@ enum Theme {
     /// line, `.callout` the quiet hint under a control or beside a count, and
     /// so on up to `.wordmark` for the launch screen.
     ///
-    /// Each size has a `swiftUI` twin because SwiftUI's `.font` takes a
-    /// `Font`, not an `NSFont`. These are computed, not stored: `NSFont` is
-    /// a class and not `Sendable`, so a `static let` would be shared mutable
-    /// global state under Swift 6 strict concurrency. Building one per use is
-    /// cheap.
+    /// These are `Font`, not `NSFont`, because every consumer is SwiftUI's
+    /// `.font(_:)`. An earlier revision also declared an `NSFont` twin of
+    /// each size; nothing used them once the call sites settled on SwiftUI, so
+    /// they are gone rather than kept "for AppKit interop" nobody needs.
+    ///
+    /// Computed rather than stored: `Font` is a struct but the sizes are
+    /// derived, and a stored static would need a `Sendable` guarantee for no
+    /// benefit at these counts.
     enum Chrome {
         /// 11pt. Tertiary detail: "opens here", a file path in monospaced.
-        static var caption: NSFont { .systemFont(ofSize: 11) }
         static var captionUI: Font { .system(size: 11) }
-        static var captionMono: NSFont { .monospacedSystemFont(ofSize: 11, weight: .regular) }
         static var captionMonoUI: Font { .system(size: 11, design: .monospaced) }
 
         /// 12pt. The common quiet label: hints, secondary lines, page
         /// numbers, diagnostics, section captions.
-        static var callout: NSFont { .systemFont(ofSize: 12) }
         static var calloutUI: Font { .system(size: 12) }
-        static var calloutMono: NSFont { .monospacedSystemFont(ofSize: 12, weight: .regular) }
         static var calloutMonoUI: Font { .system(size: 12, design: .monospaced) }
 
         /// 13pt. Row content: a template name, a status line, a detail value.
-        static var row: NSFont { .systemFont(ofSize: 13) }
         static var rowUI: Font { .system(size: 13) }
-        static var rowMedium: NSFont { .systemFont(ofSize: 13, weight: .medium) }
         static var rowMediumUI: Font { .system(size: 13, weight: .medium) }
-        static var rowMono: NSFont { .monospacedSystemFont(ofSize: 13, weight: .regular) }
         static var rowMonoUI: Font { .system(size: 13, design: .monospaced) }
-        static var rowMonoSemibold: NSFont { .monospacedSystemFont(ofSize: 13, weight: .semibold) }
         static var rowMonoSemiboldUI: Font { .system(size: 13, weight: .semibold, design: .monospaced) }
 
         /// 14pt. A subtitle, or the title of a selected list row.
-        static var body: NSFont { .systemFont(ofSize: 14) }
         static var bodyUI: Font { .system(size: 14) }
-        static var bodyEmphasized: NSFont { .systemFont(ofSize: 14, weight: .medium) }
         static var bodyEmphasizedUI: Font { .system(size: 14, weight: .medium) }
 
         /// 17pt. A panel or sheet section heading; the selected Quick Open row.
-        static var heading: NSFont { .systemFont(ofSize: 17) }
         static var headingUI: Font { .system(size: 17) }
-        static var headingSerif: NSFont { prose(size: 17, weight: .semibold) }
         static var headingSerifUI: Font { .system(size: 17, weight: .semibold, design: .serif) }
 
         /// 24pt. The title of a sheet.
-        static var sheetTitle: NSFont { prose(size: 24, weight: .semibold) }
         static var sheetTitleUI: Font { .system(size: 24, weight: .semibold, design: .serif) }
 
         /// 40pt. The launch screen wordmark.
-        static var wordmark: NSFont { prose(size: 40, weight: .semibold) }
         static var wordmarkUI: Font { .system(size: 40, weight: .semibold, design: .serif) }
     }
 

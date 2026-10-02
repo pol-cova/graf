@@ -107,10 +107,11 @@ final class Workspace {
         var caret = 0
         if !isDirectory {
             file = url
-        } else if let last = remembered?.lastFile,
+        } else if let remembered,
+                  let last = remembered.lastFile,
                   FileManager.default.fileExists(atPath: URL(fileURLWithPath: project.root).appending(path: last).path) {
             file = URL(fileURLWithPath: project.root).appending(path: last)
-            caret = remembered?.caret ?? 0
+            caret = remembered.caret
         } else if let root = project.rootDocument {
             file = URL(fileURLWithPath: root)
         } else if let first = project.files.first(where: { $0.kind == .latex || $0.kind == .typst }) {

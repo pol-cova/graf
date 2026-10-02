@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 /// The visual decisions of the editor's styling pass, kept apart from the
@@ -20,10 +19,15 @@ import Foundation
 /// font appears in these values; the coordinator resolves one from `Theme`
 /// when it applies them.
 public enum MarkupStyler {
-    /// What one styled span looks like. Prose is the default, so it is not
-    /// spelled out here.
+    /// What one styled span looks like.
+    ///
+    /// There is no `prose` case: prose is what a span has *before* any token
+    /// is applied, and `EditorCoordinator.restyle` lays it down across the
+    /// whole range first. A token either differs from prose and appears here,
+    /// or it does not and the scanner should not have emitted it. An earlier
+    /// revision carried a `prose` case plus a `distinctTokens` filter to drop
+    /// it; `style(for:)` never produced one, so both were unreachable.
     public enum Style: Equatable, Sendable {
-        case prose
         /// A command name, braces, and other markup that steps back.
         case markup
         /// The argument of a cross-reference: link blue, the only accent.
@@ -48,11 +52,7 @@ public enum MarkupStyler {
 
     /// Resolves the style for one scanner token.
     ///
-    /// This is the mapping that used to be the body of `restyle`. Note that
-    /// a token with no visual difference from prose — `delimiter` inside an
-    /// otherwise-prose run — still resolves, so the caller can apply it
-    /// unconditionally; collapsing no-op spans here would mean the applier
-    /// had to re-derive the same judgement.
+    /// This is the mapping that used to be the body of `restyle`.
     public static func style(for token: MarkupToken) -> StyledToken {
         switch token {
         case let .command(range), let .delimiter(range):
@@ -69,26 +69,11 @@ public enum MarkupStyler {
     }
 
     /// Scans `text` over `range` and resolves every token, in document order.
-    ///
-    /// `syntax` being `nil` — a file Graf does not compile — leaves the
-    /// whole span as prose, which is what the caller applies first.
     public static func styledTokens(
         in text: NSString,
-        syntax: Syntax?,
+        syntax: Syntax,
         over range: NSRange
     ) -> [StyledToken] {
-        guard let syntax else { return [] }
-        return MarkupScanner.scan(text, in: range, syntax: syntax).map(style(for:))
-    }
-
-    /// Spans whose style differs from prose. Prose itself is applied to the
-    /// whole range before these, so a token that would render identically
-    /// to prose is dropped here rather than needlessly re-styled.
-    public static func distinctTokens(
-        in text: NSString,
-        syntax: Syntax?,
-        over range: NSRange
-    ) -> [StyledToken] {
-        styledTokens(in: text, syntax: syntax, over: range).filter { $0.style != .prose }
+        MarkupScanner.scan(text, in: range, syntax: syntax).map(style(for:))
     }
 }
