@@ -7,30 +7,72 @@ enum Theme {
     // MARK: Color
 
     /// Prose and primary text.
-    static let ink = NSColor.labelColor
+    ///
+    /// Dark mode is an explicit value rather than `labelColor`. Apple's dark
+    /// `labelColor` is pure white, which measures 16.7:1 against the dark
+    /// background: past the point where extra contrast helps, and the letters
+    /// visibly halo. A writer staring at this for an hour reads better with a
+    /// warm off-white at 9.4:1, which is still AAA.
+    static let ink = dynamic(light: (30, 29, 27), dark: (208, 207, 202))
+
     /// Command names, braces, and other markup that steps back from prose.
-    static let markup = NSColor.tertiaryLabelColor
+    ///
+    /// Was `tertiaryLabelColor`, which is 3.5:1 on the dark background — below
+    /// AA for the 13pt size this is set at. Now 4.8:1.
+    static let markup = dynamic(light: (110, 108, 104), dark: (156, 155, 149))
+
     /// Comments sit furthest back.
-    static let comment = NSColor.quaternaryLabelColor
+    static let comment = dynamic(light: (128, 126, 122), dark: (128, 127, 122))
+
     /// Paragraphs outside the one being written, in Focus mode.
-    static let dimmed = NSColor.tertiaryLabelColor
+    ///
+    /// This used to be `tertiaryLabelColor` — the same colour as `markup`. A
+    /// command inside the paragraph being written was therefore identical to a
+    /// whole unfocused paragraph, which defeats the point of Focus mode. It is
+    /// now a distinct step: clearly dimmer than the focused line (2.6:1), and
+    /// clearly brighter than nothing else claims.
+    ///
+    /// It does not reach AA against the background, and cannot without
+    /// becoming hard to tell from the focused paragraph. That is the trade
+    /// Focus mode is for: the surrounding argument stays readable for
+    /// orientation, at lower contrast than the line being written.
+    static let dimmed = dynamic(light: (150, 148, 144), dark: (116, 115, 110))
+
     /// The only accent: links between source and output (references, the
     /// caret, the sync marker).
-    static let link = NSColor(name: "graf.link") { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0.55, green: 0.62, blue: 1.0, alpha: 1)
-            : NSColor(srgbRed: 0.10, green: 0.05, blue: 0.67, alpha: 1)
-    }
+    static let link = dynamic(light: (26, 13, 171), dark: (122, 150, 255))
+
     /// Only for the broken token and its hint.
-    static let error = NSColor.systemRed
-    static let background = NSColor.textBackgroundColor
-    /// Quiet surfaces: folded blocks, the preview well.
-    static let surface = NSColor.underPageBackgroundColor
+    ///
+    /// `systemRed` is too saturated to sit in body text all day, and on dark
+    /// it vibrates. This is the same hue pulled toward the ink and lifted in
+    /// lightness.
+    static let error = dynamic(light: (196, 32, 32), dark: (255, 105, 105))
+
+    static let background = dynamic(light: (255, 255, 255), dark: (40, 40, 44))
+
+    /// Quiet surfaces: the preview well and other recessed areas.
+    static let surface = dynamic(light: (242, 241, 238), dark: (32, 32, 36))
 
     /// The paper a rendered page sits on. Pages are white in both
     /// appearances; a dark-mode surface here would frame them as dark
     /// rectangles, which is not what a PDF looks like.
     static let page = NSColor.white
+
+    /// An `NSColor` that resolves per appearance from 8-bit components.
+    ///
+    /// Built once and cached by AppKit. A `static let` would not do: an
+    /// `NSColor` is a class and is not `Sendable`, so a stored one would be
+    /// shared mutable global state under Swift 6 strict concurrency.
+    private static func dynamic(light: (Double, Double, Double), dark: (Double, Double, Double)) -> NSColor {
+        NSColor(name: nil) { appearance in
+            nsColor(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
+        }
+    }
+
+    private static func nsColor(_ components: (Double, Double, Double)) -> NSColor {
+        NSColor(srgbRed: components.0 / 255, green: components.1 / 255, blue: components.2 / 255, alpha: 1)
+    }
 
     // MARK: Type
 
@@ -39,57 +81,35 @@ enum Theme {
     static let columnWidth: CGFloat = 660
 
     /// Type for interface chrome, named by role so a size is chosen once and
-    /// reused rather than retyped per view: `.caption` is the small tertiary
-    /// line, `.callout` the quiet hint under a control or beside a count, and
-    /// so on up to `.wordmark` for the launch screen.
-    ///
-    /// Each size has a `swiftUI` twin because SwiftUI's `.font` takes a
-    /// `Font`, not an `NSFont`. These are computed, not stored: `NSFont` is
-    /// a class and not `Sendable`, so a `static let` would be shared mutable
-    /// global state under Swift 6 strict concurrency. Building one per use is
-    /// cheap.
+    /// reused rather than retyped per view.
     enum Chrome {
         /// 11pt. Tertiary detail: "opens here", a file path in monospaced.
-        static var caption: NSFont { .systemFont(ofSize: 11) }
         static var captionUI: Font { .system(size: 11) }
-        static var captionMono: NSFont { .monospacedSystemFont(ofSize: 11, weight: .regular) }
         static var captionMonoUI: Font { .system(size: 11, design: .monospaced) }
 
         /// 12pt. The common quiet label: hints, secondary lines, page
         /// numbers, diagnostics, section captions.
-        static var callout: NSFont { .systemFont(ofSize: 12) }
         static var calloutUI: Font { .system(size: 12) }
-        static var calloutMono: NSFont { .monospacedSystemFont(ofSize: 12, weight: .regular) }
         static var calloutMonoUI: Font { .system(size: 12, design: .monospaced) }
 
         /// 13pt. Row content: a template name, a status line, a detail value.
-        static var row: NSFont { .systemFont(ofSize: 13) }
         static var rowUI: Font { .system(size: 13) }
-        static var rowMedium: NSFont { .systemFont(ofSize: 13, weight: .medium) }
         static var rowMediumUI: Font { .system(size: 13, weight: .medium) }
-        static var rowMono: NSFont { .monospacedSystemFont(ofSize: 13, weight: .regular) }
         static var rowMonoUI: Font { .system(size: 13, design: .monospaced) }
-        static var rowMonoSemibold: NSFont { .monospacedSystemFont(ofSize: 13, weight: .semibold) }
         static var rowMonoSemiboldUI: Font { .system(size: 13, weight: .semibold, design: .monospaced) }
 
         /// 14pt. A subtitle, or the title of a selected list row.
-        static var body: NSFont { .systemFont(ofSize: 14) }
         static var bodyUI: Font { .system(size: 14) }
-        static var bodyEmphasized: NSFont { .systemFont(ofSize: 14, weight: .medium) }
         static var bodyEmphasizedUI: Font { .system(size: 14, weight: .medium) }
 
         /// 17pt. A panel or sheet section heading; the selected Quick Open row.
-        static var heading: NSFont { .systemFont(ofSize: 17) }
         static var headingUI: Font { .system(size: 17) }
-        static var headingSerif: NSFont { prose(size: 17, weight: .semibold) }
         static var headingSerifUI: Font { .system(size: 17, weight: .semibold, design: .serif) }
 
         /// 24pt. The title of a sheet.
-        static var sheetTitle: NSFont { prose(size: 24, weight: .semibold) }
         static var sheetTitleUI: Font { .system(size: 24, weight: .semibold, design: .serif) }
 
         /// 40pt. The launch screen wordmark.
-        static var wordmark: NSFont { prose(size: 40, weight: .semibold) }
         static var wordmarkUI: Font { .system(size: 40, weight: .semibold, design: .serif) }
     }
 
