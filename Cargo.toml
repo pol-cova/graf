@@ -1,8 +1,21 @@
 [workspace]
 resolver = "3"
-members = ["crates/graf-core", "crates/graf-ffi", "crates/uniffi-bindgen-swift"]
-# The bindgen tool is only needed when packaging the XCFramework.
+members = [
+    "crates/graf-canvas",
+    "crates/graf-core",
+    "crates/graf-ffi",
+    "crates/uniffi-bindgen-swift",
+]
+# The bindgen tool is only needed when packaging the XCFramework. graf-canvas
+# is a standalone recovery CLI for the removed .graf format, not part of the
+# app, so it is excluded from the default set.
 default-members = ["crates/graf-core", "crates/graf-ffi"]
+
+[workspace.dependencies]
+# Declared here so a member can inherit it; graf-core and graf-ffi keep their
+# own pins, which already resolve to the same versions.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [workspace.package]
 version = "1.0.0-alpha"

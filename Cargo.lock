@@ -232,6 +232,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "graf-canvas"
+version = "1.0.0-alpha"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "graf-core"
 version = "1.0.0-alpha"
 dependencies = [

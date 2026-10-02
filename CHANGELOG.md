@@ -6,6 +6,7 @@ Notable changes to graf are documented here.
 
 - Moved compiling, projects, and text logic into the `graf-core` library crate.
 - Removed the GPUI front end, including the `.graf` canvas editor, ahead of the native Swift app.
+- Added `graf-canvas`, which converts existing `.graf` scenes to SVG. The canvas editor is gone, but the format was plain JSON, so the diagrams are recoverable: `cargo run -p graf-canvas -- my-diagram.graf` writes `my-diagram.svg` beside it. See "Recovering .graf diagrams" below.
 - Removed the GPUI app bundle, profiling, and release scripts. Releases resume with the Swift app.
 - Added the `graf-ffi` UniFFI bridge and a script that packages it as `GrafCore.xcframework` with Swift bindings.
 - Moved project scaffolding from a template into `graf-core`.
@@ -29,4 +30,29 @@ Notable changes to graf are documented here.
 - Added background compilation and retained PDF preview.
 - Added persistent editor and layout settings.
 - Added native file dialogs, recovery, and external-change protection.
+
+## Recovering .graf diagrams
+
+The canvas editor was removed in this release, and Graf no longer registers as a
+handler for the `.graf` extension — so double-clicking one will not open it, and
+there is nothing in the app that reads the format.
+
+Your files are not lost. A `.graf` scene is plain JSON, and `graf-canvas` converts
+one to SVG:
+
+```bash
+# one file, writing scene.svg beside it
+cargo run -p graf-canvas -- diagrams/scene.graf
+
+# a whole directory into another one, keeping names
+cargo run -p graf-canvas -- -o svg-out diagrams/*.graf
+
+# check without writing anything
+cargo run -p graf-canvas -- --check diagrams/*.graf
+```
+
+The output is a standalone SVG that opens in any browser, Illustrator, or
+Inkscape. Shapes, arrows, text, fills, stroke styles, opacity, and the scene
+background all carry over; canvas pan and zoom do not, since they were view
+state rather than part of the drawing.
 - Added macOS application and DMG packaging.
