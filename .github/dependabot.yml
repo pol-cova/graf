@@ -1,12 +1,42 @@
 version: 2
 updates:
+  # The Rust core is a cargo workspace; the manifest and lockfile live at the
+  # root, so "/" is still the right directory after the Swift migration.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Bump families that must move together in one commit. The UniFFI crates
+    # and the generated bindings are version-coupled, so splitting them
+    # across PRs produces combinations that do not build.
+    groups:
+      uniffi:
+        patterns:
+          - uniffi
+          - uniffi_*
+        update-types:
+          - minor
+          - patch
+      serde:
+        patterns:
+          - serde
+          - serde_*
+        update-types:
+          - minor
+          - patch
+
+  # Only actions/checkout is semantically versioned; rust-toolchain@stable and
+  # rust-cache@v2 are floating tags, so this sweep stays monthly and small.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
+
+# There is deliberately no `swift` ecosystem entry for apple/. That package
+# declares a local binary target (Frameworks/GrafCore.xcframework) that is a
+# gitignored build product of scripts/build_core_xcframework.sh, so on a clean
+# clone `swift package resolve` fails with "does not contain a binary
+# artifact" and Dependabot would open a permanently failing job. Re-enable it
+# only if the Swift package ever gains real remote dependencies.
