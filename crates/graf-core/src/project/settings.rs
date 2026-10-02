@@ -9,10 +9,13 @@ const SETTINGS_FILE_NAME: &str = "settings.json";
 pub struct GrafSettings {
     #[serde(default)]
     pub editor: EditorSettings,
-    #[serde(default)]
-    pub layout: LayoutSettings,
-    // `ai` settings were removed for the v1 editor-only scope; legacy keys
-    // in an existing settings.json are silently ignored by serde.
+    // `layout` (sidebar_width, preview_width, diagnostics_height) was the
+    // GPUI three-pane geometry. SwiftUI sizes the sidebar and preview itself,
+    // so nothing read these; they are gone rather than left to be carried in
+    // every user's settings.json forever.
+    // `ai` went earlier for the v1 editor-only scope. Legacy keys in an
+    // existing settings.json are silently ignored by serde, which is also
+    // what happens to a stale `layout` block on the next save.
 }
 
 impl GrafSettings {
@@ -170,28 +173,10 @@ fn preserve_corrupt_settings(path: &Path) -> std::io::Result<()> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct LayoutSettings {
-    pub sidebar_width: f32,
-    pub preview_width: f32,
-    pub diagnostics_height: f32,
-}
-
-impl Default for LayoutSettings {
-    fn default() -> Self {
-        Self {
-            sidebar_width: 236.0,
-            preview_width: 460.0,
-            diagnostics_height: 180.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
 pub struct EditorSettings {
-    pub font_size: f32,
+    /// Spaces inserted by Tab in the editor, and the width ⌘⇥ and the
+    /// Find/Replace indents use.
     pub tab_size: usize,
-    pub line_numbers: bool,
     #[serde(alias = "auto_compile_on_save")]
     pub auto_compile: bool,
     pub compile_debounce_ms: u64,
@@ -206,9 +191,7 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
-            font_size: 14.0,
             tab_size: 2,
-            line_numbers: true,
             auto_compile: true,
             // Builds run when the writer pauses, not between keystrokes.
             compile_debounce_ms: 800,
@@ -226,15 +209,42 @@ mod tests {
     #[test]
     fn test_settings_serialization_and_defaults() {
         let settings = GrafSettings::default();
-        assert_eq!(settings.editor.font_size, 14.0);
         assert_eq!(settings.editor.tab_size, 2);
-        assert!(settings.editor.line_numbers);
+        assert!(settings.editor.auto_compile);
+        assert_eq!(settings.editor.compile_debounce_ms, 800);
 
         let json = settings.to_json().unwrap_or_else(|_| String::new());
-        assert!(json.contains("font_size"));
+        assert!(json.contains("tab_size"));
 
         let loaded = GrafSettings::from_json(&json).expect("roundtrip serialize");
         assert_eq!(loaded, settings);
+    }
+
+    /// The GPUI settings that are gone must not break an existing file. serde
+    /// ignores unknown keys, so a user's saved `layout`, `font_size`, and
+    /// `line_numbers` load fine and simply stop coming back on the next save.
+    #[test]
+    fn ignores_removed_settings_in_an_existing_file() {
+        let json = r#"{
+            "editor": {
+                "font_size": 15.0,
+                "line_numbers": false,
+                "tab_size": 4
+            },
+            "layout": {
+                "sidebar_width": 300.0,
+                "preview_width": 500.0,
+                "diagnostics_height": 200.0
+            },
+            "ai": { "provider": "anthropic" }
+        }"#;
+
+        let loaded = GrafSettings::from_json(json).expect("legacy file still parses");
+
+        assert_eq!(loaded.editor.tab_size, 4);
+        // Everything the Swift app actually reads keeps its default.
+        assert_eq!(loaded.editor.compile_debounce_ms, 800);
+        assert_eq!(loaded.editor.prose_font_size, 19.0);
     }
 
     #[test]
@@ -271,9 +281,7 @@ mod tests {
     fn loads_legacy_auto_compile_key() {
         let json = r#"{
             "editor": {
-                "font_size": 15.0,
                 "tab_size": 4,
-                "line_numbers": false,
                 "auto_compile_on_save": false,
                 "compile_debounce_ms": 500
             }
@@ -281,8 +289,7 @@ mod tests {
 
         let loaded = GrafSettings::from_json(json).expect("legacy json should parse");
         assert!(!loaded.editor.auto_compile);
-        assert_eq!(loaded.editor.font_size, 15.0);
-        assert_eq!(loaded.layout, LayoutSettings::default());
+        assert_eq!(loaded.editor.compile_debounce_ms, 500);
     }
 
     #[test]
@@ -292,11 +299,11 @@ mod tests {
         let settings_path = temp_dir.join(SETTINGS_FILE_NAME);
 
         let mut settings = GrafSettings::default();
-        settings.editor.font_size = 16.0;
+        settings.editor.prose_font_size = 21.0;
         settings.save_to_path(&settings_path).unwrap();
 
         let loaded = GrafSettings::load_from_path(&settings_path);
-        assert_eq!(loaded.editor.font_size, 16.0);
+        assert_eq!(loaded.editor.prose_font_size, 21.0);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

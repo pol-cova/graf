@@ -43,9 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// Development aid: `GRAF_SNAPSHOT=/path/out.png` renders the key window to
 /// a PNG after `GRAF_SNAPSHOT_DELAY` seconds (default 6), then quits. It
 /// draws the app's own views, so it needs no screen-recording permission.
-/// Halfway through, `GRAF_SNAPSHOT_ACTION=<menu title>` clicks a menu item
-/// (for example "Show Preview") and `GRAF_SNAPSHOT_TYPE=<text>` types into
-/// the editor at the caret, which exercises the edit, save, and compile path.
+/// Halfway through, `GRAF_SNAPSHOT_KEY` presses a shortcut ("p", or
+/// "shift+cmd+f"; space-separated keys run in order), `GRAF_SNAPSHOT_TYPE`
+/// types at the caret, and `GRAF_SNAPSHOT_TYPE_AFTER` types after the keys.
+/// Typing exercises the edit, save, and compile path.
 @MainActor
 enum DebugSnapshot {
     static func scheduleIfRequested() {

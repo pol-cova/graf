@@ -81,7 +81,18 @@ enum Theme {
     static let columnWidth: CGFloat = 660
 
     /// Type for interface chrome, named by role so a size is chosen once and
-    /// reused rather than retyped per view.
+    /// reused rather than retyped per view: `.caption` is the small tertiary
+    /// line, `.callout` the quiet hint under a control or beside a count, and
+    /// so on up to `.wordmark` for the launch screen.
+    ///
+    /// These are `Font`, not `NSFont`, because every consumer is SwiftUI's
+    /// `.font(_:)`. An earlier revision also declared an `NSFont` twin of
+    /// each size; nothing used them once the call sites settled on SwiftUI, so
+    /// they are gone rather than kept "for AppKit interop" nobody needs.
+    ///
+    /// Computed rather than stored: `Font` is a struct but the sizes are
+    /// derived, and a stored static would need a `Sendable` guarantee for no
+    /// benefit at these counts.
     enum Chrome {
         /// 11pt. Tertiary detail: "opens here", a file path in monospaced.
         static var captionUI: Font { .system(size: 11) }

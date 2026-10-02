@@ -116,7 +116,7 @@ struct NewProjectSheet: View {
     }
 
     private var slug: String {
-        folderSlug(for: name.isEmpty ? "untitled" : name)
+        folderSlug(for: name)
     }
 
     private func chooseLocation() {
