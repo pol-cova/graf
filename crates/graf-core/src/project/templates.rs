@@ -216,23 +216,6 @@ pub fn scaffold_project(dir: &Path, template: &DocumentTemplate) -> io::Result<P
     Ok(target)
 }
 
-/// Templates matching `query` (case-insensitive substring on name and
-/// description) and, when `kind` is given, only that document kind. Shared
-/// by the picker view and Enter-accept so the visible list and the accepted
-/// result agree.
-pub fn filter_templates(
-    query: &str,
-    kind: Option<DocumentKind>,
-) -> impl Iterator<Item = &'static DocumentTemplate> {
-    let query_lower = query.trim().to_lowercase();
-    builtin_templates().iter().filter(move |template| {
-        kind.is_none_or(|wanted| template.kind == wanted)
-            && (query_lower.is_empty()
-                || template.name.to_lowercase().contains(&query_lower)
-                || template.description.to_lowercase().contains(&query_lower))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,30 +279,32 @@ mod tests {
     }
 
     #[test]
-    fn filter_matches_name_and_description_case_insensitively() {
-        let all: Vec<_> = filter_templates("", None).collect();
-        assert_eq!(all.len(), builtin_templates().len());
-
-        let latex: Vec<_> = filter_templates("", Some(DocumentKind::Latex)).collect();
-        assert_eq!(latex.len(), 3);
-        assert!(latex.iter().all(|t| t.kind == DocumentKind::Latex));
-
-        assert!(filter_templates("beamer", None).count() == 1);
-        assert!(filter_templates("BIBLIOGRAPHY", None).count() == 1);
-        assert!(
-            filter_templates("nothing matches this", None)
-                .next()
-                .is_none()
-        );
-    }
-
-    #[test]
     fn latex_templates_compile_standalone() {
         // Every LaTeX template must open and close the document environment;
         // a template that cannot compile on first try is a broken first run.
-        for template in filter_templates("", Some(DocumentKind::Latex)) {
+        // This used to go through `filter_templates`, which existed so the
+        // GPUI picker and its Enter-accept would agree on the visible list.
+        // The Swift sheet filters its own copy of `templates()`, so the check
+        // now walks the builtin list directly.
+        let latex: Vec<_> = builtin_templates()
+            .iter()
+            .filter(|t| t.kind == DocumentKind::Latex)
+            .collect();
+        assert!(!latex.is_empty(), "there must be LaTeX templates");
+        for template in latex {
             assert!(template.content.contains("\\begin{document}"));
             assert!(template.content.contains("\\end{document}"));
+        }
+    }
+
+    /// Template lookup is by exact id, which is how the sheet restores a
+    /// selection. Ids must therefore be unique.
+    #[test]
+    fn template_ids_are_unique_and_resolvable() {
+        for template in builtin_templates() {
+            let found = template_by_id(template.id);
+            assert!(found.is_some(), "{} is not resolvable", template.id);
+            assert_eq!(found.map(|t| t.name), Some(template.name));
         }
     }
 }

@@ -145,7 +145,7 @@ impl Compiler {
             tectonic: TectonicEngine::new(),
             typst: TypstEngine::new(),
             // Swift debounces edits; the controller only tracks revisions.
-            controller: Mutex::new(CompilerController::with_debounce(Duration::ZERO)),
+            controller: Mutex::new(CompilerController::new()),
             in_flight: Mutex::new(None),
         })
     }
@@ -378,9 +378,12 @@ pub fn templates() -> Vec<Template> {
     templates::builtin_templates()
         .iter()
         .filter_map(|template| {
-            let engine = match template.kind.as_engine()? {
-                graf_core::compiler::EngineKind::Latex => Engine::Latex,
-                graf_core::compiler::EngineKind::Typst => Engine::Typst,
+            let engine = match template.kind {
+                graf_core::project::document::DocumentKind::Latex => Engine::Latex,
+                graf_core::project::document::DocumentKind::Typst => Engine::Typst,
+                // Plain-text templates have no engine, so they cannot be
+                // offered as something to compile.
+                graf_core::project::document::DocumentKind::PlainText => return None,
             };
             Some(Template {
                 id: template.id.to_string(),

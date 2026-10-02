@@ -5,17 +5,6 @@ pub struct OutlineItem {
     pub line_number: usize,
 }
 
-impl OutlineItem {
-    pub fn display_prefix(&self) -> &'static str {
-        match self.level {
-            0 => "§",
-            1 => "§§",
-            2 => "•",
-            _ => "·",
-        }
-    }
-}
-
 pub fn parse_latex_outline(source: &str) -> Vec<OutlineItem> {
     let mut items = Vec::new();
 

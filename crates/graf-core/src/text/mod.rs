@@ -1,4 +1,2 @@
-pub mod buffer;
+pub mod clamp;
 pub mod completion;
-pub mod find;
-pub mod table;

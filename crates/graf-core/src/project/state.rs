@@ -51,10 +51,6 @@ impl ProjectState {
         }
     }
 
-    pub fn reload_editor_labels(&mut self, text: &str) {
-        self.label_index.parse_and_load(text);
-    }
-
     /// Loads `\label` keys from every LaTeX file in the project, so a
     /// reference can point at a label defined in another file.
     pub fn reload_project_labels(&mut self, root: &std::path::Path) {

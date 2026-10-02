@@ -24,71 +24,36 @@ pub enum CompileState {
     },
 }
 
-use std::borrow::Cow;
-
-impl CompileState {
-    pub fn status_text(&self) -> Cow<'static, str> {
-        match self {
-            Self::Idle => Cow::Borrowed("ready"),
-            Self::Waiting => Cow::Borrowed("waiting..."),
-            Self::Compiling { revision, .. } => {
-                Cow::Owned(format!("compiling (rev {revision})..."))
-            }
-            Self::Success {
-                duration, revision, ..
-            } => Cow::Owned(format!(
-                "ready (rev {revision}, {:.0}ms)",
-                duration.as_secs_f64() * 1000.0
-            )),
-            Self::Failed {
-                id: _,
-                revision,
-                diagnostics,
-                duration,
-            } => match diagnostics.len() {
-                0 => Cow::Owned(format!(
-                    "failed (rev {revision}, {:.0}ms)",
-                    duration.as_secs_f64() * 1000.0
-                )),
-                1 => Cow::Owned(format!("1 error (rev {revision})")),
-                n => Cow::Owned(format!("{n} errors (rev {revision})")),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaleResult {
     pub completed_revision: u64,
     pub current_revision: u64,
 }
 
+/// Tracks the current revision and refuses results from superseded builds.
+///
+/// Debouncing used to live here, as a `debounce_duration` the workspace read
+/// back and slept on. It no longer does: Swift owns the pause between typing
+/// and compiling (`AppSettings.compileDelay`, driving a `Debouncer`), so the
+/// field was written once with `Duration::ZERO` and never read. What remains is
+/// the part that is load-bearing — rejecting a background result whose
+/// revision is no longer current.
 pub struct CompilerController {
     current_revision: u64,
     state: CompileState,
-    debounce_duration: Duration,
 }
 
 impl Default for CompilerController {
     fn default() -> Self {
-        Self::with_debounce(Duration::from_millis(150))
+        Self::new()
     }
 }
 
 impl CompilerController {
-    /// Test-only convenience. Production always builds via
-    /// `with_debounce(settings.compile_debounce_ms)` — there is no second
-    /// debounce default that can drift from the settings default.
-    #[cfg(test)]
     pub fn new() -> Self {
-        Self::with_debounce(Duration::from_millis(150))
-    }
-
-    pub fn with_debounce(debounce_duration: Duration) -> Self {
         Self {
             current_revision: 0,
             state: CompileState::Idle,
-            debounce_duration,
         }
     }
 
@@ -96,25 +61,8 @@ impl CompilerController {
         &self.state
     }
 
-    pub fn status_text(&self) -> Cow<'static, str> {
-        self.state.status_text()
-    }
-
     pub fn current_revision(&self) -> u64 {
         self.current_revision
-    }
-
-    pub fn debounce_duration(&self) -> Duration {
-        self.debounce_duration
-    }
-
-    pub fn reset(&mut self) {
-        self.current_revision = 0;
-        self.state = CompileState::Idle;
-    }
-
-    pub fn set_debounce_duration(&mut self, duration: Duration) {
-        self.debounce_duration = duration;
     }
 
     pub fn on_source_edited(&mut self, new_revision: u64) {
@@ -191,11 +139,15 @@ mod tests {
         let controller = CompilerController::new();
         assert_eq!(controller.state(), &CompileState::Idle);
         assert_eq!(controller.current_revision(), 0);
-        assert_eq!(controller.status_text(), "ready");
     }
 
+    /// A completed build leaves the controller at that revision, and the next
+    /// edit moves it forward. `reset()` used to exist for the GPUI workspace,
+    /// which cleared the controller when a compile session restarted; nothing
+    /// does that now, because a session is a `Workspace` and closing it drops
+    /// the controller with it.
     #[test]
-    fn reset_clears_revision_tracking() {
+    fn a_completed_build_then_a_new_edit_advances_the_revision() {
         let mut controller = CompilerController::new();
         controller.on_source_edited(7);
         controller.begin_compile(CompileId(1), 7);
@@ -209,10 +161,13 @@ mod tests {
             })
             .expect("current output should be accepted");
 
-        controller.reset();
+        assert_eq!(controller.current_revision(), 7);
+        assert!(matches!(controller.state(), CompileState::Success { .. }));
 
-        assert_eq!(controller.current_revision(), 0);
-        assert_eq!(controller.state(), &CompileState::Idle);
+        controller.on_source_edited(8);
+
+        assert_eq!(controller.current_revision(), 8);
+        assert_eq!(controller.state(), &CompileState::Waiting);
     }
 
     #[test]
@@ -236,7 +191,7 @@ mod tests {
 
     #[test]
     fn source_edit_enters_waiting_state() {
-        let mut controller = CompilerController::with_debounce(Duration::from_millis(100));
+        let mut controller = CompilerController::new();
 
         controller.on_source_edited(1);
 
@@ -277,12 +232,17 @@ mod tests {
         );
     }
 
+    /// A result is only accepted for the compile that is currently running: a
+    /// different id is stale even at a revision the controller has seen. This
+    /// is what stops a slow build from one keystroke applying over a newer
+    /// one.
     #[test]
-    fn output_from_reset_compile_session_is_rejected() {
+    fn output_from_a_superseded_compile_is_rejected() {
         let mut controller = CompilerController::new();
+        controller.on_source_edited(7);
         controller.begin_compile(CompileId(1), 7);
-        controller.reset();
-        controller.begin_compile(CompileId(2), 0);
+        // A second build starts while the first is still running.
+        controller.begin_compile(CompileId(2), 8);
 
         let result = controller.handle_output(&CompileOutput {
             compile_id: CompileId(1),
@@ -296,14 +256,14 @@ mod tests {
             result,
             Err(StaleResult {
                 completed_revision: 7,
-                current_revision: 0,
+                current_revision: 8,
             })
         );
         assert_eq!(
             controller.state(),
             &CompileState::Compiling {
                 id: CompileId(2),
-                revision: 0,
+                revision: 8,
             }
         );
     }
@@ -387,18 +347,21 @@ mod tests {
         let res = controller.handle_error(err);
         assert!(res.is_ok());
         assert!(matches!(controller.state(), CompileState::Failed { .. }));
-        assert_eq!(controller.status_text(), "1 error (rev 1)");
     }
 
+    /// The failed state keeps the diagnostics and the duration, which is what
+    /// the Swift side reads to render its error count and message. It used to
+    /// also assert a formatted status string; that display lived here for the
+    /// GPUI status bar and `Workspace.BuildStatus` owns it now.
     #[test]
-    fn test_multiple_errors_status_text() {
+    fn a_failure_reports_diagnostics_and_duration() {
         let mut controller = CompilerController::new();
-        controller.on_source_edited(1);
-        controller.begin_compile(CompileId(1), 1);
+        controller.on_source_edited(3);
+        controller.begin_compile(CompileId(1), 3);
 
         let err = CompileError {
             compile_id: CompileId(1),
-            revision: 1,
+            revision: 3,
             diagnostics: vec![
                 Diagnostic::new(
                     1,
@@ -421,8 +384,23 @@ mod tests {
             duration: Duration::from_millis(15),
         };
 
-        let res = controller.handle_error(err);
-        assert!(res.is_ok());
-        assert_eq!(controller.status_text(), "2 errors (rev 1)");
+        controller
+            .handle_error(err)
+            .expect("current failure is accepted");
+
+        match controller.state() {
+            CompileState::Failed {
+                id,
+                revision,
+                diagnostics,
+                duration,
+            } => {
+                assert_eq!(*id, CompileId(1));
+                assert_eq!(*revision, 3);
+                assert_eq!(diagnostics.len(), 2);
+                assert_eq!(*duration, Duration::from_millis(15));
+            }
+            other => panic!("expected a failed state, got {other:?}"),
+        }
     }
 }

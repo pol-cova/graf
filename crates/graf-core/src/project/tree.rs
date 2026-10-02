@@ -4,12 +4,18 @@ use std::path::{Path, PathBuf};
 pub use crate::project::kinds::FileKind;
 use crate::project::text_search;
 
+/// A scanned directory entry.
+///
+/// Only `scan_directory` builds these, and only long enough to flatten into
+/// `quick_open_files` and to detect the root document. `ProjectTree` does not
+/// keep the tree: it holds the flat list and discards the nodes. `is_expanded`
+/// and `toggle_directory_node` went with the GPUI sidebar, which was the only
+/// consumer that expanded and collapsed folders.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileNode {
+enum FileNode {
     Directory {
         path: PathBuf,
         name: String,
-        is_expanded: bool,
         children: Vec<FileNode>,
     },
     File {
@@ -34,7 +40,6 @@ pub struct QuickOpenEntry {
 #[derive(Debug, Clone)]
 pub struct ProjectTree {
     root_path: PathBuf,
-    root_node: FileNode,
     root_document: Option<PathBuf>,
     /// Files flattened with pre-verified data; QuickOpen serves matches from
     /// this list instead of re-walking the node tree per keystroke.
@@ -44,11 +49,6 @@ pub struct ProjectTree {
 impl ProjectTree {
     pub fn scan(root_path: impl Into<PathBuf>) -> Self {
         let root_path = root_path.into();
-        let name = root_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project")
-            .to_string();
 
         let children = scan_directory(&root_path);
         let root_document = detect_root_document(&root_path, &children);
@@ -56,16 +56,8 @@ impl ProjectTree {
         let mut quick_open_files = Vec::new();
         flatten_quick_open_entries(&root_path, &children, &mut quick_open_files);
 
-        let root_node = FileNode::Directory {
-            path: root_path.clone(),
-            name,
-            is_expanded: true,
-            children,
-        };
-
         Self {
             root_path,
-            root_node,
             root_document,
             quick_open_files,
         }
@@ -73,10 +65,6 @@ impl ProjectTree {
 
     pub fn root_path(&self) -> &Path {
         &self.root_path
-    }
-
-    pub fn root_node(&self) -> &FileNode {
-        &self.root_node
     }
 
     /// Up to `limit` entries whose relative path contains `query`
@@ -95,10 +83,6 @@ impl ProjectTree {
     }
     pub fn root_document(&self) -> Option<&Path> {
         self.root_document.as_deref()
-    }
-
-    pub fn toggle_directory(&mut self, path: &Path) -> bool {
-        toggle_directory_node(&mut self.root_node, path)
     }
 }
 
@@ -130,27 +114,6 @@ fn flatten_quick_open_entries(
             }
         }
     }
-}
-
-fn toggle_directory_node(node: &mut FileNode, path: &Path) -> bool {
-    let FileNode::Directory {
-        path: node_path,
-        is_expanded,
-        children,
-        ..
-    } = node
-    else {
-        return false;
-    };
-
-    if node_path == path {
-        *is_expanded = !*is_expanded;
-        return true;
-    }
-
-    children
-        .iter_mut()
-        .any(|child| toggle_directory_node(child, path))
 }
 
 /// How deep the scanner descends and how many nodes it produces in total.
@@ -218,7 +181,6 @@ fn scan_directory_bounded(dir: &Path, depth: usize, budget: &mut usize) -> Vec<F
             entries.push(FileNode::Directory {
                 path,
                 name,
-                is_expanded: false,
                 children,
             });
         } else if !is_dir {
@@ -256,13 +218,17 @@ fn should_ignore(name: &str) -> bool {
 /// Root-document candidates, probed in order. Both engines get their
 /// conventional names so a Typst-only project no longer falls through to
 /// the welcome screen.
-const ROOT_DOC_CANDIDATES: &[(&str, FileKind)] = &[
-    ("main.tex", FileKind::Latex),
-    ("main.typ", FileKind::Typst),
-    ("document.tex", FileKind::Latex),
-    ("document.typ", FileKind::Typst),
-    ("paper.tex", FileKind::Latex),
-    ("paper.typ", FileKind::Typst),
+///
+/// Names only: the `FileKind` this used to carry was discarded at the one
+/// place it was read, so pairing each name with its kind documented nothing
+/// the code enforced. Ordering is what matters here.
+const ROOT_DOC_CANDIDATES: &[&str] = &[
+    "main.tex",
+    "main.typ",
+    "document.tex",
+    "document.typ",
+    "paper.tex",
+    "paper.typ",
 ];
 
 /// Typst has no `\documentclass`; a root file instead declares page or
@@ -270,7 +236,7 @@ const ROOT_DOC_CANDIDATES: &[(&str, FileKind)] = &[
 const TYPST_ROOT_MARKERS: &[&str] = &["#set page(", "#set document(", "#outline("];
 
 fn detect_root_document(root_dir: &Path, children: &[FileNode]) -> Option<PathBuf> {
-    for (name, _) in ROOT_DOC_CANDIDATES {
+    for name in ROOT_DOC_CANDIDATES {
         let candidate = root_dir.join(name);
         if candidate.exists() {
             return Some(candidate);
@@ -333,32 +299,21 @@ mod tests {
         fs::write(dir.join("refs.bib"), "@article{key, title={Test}}").unwrap();
         fs::write(dir.join(".hidden"), "hidden").unwrap();
 
-        let mut tree = ProjectTree::scan(dir);
+        let tree = ProjectTree::scan(dir);
         assert_eq!(tree.root_document(), Some(dir.join("main.tex").as_path()));
-        assert!(tree.toggle_directory(&dir.join("sections")));
 
-        if let FileNode::Directory { children, .. } = tree.root_node() {
-            assert!(children.iter().any(|c| match c {
-                FileNode::Directory {
-                    name, is_expanded, ..
-                } => name == "sections" && *is_expanded,
-                _ => false,
-            }));
-            assert!(children.iter().any(|c| match c {
-                FileNode::File { name, .. } => name == "main.tex",
-                _ => false,
-            }));
-            assert!(children.iter().any(|c| match c {
-                FileNode::File { name, .. } => name == "refs.bib",
-                _ => false,
-            }));
-            assert!(!children.iter().any(|c| match c {
-                FileNode::File { name, .. } => name == ".hidden",
-                _ => false,
-            }));
-        } else {
-            panic!("Expected root node to be a Directory");
-        }
+        // Subdirectories are flattened into Quick Open, which is what the
+        // Swift sidebar and Go to… both read. This replaced walking the node
+        // tree, so a nested file is now asserted through the flat list.
+        let paths: Vec<&str> = tree
+            .quick_open_matches("", usize::MAX)
+            .iter()
+            .map(|entry| entry.relative.as_str())
+            .collect();
+        assert!(paths.contains(&"main.tex"));
+        assert!(paths.contains(&"refs.bib"));
+        assert!(paths.iter().any(|p| p.ends_with("intro.tex")));
+        assert!(!paths.iter().any(|p| p.contains(".hidden")));
     }
 
     #[test]
@@ -419,7 +374,6 @@ mod tests {
         std::os::unix::fs::symlink(dir, dir.join("loop")).unwrap();
 
         let tree = ProjectTree::scan(dir);
-        assert!(matches!(tree.root_node(), FileNode::Directory { .. }));
         // No crash/hang is the assertion; verify the deep file is reachable
         // within the depth cap.
         assert!(
