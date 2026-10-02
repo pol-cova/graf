@@ -104,7 +104,9 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     private var focusedParagraph: NSRange?
     private var focusMode = true
     private var shownFile: URL?
-    private var hintViews: [NSView] = []
+    /// Owns the error hints, so their subviews, underlines, and the frame
+    /// observer are not this coordinator's problem.
+    @ObservationIgnored private var hints: DiagnosticHints?
     private var shownDiagnostics: [GrafCore.Diagnostic] = []
     /// Set while the coordinator itself replaces the text (opening a file),
     /// so that load is not mistaken for an edit.
@@ -147,12 +149,10 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             contentStorage.textStorage = workspace.textStorage
         }
         workspace.textStorage.delegate = self
+        let hints = DiagnosticHints(textView: textView)
+        hints.observeReflow()
+        self.hints = hints
         loadCurrentFile()
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(frameDidChange),
-            name: NSView.frameDidChangeNotification, object: textView
-        )
     }
 
     func update(
@@ -170,7 +170,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             isLoading = true
             restyle(NSRange(location: 0, length: workspace.textStorage.length))
             isLoading = false
-            if !hintViews.isEmpty { showDiagnostics() }
+            if hints?.isVisible == true { showDiagnostics() }
         }
         if let jump, jump.id != handledJump {
             handledJump = jump.id
@@ -304,6 +304,10 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
 
     /// Applies prose and markup attributes to `range`. Runs synchronously on
     /// the edited paragraphs only, so it keeps up with typing.
+    ///
+    /// Deciding *what* each span looks like is `MarkupStyler`'s job, in
+    /// GrafKit, where it is unit tested. This method only translates those
+    /// styles into `Theme` fonts and colors.
     private func restyle(_ range: NSRange) {
         let storage = workspace.textStorage
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
@@ -328,22 +332,27 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         ], range: range)
 
         let markup = Theme.markupFont(prose: proseSize)
-        for token in MarkupScanner.scan(storage.string as NSString, in: range, syntax: syntax) {
-            switch token {
-            case let .command(tokenRange), let .delimiter(tokenRange):
-                storage.addAttributes([.font: markup, .foregroundColor: Theme.markup], range: tokenRange)
-            case let .comment(tokenRange):
-                storage.addAttributes([.font: markup, .foregroundColor: Theme.comment], range: tokenRange)
-            case let .reference(tokenRange):
-                storage.addAttributes([
+        let text = storage.string as NSString
+        for token in MarkupStyler.styledTokens(in: text, syntax: syntax, over: range) {
+            let attributes: [NSAttributedString.Key: Any]
+            switch token.style {
+            case .prose:
+                continue
+            case .markup:
+                attributes = [.font: markup, .foregroundColor: Theme.markup]
+            case .comment:
+                attributes = [.font: markup, .foregroundColor: Theme.comment]
+            case .reference:
+                attributes = [
                     .font: Theme.markupFont(prose: proseSize, emphasis: true),
                     .foregroundColor: Theme.link,
-                ], range: tokenRange)
-            case let .math(tokenRange):
-                storage.addAttributes([.font: Theme.prose(size: proseSize, italic: true)], range: tokenRange)
-            case let .heading(tokenRange, level):
-                storage.addAttributes([.font: Theme.headingFont(level: level, prose: proseSize)], range: tokenRange)
+                ]
+            case .math:
+                attributes = [.font: Theme.prose(size: proseSize, italic: true)]
+            case let .heading(level):
+                attributes = [.font: Theme.headingFont(level: level, prose: proseSize)]
             }
+            storage.addAttributes(attributes, range: token.range)
         }
     }
 
@@ -382,14 +391,75 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     /// Puts a quiet hint under each line that has an error, like frame 05 of
     /// the concept. Hints clear as soon as the writer types again.
     private func showDiagnostics() {
-        clearHints()
+        hints?.show(shownDiagnostics, in: workspace.textStorage.string as NSString)
+    }
+
+    private func clearHints() {
+        hints?.clear()
+    }
+}
+
+/// Owns the error hints under broken lines.
+///
+/// This type exists so the coordinator does not have to. It holds the hint
+/// subviews, the underline rendering attributes, and the frame-change
+/// observer that repositions them; tearing them down is its own
+/// responsibility rather than a `clearHints()` call the caller must
+/// remember to make on every path that invalidates them.
+@MainActor
+final class DiagnosticHints {
+    private weak var textView: NSTextView?
+    private var views: [NSView] = []
+    /// Ranges currently underlined, so clearing retracts them precisely
+    /// rather than stripping attributes from the whole document.
+    private var underlined: [NSTextRange] = []
+    /// The diagnostics last drawn, kept so a reflow can redraw the same set
+    /// without the coordinator re-supplying them.
+    private var lastDiagnostics: [GrafCore.Diagnostic] = []
+
+    /// Whether any hint is showing. The frame observer skips work when
+    /// nothing is visible, which is the common case.
+    var isVisible: Bool { !views.isEmpty }
+
+    init(textView: NSTextView) {
+        self.textView = textView
+    }
+
+    /// Starts watching for reflow, so hints follow their line when the
+    /// column width changes.
+    func observeReflow() {
+        NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification,
+            object: textView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.repositionIfVisible() }
+        }
+    }
+
+    /// Removes every hint and underline. Safe to call when nothing is shown.
+    func clear() {
+        views.forEach { $0.removeFromSuperview() }
+        views.removeAll()
+        guard let layoutManager = textView?.textLayoutManager
+        else { underlined = []; return }
+        for range in underlined {
+            layoutManager.removeRenderingAttribute(.underlineStyle, for: range)
+            layoutManager.removeRenderingAttribute(.underlineColor, for: range)
+        }
+        underlined = []
+    }
+
+    /// Draws one hint per error diagnostic, at the line that caused it.
+    func show(_ diagnostics: [GrafCore.Diagnostic], in text: NSString) {
+        lastDiagnostics = diagnostics
+        clear()
         guard let textView,
               let layoutManager = textView.textLayoutManager,
               let content = layoutManager.textContentManager as? NSTextContentStorage
         else { return }
-        let text = workspace.textStorage.string as NSString
 
-        for diagnostic in shownDiagnostics where diagnostic.severity == .error {
+        for diagnostic in diagnostics where diagnostic.severity == .error {
             guard let line = diagnostic.line, line > 0,
                   let lineRange = text.rangeOfLine(Int(line)),
                   let textRange = content.textRange(for: lineRange)
@@ -406,19 +476,27 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
                     for: underline
                 )
                 layoutManager.addRenderingAttribute(.underlineColor, value: Theme.error, for: underline)
+                underlined.append(underline)
             }
 
             let hint = NSHostingView(rootView: DiagnosticHint(message: diagnostic.message))
             hint.setFrameSize(hint.fittingSize)
-            hint.setFrameOrigin(hintOrigin(size: hint.frame.size, fragment: fragment, in: textView))
+            hint.setFrameOrigin(origin(size: hint.frame.size, fragment: fragment, in: textView))
             textView.addSubview(hint)
-            hintViews.append(hint)
+            views.append(hint)
         }
+    }
+
+    /// Redraws in place after a reflow. Skips the work entirely when nothing is
+    /// showing, which is the common case.
+    func repositionIfVisible() {
+        guard isVisible else { return }
+        show(lastDiagnostics, in: (textView?.string ?? "") as NSString)
     }
 
     /// Places a hint where it never covers text: after the end of the
     /// broken line, else in the right margin, else under the line.
-    private func hintOrigin(size: NSSize, fragment: NSTextLayoutFragment, in textView: NSTextView) -> NSPoint {
+    private func origin(size: NSSize, fragment: NSTextLayoutFragment, in textView: NSTextView) -> NSPoint {
         // Layout fragment frames are in text-container coordinates.
         let origin = textView.textContainerOrigin
         let frame = fragment.layoutFragmentFrame
@@ -437,21 +515,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             return NSPoint(x: columnEnd + 12, y: centeredY)
         }
         return NSPoint(x: origin.x + frame.minX, y: origin.y + frame.maxY + 2)
-    }
-
-    private func clearHints() {
-        hintViews.forEach { $0.removeFromSuperview() }
-        hintViews.removeAll()
-        guard let layoutManager = textView?.textLayoutManager,
-              let content = layoutManager.textContentManager
-        else { return }
-        layoutManager.removeRenderingAttribute(.underlineStyle, for: content.documentRange)
-        layoutManager.removeRenderingAttribute(.underlineColor, for: content.documentRange)
-    }
-
-    @objc private func frameDidChange() {
-        // Line positions move when the column reflows.
-        if !hintViews.isEmpty { showDiagnostics() }
     }
 }
 
