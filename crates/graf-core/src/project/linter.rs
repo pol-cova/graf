@@ -55,21 +55,6 @@ static WEASEL_WORDS: &[(&str, &str)] = &[
 
 static PASSIVE_BE_FORMS: &[&str] = &["is", "are", "was", "were", "been", "being", "be"];
 
-pub fn lint_academic_warnings_as_diagnostics(
-    text: &str,
-    is_typst: bool,
-) -> Vec<crate::compiler::diagnostics::Diagnostic> {
-    lint_academic_text(text, is_typst)
-        .into_iter()
-        .map(|warning| {
-            crate::compiler::diagnostics::Diagnostic::from_style_warning(
-                warning.line,
-                warning.message,
-            )
-        })
-        .collect()
-}
-
 pub fn lint_academic_text(text: &str, is_typst: bool) -> Vec<StyleWarning> {
     let mut warnings = Vec::new();
 
@@ -314,26 +299,23 @@ mod tests {
 
     #[test]
     fn lint_diagnostics_draw_ids_from_one_growing_sequence() {
-        let first = lint_academic_warnings_as_diagnostics("was shown", false);
-        let second = lint_academic_warnings_as_diagnostics("was shown", false);
+        // Diagnostic ids come from one process-wide sequence, so two lint runs
+        // never repeat an id. The bridge used to convert `StyleWarning` into a
+        // `Diagnostic` via `Diagnostic::from_style_warning`, which is the only
+        // thing that allocated them for lint output; the conversion itself is
+        // gone, so this now asserts the allocator directly.
+        let first = crate::compiler::diagnostics::Diagnostic::from_style_warning(1, "first");
+        let second = crate::compiler::diagnostics::Diagnostic::from_style_warning(1, "second");
 
-        assert!(!first.is_empty() && !second.is_empty());
-        let max_first = first.iter().map(|d| d.id.0).max().unwrap();
-        let min_second = second.iter().map(|d| d.id.0).min().unwrap();
-        assert!(
-            min_second > max_first,
-            "ids must never repeat or reset between lint runs"
+        assert!(second.id.0 > first.id.0, "ids must never repeat or reset");
+        assert_eq!(
+            first.severity,
+            crate::compiler::diagnostics::Severity::Warning
         );
-        for diagnostic in first.iter().chain(second.iter()) {
-            assert_eq!(
-                diagnostic.severity,
-                crate::compiler::diagnostics::Severity::Warning
-            );
-            assert_eq!(
-                diagnostic.source,
-                crate::compiler::diagnostics::DiagnosticSource::Parser
-            );
-        }
+        assert_eq!(
+            first.source,
+            crate::compiler::diagnostics::DiagnosticSource::Parser
+        );
     }
 
     #[test]

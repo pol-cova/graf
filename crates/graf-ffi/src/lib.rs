@@ -19,7 +19,7 @@ use graf_core::project::recovery::RecoveryJournal;
 use graf_core::project::settings::GrafSettings;
 use graf_core::project::state::ProjectState;
 use graf_core::project::{
-    bibtex, linter, outline, persistence, stats, templates, text_search, tree, zotero,
+    linter, outline, persistence, stats, templates, text_search, tree, zotero,
 };
 use graf_core::text::completion;
 
@@ -145,7 +145,7 @@ impl Compiler {
             tectonic: TectonicEngine::new(),
             typst: TypstEngine::new(),
             // Swift debounces edits; the controller only tracks revisions.
-            controller: Mutex::new(CompilerController::with_debounce(Duration::ZERO)),
+            controller: Mutex::new(CompilerController::new()),
             in_flight: Mutex::new(None),
         })
     }
@@ -308,38 +308,6 @@ pub fn stats(text: String, engine: Engine) -> Stats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct BibEntry {
-    pub key: String,
-    pub entry_type: String,
-    pub title: Option<String>,
-    pub author: Option<String>,
-    pub year: Option<String>,
-}
-
-/// Entries of a `.bib` file on disk.
-#[uniffi::export]
-pub fn bib_entries(path: String) -> Result<Vec<BibEntry>, FileError> {
-    let path = PathBuf::from(path);
-    let content = std::fs::read_to_string(&path).map_err(|error| FileError::io(&path, error))?;
-    Ok(bibtex::parse_bibtex_entries(&content)
-        .into_iter()
-        .map(|entry| BibEntry {
-            key: entry.key,
-            entry_type: entry.entry_type,
-            title: entry.title,
-            author: entry.author,
-            year: entry.year,
-        })
-        .collect())
-}
-
-/// `\label{...}` keys defined in a LaTeX snapshot.
-#[uniffi::export]
-pub fn labels(text: String) -> Vec<String> {
-    bibtex::parse_latex_labels(&text)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct StyleWarning {
     /// One-based line and zero-based column of the match.
     pub line: u64,
@@ -378,9 +346,12 @@ pub fn templates() -> Vec<Template> {
     templates::builtin_templates()
         .iter()
         .filter_map(|template| {
-            let engine = match template.kind.as_engine()? {
-                graf_core::compiler::EngineKind::Latex => Engine::Latex,
-                graf_core::compiler::EngineKind::Typst => Engine::Typst,
+            let engine = match template.kind {
+                graf_core::project::document::DocumentKind::Latex => Engine::Latex,
+                graf_core::project::document::DocumentKind::Typst => Engine::Typst,
+                // Plain-text templates have no engine, so they cannot be
+                // offered as something to compile.
+                graf_core::project::document::DocumentKind::PlainText => return None,
             };
             Some(Template {
                 id: template.id.to_string(),
@@ -815,12 +786,6 @@ mod tests {
         let temp = std::env::temp_dir().join("graf-ffi-unknown-template");
         let result = create_project(temp.display().to_string(), "nope".to_string());
         assert!(matches!(result, Err(FileError::UnknownTemplate { .. })));
-    }
-
-    #[test]
-    fn missing_bib_file_is_an_io_error() {
-        let result = bib_entries("/nonexistent/graf/refs.bib".to_string());
-        assert!(matches!(result, Err(FileError::Io { .. })));
     }
 
     #[test]

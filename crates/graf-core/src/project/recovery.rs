@@ -7,12 +7,6 @@ use super::persistence::atomic_write;
 
 const RECOVERY_FILE_NAME: &str = "session_recovery.json";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RestoreTarget {
-    Existing(PathBuf),
-    Untitled(String),
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryEntry {
     pub title: String,
@@ -104,13 +98,6 @@ fn closing_suffix(prefix: &str) -> String {
 impl RecoveryJournal {
     pub fn new(entries: Vec<RecoveryEntry>) -> Self {
         Self { entries }
-    }
-
-    pub fn restore_target(entry: &RecoveryEntry) -> RestoreTarget {
-        match &entry.path {
-            Some(path) if path.is_file() => RestoreTarget::Existing(path.clone()),
-            _ => RestoreTarget::Untitled(entry.title.clone()),
-        }
     }
 
     /// Serialization is infallible for this shape, but the Result keeps the
@@ -266,27 +253,24 @@ mod tests {
     }
 
     #[test]
-    fn restore_target_prefers_existing_files() {
+    fn an_entry_records_the_file_it_journaled() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("paper.tex");
         std::fs::write(&path, "on disk").unwrap();
 
         let existing = RecoveryEntry::new("paper.tex", Some(path.clone()), "unsaved");
-        let missing = RecoveryEntry::new("draft.tex", Some(temp.path().join("gone.tex")), "text");
         let untitled = RecoveryEntry::new("notes.typ", None, "= Notes");
 
-        assert_eq!(
-            RecoveryJournal::restore_target(&existing),
-            RestoreTarget::Existing(path)
-        );
-        assert_eq!(
-            RecoveryJournal::restore_target(&missing),
-            RestoreTarget::Untitled("draft.tex".to_string())
-        );
-        assert_eq!(
-            RecoveryJournal::restore_target(&untitled),
-            RestoreTarget::Untitled("notes.typ".to_string())
-        );
+        // The journal stores the path and leaves the "does this still exist"
+        // decision to the app: `Workspace.restoreRecovered` writes the
+        // recovered text to this path when it differs from the open file, and
+        // a missing one surfaces as a save error rather than silently
+        // creating a new buffer. `RestoreTarget` used to make that choice
+        // here, and nothing constructed one.
+        assert_eq!(existing.path.as_deref(), Some(path.as_path()));
+        assert_eq!(existing.title, "paper.tex");
+        assert_eq!(untitled.path, None);
+        assert_eq!(untitled.title, "notes.typ");
     }
 
     #[test]

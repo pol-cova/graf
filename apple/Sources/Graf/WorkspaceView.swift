@@ -1,4 +1,3 @@
-import GrafCore
 import SwiftUI
 
 /// A project window: the text, and nothing else until asked for.

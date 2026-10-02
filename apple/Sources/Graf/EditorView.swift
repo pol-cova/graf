@@ -19,9 +19,7 @@ struct EditorView: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = true
         scrollView.backgroundColor = Theme.background
-        scrollView.contentView.postsBoundsChangedNotifications = true
         return scrollView
     }
 
@@ -106,7 +104,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     private var shownFile: URL?
     /// Owns the error hints, so their subviews, underlines, and the frame
     /// observer are not this coordinator's problem.
-    @ObservationIgnored private var hints: DiagnosticHints?
+    private var hints: DiagnosticHints?
     private var shownDiagnostics: [GrafCore.Diagnostic] = []
     /// Set while the coordinator itself replaces the text (opening a file),
     /// so that load is not mistaken for an edit.
@@ -336,8 +334,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         for token in MarkupStyler.styledTokens(in: text, syntax: syntax, over: range) {
             let attributes: [NSAttributedString.Key: Any]
             switch token.style {
-            case .prose:
-                continue
             case .markup:
                 attributes = [.font: markup, .foregroundColor: Theme.markup]
             case .comment:
@@ -416,6 +412,11 @@ final class DiagnosticHints {
     /// The diagnostics last drawn, kept so a reflow can redraw the same set
     /// without the coordinator re-supplying them.
     private var lastDiagnostics: [GrafCore.Diagnostic] = []
+    /// Retained so `deinit` can unregister; see `observeReflow`.
+    /// `nonisolated(unsafe)` because `deinit` on a `@MainActor` type is not
+    /// isolated, and the token is only ever created on the main actor and
+    /// read once during deallocation.
+    nonisolated(unsafe) private var reflowObserver: (any NSObjectProtocol)?
 
     /// Whether any hint is showing. The frame observer skips work when
     /// nothing is visible, which is the common case.
@@ -427,13 +428,25 @@ final class DiagnosticHints {
 
     /// Starts watching for reflow, so hints follow their line when the
     /// column width changes.
+    ///
+    /// The observer token is kept and removed in `deinit`. A block observer
+    /// holding `[weak self]` cannot leak this object, but without the
+    /// removal it stays registered for the process lifetime — one per
+    /// coordinator ever created — and runs a main-actor hop on every frame
+    /// change of a text view nobody is looking at.
     func observeReflow() {
-        NotificationCenter.default.addObserver(
+        reflowObserver = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification,
             object: textView,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.repositionIfVisible() }
+        }
+    }
+
+    deinit {
+        if let reflowObserver {
+            NotificationCenter.default.removeObserver(reflowObserver)
         }
     }
 
