@@ -23,8 +23,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      # --workspace, not the default member set: graf-canvas is excluded from
+      # default-members because it is a standalone tool, but its tests and
+      # lints still have to be checked or nothing verifies the .graf reader.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
 
   app:
     runs-on: macos-15
