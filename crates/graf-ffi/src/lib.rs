@@ -19,7 +19,7 @@ use graf_core::project::recovery::RecoveryJournal;
 use graf_core::project::settings::GrafSettings;
 use graf_core::project::state::ProjectState;
 use graf_core::project::{
-    bibtex, linter, outline, persistence, stats, templates, text_search, tree, zotero,
+    linter, outline, persistence, stats, templates, text_search, tree, zotero,
 };
 use graf_core::text::completion;
 
@@ -305,38 +305,6 @@ pub fn stats(text: String, engine: Engine) -> Stats {
         reading_minutes: stats.reading_time_mins,
         estimated_pages: stats.estimated_pages,
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct BibEntry {
-    pub key: String,
-    pub entry_type: String,
-    pub title: Option<String>,
-    pub author: Option<String>,
-    pub year: Option<String>,
-}
-
-/// Entries of a `.bib` file on disk.
-#[uniffi::export]
-pub fn bib_entries(path: String) -> Result<Vec<BibEntry>, FileError> {
-    let path = PathBuf::from(path);
-    let content = std::fs::read_to_string(&path).map_err(|error| FileError::io(&path, error))?;
-    Ok(bibtex::parse_bibtex_entries(&content)
-        .into_iter()
-        .map(|entry| BibEntry {
-            key: entry.key,
-            entry_type: entry.entry_type,
-            title: entry.title,
-            author: entry.author,
-            year: entry.year,
-        })
-        .collect())
-}
-
-/// `\label{...}` keys defined in a LaTeX snapshot.
-#[uniffi::export]
-pub fn labels(text: String) -> Vec<String> {
-    bibtex::parse_latex_labels(&text)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -818,12 +786,6 @@ mod tests {
         let temp = std::env::temp_dir().join("graf-ffi-unknown-template");
         let result = create_project(temp.display().to_string(), "nope".to_string());
         assert!(matches!(result, Err(FileError::UnknownTemplate { .. })));
-    }
-
-    #[test]
-    fn missing_bib_file_is_an_io_error() {
-        let result = bib_entries("/nonexistent/graf/refs.bib".to_string());
-        assert!(matches!(result, Err(FileError::Io { .. })));
     }
 
     #[test]
