@@ -1,14 +1,14 @@
 import Foundation
 
 /// Source language of the document being edited.
+///
+/// Classification belongs to one place, `Workspace.syntax(for:)`, which
+/// returns `nil` for a file Graf does not compile. A defaulting-to-LaTeX
+/// initializer here would disagree with it on anything that is neither
+/// `.tex`-family nor `.typ`, so there is no second classifier.
 public enum Syntax: Sendable {
     case latex
     case typst
-
-    /// Chooses the syntax from a file name, defaulting to LaTeX.
-    public init(fileName: String) {
-        self = fileName.lowercased().hasSuffix(".typ") ? .typst : .latex
-    }
 }
 
 /// A span of markup the editor styles differently from prose. Ranges are

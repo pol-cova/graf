@@ -22,7 +22,6 @@ public final class Debouncer {
         }
     }
 
-    /// Runs the pending action now instead of waiting, if there is one.
     public func flush(_ action: @escaping @MainActor () async -> Void) async {
         guard pending != nil else { return }
         pending?.cancel()

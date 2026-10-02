@@ -126,8 +126,9 @@ pub fn resolve(name: &str, env_var: &str, common_paths: &[&str]) -> Option<Resol
     )
 }
 
-/// Directory holding compiler binaries shipped inside graf.app, when running
-/// from a bundle layout. Dev builds (`target/debug/graf`) return `None`.
+/// Directory holding compiler binaries shipped inside graf.app: two levels
+/// above the executable, which is `Contents/MacOS/Graf`. A dev build yields a
+/// path that does not exist, and the caller falls through to `PATH`.
 pub fn bundled_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let macos_dir = exe.parent()?;

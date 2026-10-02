@@ -231,7 +231,6 @@ struct RootView: View {
         // Prefer an empty window for new requests; any window may accept.
         .handlesExternalEvents(preferring: model.workspace == nil ? ["*"] : [], allowing: ["*"])
         .onChange(of: requests.pending, initial: true) {
-            // Only an empty window takes a waiting request.
             guard model.workspace == nil, !model.isOpening, let url = requests.take() else { return }
             if WindowRegistry.shared.focusWindow(showing: url) { return }
             Task { await model.open(url) }

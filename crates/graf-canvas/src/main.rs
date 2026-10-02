@@ -2,7 +2,7 @@
 //!
 //! The canvas editor was removed in #111. This tool exists so files written
 //! by it are not lost: the format is plain JSON, so the content is fully
-//! recoverable. See `docs/adr/0001-native-swift-front-end.md`.
+//! recoverable.
 //!
 //!     graf-canvas scene.graf                 # -> scene.svg
 //!     graf-canvas -o out/ diagrams/*.graf    # -> out/diagrams/*.svg
@@ -68,9 +68,13 @@ fn run() -> Result<(), String> {
         return Err(format!("no input files\n\n{USAGE}"));
     }
 
+    // The directory every input sits under, so `-o` can reproduce the input's
+    // shape instead of flattening a tree into one folder.
+    let input_root = common_ancestor(&inputs);
+
     let mut failures = 0;
     for path in &inputs {
-        if let Err(error) = convert(path, output_dir.as_deref(), check_only) {
+        if let Err(error) = convert(path, output_dir.as_deref(), check_only, &input_root) {
             eprintln!("{}: {error}", path.display());
             failures += 1;
         }
@@ -86,13 +90,50 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn convert(path: &Path, output_dir: Option<&Path>, check_only: bool) -> Result<(), String> {
+/// The deepest directory containing every input, or the first input's parent
+/// when they share none.
+fn common_ancestor(inputs: &[PathBuf]) -> PathBuf {
+    let mut shared: Option<PathBuf> = None;
+    for path in inputs {
+        let parent = path.parent().unwrap_or(Path::new(""));
+        shared = Some(match shared {
+            None => parent.into(),
+            Some(current) => {
+                let mut next = PathBuf::new();
+                for (a, b) in current.components().zip(parent.components()) {
+                    if a != b {
+                        break;
+                    }
+                    next.push(a);
+                }
+                next
+            }
+        });
+    }
+    match shared {
+        Some(path) if path.as_os_str().is_empty() => PathBuf::from("."),
+        Some(path) => path,
+        None => PathBuf::from("."),
+    }
+}
+
+fn convert(
+    path: &Path,
+    output_dir: Option<&Path>,
+    check_only: bool,
+    input_root: &Path,
+) -> Result<(), String> {
     let json = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let document =
         CanvasDocument::from_json(&json).map_err(|error| format!("not a .graf scene: {error}"))?;
 
+    // Output directories preserve the input's parent directory, so a batch of
+    // same-named scenes in different subfolders does not collapse into one.
     let destination = match output_dir {
-        Some(directory) => directory.join(with_svg_extension(path)),
+        Some(directory) => {
+            let relative = path.strip_prefix(input_root).unwrap_or(path);
+            directory.join(relative).with_extension("svg")
+        }
         None => path.with_extension("svg"),
     };
 
@@ -121,17 +162,6 @@ fn convert(path: &Path, output_dir: Option<&Path>, check_only: bool) -> Result<(
     Ok(())
 }
 
-/// `scene.graf` -> `scene.svg`, keeping any directories in the input name so
-/// a batch keeps its structure when writing into an output directory.
-fn with_svg_extension(path: &Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("scene.svg"));
-    name.set_extension("svg");
-    name
-}
-
 /// Writes through a temporary file in the destination directory and renames,
 /// so an interrupted run never leaves a half-written SVG that looks valid.
 fn write_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
@@ -150,4 +180,44 @@ fn write_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         file.sync_all()?;
     }
     fs::rename(&temporary, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shared_ancestor_is_the_deepest_common_directory() {
+        let inputs = vec![
+            PathBuf::from("diagrams/a/scene.graf"),
+            PathBuf::from("diagrams/b/scene.graf"),
+        ];
+        assert_eq!(common_ancestor(&inputs), PathBuf::from("diagrams"));
+    }
+
+    #[test]
+    fn unrelated_inputs_fall_back_to_the_current_directory() {
+        let inputs = vec![PathBuf::from("/one/a.graf"), PathBuf::from("/two/b.graf")];
+        assert_eq!(common_ancestor(&inputs), PathBuf::from("/"));
+    }
+
+    /// The bug this exists for: `-o` must not write both `a/scene.graf` and
+    /// `b/scene.graf` to the same `out/scene.svg`, silently losing one.
+    #[test]
+    fn same_named_scenes_in_different_folders_get_different_outputs() {
+        let a = PathBuf::from("diagrams/a/scene.graf");
+        let b = PathBuf::from("diagrams/b/scene.graf");
+        let ancestor = common_ancestor(&[a.clone(), b.clone()]);
+
+        let out_a = PathBuf::from("out")
+            .join(a.strip_prefix(&ancestor).unwrap_or(&a))
+            .with_extension("svg");
+        let out_b = PathBuf::from("out")
+            .join(b.strip_prefix(&ancestor).unwrap_or(&b))
+            .with_extension("svg");
+
+        assert_ne!(out_a, out_b, "distinct inputs must not collide");
+        assert_eq!(out_a, PathBuf::from("out/a/scene.svg"));
+        assert_eq!(out_b, PathBuf::from("out/b/scene.svg"));
+    }
 }

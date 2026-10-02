@@ -282,10 +282,8 @@ mod tests {
     fn latex_templates_compile_standalone() {
         // Every LaTeX template must open and close the document environment;
         // a template that cannot compile on first try is a broken first run.
-        // This used to go through `filter_templates`, which existed so the
-        // GPUI picker and its Enter-accept would agree on the visible list.
-        // The Swift sheet filters its own copy of `templates()`, so the check
-        // now walks the builtin list directly.
+        // Walks the builtin list directly: the Swift sheet filters its own
+        // copy of `templates()`.
         let latex: Vec<_> = builtin_templates()
             .iter()
             .filter(|t| t.kind == DocumentKind::Latex)

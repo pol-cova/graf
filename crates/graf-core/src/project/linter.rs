@@ -300,10 +300,8 @@ mod tests {
     #[test]
     fn lint_diagnostics_draw_ids_from_one_growing_sequence() {
         // Diagnostic ids come from one process-wide sequence, so two lint runs
-        // never repeat an id. The bridge used to convert `StyleWarning` into a
-        // `Diagnostic` via `Diagnostic::from_style_warning`, which is the only
-        // thing that allocated them for lint output; the conversion itself is
-        // gone, so this now asserts the allocator directly.
+        // never repeat an id. `from_style_warning` is the only thing that
+        // allocates them for lint output, so it is what this exercises.
         let first = crate::compiler::diagnostics::Diagnostic::from_style_warning(1, "first");
         let second = crate::compiler::diagnostics::Diagnostic::from_style_warning(1, "second");
 

@@ -40,9 +40,8 @@ public enum Paragraphs {
         return NSRange(location: start, length: end - start)
     }
 
-    /// Expands `range` to whole paragraphs, for restyling after an edit.
-    /// Uses line boundaries on both sides so styling never splits a token
-    /// that spans a line.
+    /// Expands `range` to whole lines, so styling and spell checking never split
+    /// a token that spans a line.
     public static func enclosingLines(in text: NSString, of range: NSRange) -> NSRange {
         guard text.length > 0 else { return NSRange(location: 0, length: 0) }
         let clamped = NSIntersectionRange(range, NSRange(location: 0, length: text.length))

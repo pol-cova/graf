@@ -85,7 +85,8 @@ struct PDFPreview: NSViewRepresentable {
 
     func updateNSView(_ view: PDFView, context: Context) {
         guard view.document !== document else { return }
-        // Keep the reader's place: same page, same point on it.
+        // A rebuild must not throw the reader back to page one: the point
+        // within the page is restored too, not just the page index.
         let destination = view.currentDestination
         let pageIndex = destination?.page.flatMap { view.document?.index(for: $0) } ?? page
         let point = destination?.point

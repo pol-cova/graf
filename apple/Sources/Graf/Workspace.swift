@@ -351,7 +351,7 @@ final class Workspace {
 
     var fileName: String { fileURL.lastPathComponent }
 
-    /// Path relative to the project root, for recents and display.
+    /// Path relative to the project root, for the recents list.
     var relativePath: String {
         let root = project.root.hasSuffix("/") ? project.root : project.root + "/"
         return fileURL.path.hasPrefix(root) ? String(fileURL.path.dropFirst(root.count)) : fileURL.lastPathComponent

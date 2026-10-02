@@ -185,7 +185,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         }
     }
 
-    /// Styles the whole document after a file is opened and restores the caret.
     private func loadCurrentFile() {
         guard let textView else { return }
         shownFile = workspace.fileURL
@@ -384,8 +383,8 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
 
     // MARK: Diagnostics
 
-    /// Puts a quiet hint under each line that has an error, like frame 05 of
-    /// the concept. Hints clear as soon as the writer types again.
+    /// Puts a quiet hint under each line that has an error. Hints clear as soon
+    /// as the writer types again.
     private func showDiagnostics() {
         hints?.show(shownDiagnostics, in: workspace.textStorage.string as NSString)
     }
