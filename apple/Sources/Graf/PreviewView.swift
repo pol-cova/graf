@@ -10,12 +10,12 @@ struct PreviewPanel: View {
         VStack(spacing: 0) {
             HStack {
                 Text(pageLabel)
-                    .font(.system(size: 12))
+                    .font(Theme.Chrome.calloutUI)
                     .foregroundStyle(.secondary)
                 Spacer()
                 if case .failed = workspace.status, workspace.pdf != nil {
                     Label("Showing last good build", systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 12))
+                        .font(Theme.Chrome.calloutUI)
                         .foregroundStyle(.secondary)
                 }
                 Button {
@@ -128,7 +128,7 @@ struct PagePeek: View {
                 if let image = thumbnail {
                     Image(nsImage: image).resizable().interpolation(.high)
                 } else {
-                    Color.white
+                    Color(nsColor: Theme.page)
                 }
             }
             .frame(width: 112, height: 146)
@@ -138,7 +138,7 @@ struct PagePeek: View {
             .scaleEffect(hovering ? 1.1 : 1, anchor: .trailing)
 
             Text("p. \(pageIndex + 1)")
-                .font(.system(size: 12))
+                .font(Theme.Chrome.calloutUI)
                 .foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())

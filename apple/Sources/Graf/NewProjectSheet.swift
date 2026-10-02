@@ -37,7 +37,7 @@ struct NewProjectSheet: View {
         VStack(alignment: .leading, spacing: 22) {
             TextField("Project name", text: $name)
                 .textFieldStyle(.plain)
-                .font(.system(size: 24, weight: .semibold, design: .serif))
+                .font(Theme.Chrome.sheetTitleUI)
                 .padding(.bottom, 6)
                 .overlay(alignment: .bottom) { Divider() }
 
@@ -49,11 +49,11 @@ struct NewProjectSheet: View {
             .fixedSize()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Start from").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("Start from").font(Theme.Chrome.calloutUI).foregroundStyle(.secondary)
                 List(visibleTemplates, id: \.id, selection: $templateID) { template in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(template.name).font(.system(size: 13, weight: .medium))
-                        Text(template.description).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(template.name).font(Theme.Chrome.rowMediumUI)
+                        Text(template.description).font(Theme.Chrome.calloutUI).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 3)
                 }
@@ -64,7 +64,7 @@ struct NewProjectSheet: View {
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.grafError)
-                    .font(.system(size: 12))
+                    .font(Theme.Chrome.calloutUI)
             }
 
             Spacer(minLength: 0)
@@ -73,7 +73,7 @@ struct NewProjectSheet: View {
                 Button(location.abbreviatedPath) { chooseLocation() }
                     .buttonStyle(.link)
                     .foregroundStyle(.secondary)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(Theme.Chrome.calloutMonoUI)
                     .help("Choose where the project folder is created")
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
@@ -87,22 +87,22 @@ struct NewProjectSheet: View {
 
     private var folderPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("This creates").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text("This creates").font(Theme.Chrome.calloutUI).foregroundStyle(.secondary)
             Text(slug + "/")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(Theme.Chrome.rowMonoSemiboldUI)
                 .foregroundStyle(Color.grafLink)
             if let template = selectedTemplate {
                 HStack {
                     Text(template.fileName)
                     Spacer()
-                    Text("opens here").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text("opens here").font(Theme.Chrome.captionUI).foregroundStyle(.tertiary)
                 }
-                .font(.system(size: 13, design: .monospaced))
+                .font(Theme.Chrome.rowMonoUI)
                 .padding(.leading, 16)
             }
             Spacer()
             Text("Plain files. Works with Git, iCloud Drive, or any other editor.")
-                .font(.system(size: 12))
+                .font(Theme.Chrome.calloutUI)
                 .foregroundStyle(.secondary)
         }
     }

@@ -463,7 +463,7 @@ struct DiagnosticHint: View {
         HStack(spacing: 8) {
             Circle().fill(Color.grafError).frame(width: 6, height: 6)
             Text(message)
-                .font(.system(size: 12))
+                .font(Theme.Chrome.calloutUI)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
         }

@@ -80,7 +80,7 @@ struct WorkspaceView: View {
                 .foregroundStyle(workspace.focusMode ? .primary : .secondary)
                 .help("Dim everything but the paragraph you're writing (⇧⌘F)")
         }
-        .font(.system(size: 12))
+        .font(Theme.Chrome.calloutUI)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 20)
         .frame(height: 32)
@@ -106,7 +106,7 @@ struct WorkspaceView: View {
                     Text("Edited").foregroundStyle(.tertiary)
                 }
             }
-            .font(.system(size: 12))
+            .font(Theme.Chrome.calloutUI)
             .accessibilityElement(children: .combine)
         }
         ToolbarItem(placement: .primaryAction) {
@@ -146,7 +146,7 @@ private struct RecoveryBar: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
-        .font(.system(size: 13))
+        .font(Theme.Chrome.rowUI)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.bar)

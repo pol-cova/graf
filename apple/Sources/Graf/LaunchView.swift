@@ -14,9 +14,9 @@ struct LaunchView: View {
         VStack(alignment: .leading, spacing: 40) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(recents.isEmpty ? "Start writing." : "Pick up where you left off.")
-                    .font(.system(size: 40, weight: .semibold, design: .serif))
+                    .font(Theme.Chrome.wordmarkUI)
                 Text(subtitle)
-                    .font(.system(size: 14))
+                    .font(Theme.Chrome.bodyUI)
                     .foregroundStyle(.secondary)
             }
 
@@ -56,7 +56,7 @@ struct LaunchView: View {
             if let error = model.openError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.grafError)
-                    .font(.system(size: 13))
+                    .font(Theme.Chrome.rowUI)
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
@@ -88,16 +88,16 @@ private struct RecentRow: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name)
-                    .font(.system(size: 17, weight: .semibold, design: .serif))
+                    .font(Theme.Chrome.headingSerifUI)
                 Text(project.lastFile ?? project.path)
-                    .font(.system(size: 12))
+                    .font(Theme.Chrome.calloutUI)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
             Spacer()
             Text(project.openedAt, format: .relative(presentation: .named))
-                .font(.system(size: 12))
+                .font(Theme.Chrome.calloutUI)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)

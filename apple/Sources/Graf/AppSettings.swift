@@ -51,9 +51,9 @@ struct SettingsView: View {
                 Slider(value: proseSize, in: 14...28, step: 1) {
                     Text("Text size")
                 } minimumValueLabel: {
-                    Text("A").font(.system(size: 11))
+                    Text("A").font(Theme.Chrome.captionUI)
                 } maximumValueLabel: {
-                    Text("A").font(.system(size: 17))
+                    Text("A").font(Theme.Chrome.headingUI)
                 }
                 LabeledContent("Preview") {
                     Text("Readers rarely move in a straight line.")
