@@ -38,8 +38,8 @@ enum Theme {
     /// orientation, at lower contrast than the line being written.
     static let dimmed = dynamic(light: (150, 148, 144), dark: (116, 115, 110))
 
-    /// The only accent: links between source and output (references, the
-    /// caret, the sync marker).
+    /// The only accent: links between source and output — reference arguments,
+    /// and the caret.
     static let link = dynamic(light: (26, 13, 171), dark: (122, 150, 255))
 
     /// Only for the broken token and its hint.

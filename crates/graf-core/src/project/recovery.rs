@@ -265,8 +265,7 @@ mod tests {
         // decision to the app: `Workspace.restoreRecovered` writes the
         // recovered text to this path when it differs from the open file, and
         // a missing one surfaces as a save error rather than silently
-        // creating a new buffer. `RestoreTarget` used to make that choice
-        // here, and nothing constructed one.
+        // creating a new buffer.
         assert_eq!(existing.path.as_deref(), Some(path.as_path()));
         assert_eq!(existing.title, "paper.tex");
         assert_eq!(untitled.path, None);

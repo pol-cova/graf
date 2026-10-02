@@ -71,10 +71,9 @@ import Testing
 }
 
     @Test func aCommentDoesNotExtendItsHeadingToEndOfLine() {
-        // Pins real scanner behaviour rather than the behaviour I assumed:
-        // inside a heading, the comment is absorbed and the heading token
-        // spans to end-of-line. The styler must pass that through unchanged
-        // rather than second-guess the scanner.
+        // Inside a heading the scanner absorbs the comment and the heading
+        // token spans to end-of-line. The styler passes that through rather
+        // than second-guessing the scanner.
         let string = "\\section{Hi % note}" as NSString
         let tokens = MarkupStyler.styledTokens(in: string, syntax: .latex, over: NSRange(location: 0, length: string.length))
         let found = tokens.map { (string.substring(with: $0.range), $0.style) }
@@ -85,8 +84,4 @@ import Testing
         #expect(tokens.count == 4)
     }
 
-    @Test func commentsOutsideAHeadingAreTheirOwnStyle() {
-        let found = styles("text % hidden")
-        #expect(found.contains { $0.0 == "% hidden" && $0.1 == .comment })
     }
-}

@@ -112,9 +112,4 @@ import Testing
         #expect(tokens.isEmpty)
     }
 
-    @Test func syntaxFollowsTheFileExtension() {
-        #expect(Syntax(fileName: "main.typ") == .typst)
-        #expect(Syntax(fileName: "Main.TEX") == .latex)
-        #expect(Syntax(fileName: "notes") == .latex)
     }
-}

@@ -2,10 +2,10 @@
 //!
 //! # Why this crate exists
 //!
-//! Graf's canvas editor was removed in #111 (see
-//! `docs/adr/0001-native-swift-front-end.md`). It had no migration path, so
-//! users' `.graf` files became inert: the app no longer declares the `graf`
-//! document type, and nothing reads or writes the format any more.
+//! Graf's canvas editor was removed in #111, which shipped without a
+//! migration path, so users' `.graf` files became inert: the app no longer
+//! declares the `graf` document type, and nothing reads or writes the format
+//! any more.
 //!
 //! The format is plain JSON, so the content is fully recoverable without
 //! reverse-engineering, and this crate is that recovery path. It is
@@ -17,9 +17,9 @@
 //!
 //! A `.graf` file is a serialized [`CanvasDocument`]: a version, a viewport,
 //! a background color, and a list of elements. Every field here is
-//! transcribed from the original `src/canvas/scene.rs` so that a file
-//! written by the old canvas deserializes unchanged. Two details are load
-//! bearing and easy to lose:
+//! transcribed from the scene model the old canvas wrote, so a file it
+//! produced deserializes unchanged. Two details are load bearing and easy to
+//! lose:
 //!
 //! - `style.stroke_color` and `style.fill_color` are `Option<String>` with
 //!   `#[serde(default)]`. Legacy files carry explicit hex strings; newer ones

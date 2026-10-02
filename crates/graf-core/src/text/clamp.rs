@@ -6,10 +6,9 @@
 /// a multi-byte character has to move back to a boundary before the prefix
 /// can be sliced.
 ///
-/// This used to live at the bottom of `buffer.rs`, next to `TextBuffer`. That
-/// type is gone: Swift owns the live text in one `NSTextStorage`, so no
-/// buffer survives to own the function, and this is the only piece of it that
-/// was still live.
+/// Its own module because the `buffer.rs` it used to sit under is gone: Swift
+/// owns the live text in one `NSTextStorage`, so no Rust buffer survives, and
+/// this was the only part of it still needed.
 pub(crate) fn clamp_str_boundary(content: &str, offset: usize) -> usize {
     let mut offset = offset.min(content.len());
     while offset > 0 && !content.is_char_boundary(offset) {

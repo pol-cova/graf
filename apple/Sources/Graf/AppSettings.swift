@@ -1,4 +1,5 @@
 import GrafCore
+import GrafKit
 import Observation
 import SwiftUI
 
@@ -16,7 +17,7 @@ final class AppSettings {
         }
     }
     private(set) var saveError: String?
-    @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    @ObservationIgnored private let saver = Debouncer(delay: .milliseconds(400))
 
     private init() {
         values = loadSettings()
@@ -26,11 +27,8 @@ final class AppSettings {
     var compileDelay: Duration { .milliseconds(Int(values.compileDelayMs)) }
 
     private func scheduleSave() {
-        pendingSave?.cancel()
         let snapshot = values
-        pendingSave = Task {
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
+        saver.schedule { [self] in
             do {
                 try await Task.detached { try saveSettings(settings: snapshot) }.value
                 saveError = nil
@@ -41,7 +39,6 @@ final class AppSettings {
     }
 }
 
-/// Graf › Settings (⌘,).
 struct SettingsView: View {
     @Bindable private var settings = AppSettings.shared
 

@@ -38,7 +38,6 @@ public struct RecentProjects {
         return projects
     }
 
-    /// Adds or refreshes `project` at the top of the list.
     public func record(_ project: RecentProject) {
         var projects = all.filter { $0.path != project.path }
         projects.insert(project, at: 0)

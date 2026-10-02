@@ -93,14 +93,15 @@ struct WorkspaceView: View {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
-                    // Breathes on a 1.2s cycle while a build runs.
                     .phaseAnimator([1.0, 0.35]) { dot, phase in
                         dot.opacity(workspace.status == .compiling ? phase : 1)
                     } animation: { _ in .easeInOut(duration: 0.6) }
                 Text(workspace.status.label)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if workspace.isDirty {
+                // `isDirty` only adds something once a build is already running: the
+                // status alone says "Edited" between an edit and the commit.
+                if workspace.isDirty && workspace.status != .edited {
                     Text("·").foregroundStyle(.tertiary)
                     Text("Edited").foregroundStyle(.tertiary)
                 }

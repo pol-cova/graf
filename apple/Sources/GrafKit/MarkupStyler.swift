@@ -3,16 +3,11 @@ import Foundation
 /// The visual decisions of the editor's styling pass, kept apart from the
 /// AppKit code that applies them.
 ///
-/// `restyle` used to live in `EditorCoordinator` as a switch over scanner
-/// tokens that picked a font and a color per token kind. That switch is a
-/// design decision — it says what a command should look like, that a
-/// reference is the one accent, that math is italic prose — and it was
-/// untestable, because it could only run inside an AppKit text view holding
-/// a live document.
-///
-/// Splitting the decision from the application makes it assertable over a
-/// plain string, which is what the tests in `MarkupStylerTests` do. What
-/// follows is the cost: a plain value per styled token, instead of an
+/// The mapping is the design: what a command looks like, that a reference is
+/// the one accent, that math is italic prose. Separating it from the
+/// application makes it assertable over a plain string — `MarkupStylerTests`
+/// does that — instead of only inside an AppKit text view holding a live
+/// document. The cost is a plain value per styled token rather than an
 /// `NSTextStorage` mutated in place.
 ///
 /// These are `Sendable`. `NSFont` is a class and is *not* `Sendable`, so no
@@ -24,9 +19,7 @@ public enum MarkupStyler {
     /// There is no `prose` case: prose is what a span has *before* any token
     /// is applied, and `EditorCoordinator.restyle` lays it down across the
     /// whole range first. A token either differs from prose and appears here,
-    /// or it does not and the scanner should not have emitted it. An earlier
-    /// revision carried a `prose` case plus a `distinctTokens` filter to drop
-    /// it; `style(for:)` never produced one, so both were unreachable.
+    /// or it does not and the scanner should not have emitted it.
     public enum Style: Equatable, Sendable {
         /// A command name, braces, and other markup that steps back.
         case markup
@@ -51,8 +44,6 @@ public enum MarkupStyler {
     }
 
     /// Resolves the style for one scanner token.
-    ///
-    /// This is the mapping that used to be the body of `restyle`.
     public static func style(for token: MarkupToken) -> StyledToken {
         switch token {
         case let .command(range), let .delimiter(range):

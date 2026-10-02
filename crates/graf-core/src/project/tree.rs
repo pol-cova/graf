@@ -216,12 +216,11 @@ fn should_ignore(name: &str) -> bool {
 }
 
 /// Root-document candidates, probed in order. Both engines get their
-/// conventional names so a Typst-only project no longer falls through to
-/// the welcome screen.
+/// conventional names, so a Typst-only project is detected too.
 ///
-/// Names only: the `FileKind` this used to carry was discarded at the one
-/// place it was read, so pairing each name with its kind documented nothing
-/// the code enforced. Ordering is what matters here.
+/// Names only, and ordering is all that matters: pairing each name with its
+/// kind would document nothing the code enforces, since the only read site
+/// discards it.
 const ROOT_DOC_CANDIDATES: &[&str] = &[
     "main.tex",
     "main.typ",
