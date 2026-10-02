@@ -460,8 +460,6 @@ pub fn save_text(path: String, text: String) -> Result<(), FileError> {
     persistence::atomic_write(&path, text.as_bytes()).map_err(|error| FileError::io(&path, error))
 }
 
-// MARK: - Settings
-
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct Settings {
     pub prose_font_size: f32,
@@ -507,8 +505,6 @@ pub fn save_settings(settings: Settings) -> Result<(), FileError> {
         .save_to_path(&path)
         .map_err(|error| FileError::io(&path, error))
 }
-
-// MARK: - Crash recovery
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct RecoveredChange {
@@ -559,8 +555,6 @@ pub fn forget_unsaved(project_root: String, path: String) -> Result<(), FileErro
     let dir = RecoveryJournal::project_dir(Path::new(&project_root));
     RecoveryJournal::forget(&dir, Path::new(&path)).map_err(|error| FileError::io(&dir, error))
 }
-
-// MARK: - Completion
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CompletionKind {
@@ -638,8 +632,6 @@ impl Completer {
         .collect()
     }
 }
-
-// MARK: - Quick open
 
 /// Indexes of `candidates` that match `query`, case-insensitively, in their
 /// original order. An empty query matches everything.

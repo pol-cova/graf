@@ -4,8 +4,6 @@ import SwiftUI
 /// Shared colors and type. Views never hardcode a color or font; they read
 /// it from here so light and dark mode stay consistent.
 enum Theme {
-    // MARK: Color
-
     /// Prose and primary text.
     ///
     /// Dark mode is an explicit value rather than `labelColor`. Apple's dark
@@ -73,8 +71,6 @@ enum Theme {
     private static func nsColor(_ components: (Double, Double, Double)) -> NSColor {
         NSColor(srgbRed: components.0 / 255, green: components.1 / 255, blue: components.2 / 255, alpha: 1)
     }
-
-    // MARK: Type
 
     /// Prose size when no setting applies (the setting defaults to this too).
     static let defaultProseSize: CGFloat = 19

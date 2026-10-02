@@ -98,8 +98,6 @@ private struct Cursor {
         return index < end ? text.character(at: index) : nil
     }
 
-    // MARK: LaTeX
-
     mutating func scanLatex() -> [MarkupToken] {
         while let character = peek() {
             switch character {
@@ -192,8 +190,6 @@ private struct Cursor {
         return inner
     }
 
-    // MARK: Typst
-
     mutating func scanTypst() -> [MarkupToken] {
         var atLineStart = position == 0 || text.character(at: position - 1) == .newline
         while let character = peek() {
@@ -278,8 +274,6 @@ private struct Cursor {
         tokens.append(.delimiter(NSRange(location: cursor, length: 1)))
         position = cursor + 1
     }
-
-    // MARK: Shared
 
     mutating func scanComment(prefixLength: Int) {
         let start = position
