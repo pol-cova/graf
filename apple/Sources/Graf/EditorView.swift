@@ -110,7 +110,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     /// so that load is not mistaken for an edit.
     private var isLoading = false
     private var handledJump: UUID?
-    private var proseSize = Theme.defaultProseSize
+    private var proseSize = AppSettings.shared.proseSize
 
     init(workspace: Workspace) {
         self.workspace = workspace
@@ -211,8 +211,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         textView.showFindIndicator(for: range)
     }
 
-    // MARK: NSTextStorageDelegate
-
     nonisolated func textStorage(
         _ textStorage: NSTextStorage,
         didProcessEditing editedMask: NSTextStorageEditActions,
@@ -233,8 +231,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             if delta > 0 { offerCompletionIfTriggered() }
         }
     }
-
-    // MARK: Completion
 
     /// Opening a citation, reference, or environment brings up the list
     /// right away, since a key is what the writer needs next.
@@ -278,8 +274,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         return completions.map(\.label)
     }
 
-    // MARK: NSTextViewDelegate
-
     /// Spell checking is for prose. Words inside commands, references,
     /// math, and comments are never marked misspelled.
     func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range affectedCharRange: NSRange) -> Int {
@@ -296,8 +290,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         workspace.caret = textView.selectedRange().location
         applyFocus()
     }
-
-    // MARK: Styling
 
     /// Applies prose and markup attributes to `range`. Runs synchronously on
     /// the edited paragraphs only, so it keeps up with typing.
@@ -351,8 +343,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
         }
     }
 
-    // MARK: Focus mode
-
     /// Dims everything outside the caret's paragraph. Uses TextKit 2
     /// rendering attributes, which change how text draws without touching
     /// the document's attributes or the undo stack.
@@ -380,8 +370,6 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
             }
         }
     }
-
-    // MARK: Diagnostics
 
     /// Puts a quiet hint under each line that has an error. Hints clear as soon
     /// as the writer types again.

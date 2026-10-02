@@ -91,8 +91,6 @@ final class Workspace {
         Task.detached(priority: .utility) { compiler.warmUp() }
     }
 
-    // MARK: Opening
-
     /// Opens a project folder, or a single file. A file opens inside
     /// `projectRoot` when it belongs to a project that is already open, and
     /// otherwise in its own folder. Restores the file and caret from the
@@ -152,8 +150,6 @@ final class Workspace {
             fileError = error.localizedDescription
         }
     }
-
-    // MARK: Editing
 
     /// Called by the editor after every change to `textStorage`.
     func didEdit() {
@@ -256,8 +252,6 @@ final class Workspace {
         }
     }
 
-    // MARK: Recovery
-
     /// Puts recovered text back. The current file is replaced in place; any
     /// other file is saved from the journal so its text is safe on disk.
     func restoreRecovered() async {
@@ -288,8 +282,6 @@ final class Workspace {
             for change in changes { try? forgetUnsaved(projectRoot: root, path: change.path) }
         }
     }
-
-    // MARK: Compiling
 
     private func compile(text: String, revision snapshot: UInt64) async {
         guard let engine = buildEngine else {
@@ -342,8 +334,6 @@ final class Workspace {
                 || URL(fileURLWithPath: file).lastPathComponent == fileURL.lastPathComponent
         }
     }
-
-    // MARK: Helpers
 
     func jump(toLine line: Int) {
         jumpRequest = (line, UUID())

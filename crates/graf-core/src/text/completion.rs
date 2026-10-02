@@ -17,17 +17,6 @@ pub enum CompletionKind {
     Command,
 }
 
-impl CompletionKind {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Citation => "CITE",
-            Self::Reference => "REF",
-            Self::Environment => "ENV",
-            Self::Command => "CMD",
-        }
-    }
-}
-
 pub fn compute_completions(
     buffer_content: &str,
     cursor_offset: usize,

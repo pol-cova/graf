@@ -482,9 +482,6 @@ pub(crate) fn run_compile_subprocess(
     }
 }
 
-/// Turns a finished subprocess run into the result/error decision shared by
-/// both backends: successful status + no error-grade diagnostics + file on
-/// disk means output; anything else is a shaped failure.
 /// Static facts that differ per backend: display label and where its
 /// fallback diagnostics claim to come from.
 #[derive(Clone, Copy)]
@@ -538,6 +535,9 @@ pub(crate) struct RunOutcome {
     pub raw_failure_message: Option<String>,
 }
 
+/// Turns a finished subprocess run into the result/error decision shared by
+/// both backends: successful status + no error-grade diagnostics + file on
+/// disk means output; anything else is a shaped failure.
 pub(crate) fn finalize_output(
     request: &CompileRequest,
     job: &PreparedJob,

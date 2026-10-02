@@ -18,9 +18,7 @@ use graf_core::compiler::typst::TypstEngine;
 use graf_core::project::recovery::RecoveryJournal;
 use graf_core::project::settings::GrafSettings;
 use graf_core::project::state::ProjectState;
-use graf_core::project::{
-    linter, outline, persistence, stats, templates, text_search, tree, zotero,
-};
+use graf_core::project::{outline, persistence, stats, templates, text_search, tree, zotero};
 use graf_core::text::completion;
 
 uniffi::setup_scaffolding!();
@@ -308,30 +306,6 @@ pub fn stats(text: String, engine: Engine) -> Stats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct StyleWarning {
-    /// One-based line and zero-based column of the match.
-    pub line: u64,
-    pub column: u64,
-    pub length: u64,
-    pub message: String,
-    pub suggestion: Option<String>,
-}
-
-#[uniffi::export]
-pub fn lint(text: String, engine: Engine) -> Vec<StyleWarning> {
-    linter::lint_academic_text(&text, engine == Engine::Typst)
-        .into_iter()
-        .map(|warning| StyleWarning {
-            line: warning.line as u64,
-            column: warning.col as u64,
-            length: warning.length as u64,
-            message: warning.message,
-            suggestion: warning.suggestion,
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Template {
     pub id: String,
     pub name: String,
@@ -460,8 +434,6 @@ pub fn save_text(path: String, text: String) -> Result<(), FileError> {
     persistence::atomic_write(&path, text.as_bytes()).map_err(|error| FileError::io(&path, error))
 }
 
-// MARK: - Settings
-
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct Settings {
     pub prose_font_size: f32,
@@ -507,8 +479,6 @@ pub fn save_settings(settings: Settings) -> Result<(), FileError> {
         .save_to_path(&path)
         .map_err(|error| FileError::io(&path, error))
 }
-
-// MARK: - Crash recovery
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct RecoveredChange {
@@ -559,8 +529,6 @@ pub fn forget_unsaved(project_root: String, path: String) -> Result<(), FileErro
     let dir = RecoveryJournal::project_dir(Path::new(&project_root));
     RecoveryJournal::forget(&dir, Path::new(&path)).map_err(|error| FileError::io(&dir, error))
 }
-
-// MARK: - Completion
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CompletionKind {
@@ -638,8 +606,6 @@ impl Completer {
         .collect()
     }
 }
-
-// MARK: - Quick open
 
 /// Indexes of `candidates` that match `query`, case-insensitively, in their
 /// original order. An empty query matches everything.

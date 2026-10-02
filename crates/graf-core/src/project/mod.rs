@@ -1,7 +1,6 @@
 pub mod bibtex;
 pub mod document;
 pub mod kinds;
-pub mod linter;
 pub mod outline;
 pub mod persistence;
 pub mod recovery;

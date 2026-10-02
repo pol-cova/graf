@@ -64,14 +64,37 @@ import Testing
 
 @MainActor
 @Suite struct DebouncerTests {
+    /// Holds the actions a `Debouncer` runs. The closure fires later on the
+    /// main actor, so the test cannot simply close over a local array and
+    /// trust it is populated when the sleep returns.
+    @MainActor
+    final class ActionLog {
+        private(set) var values: [Int] = []
+
+        func append(_ value: Int) {
+            values.append(value)
+        }
+
+        /// Polls until something has run instead of assuming a span is long
+        /// enough. A fixed wait makes this test fail on a loaded machine —
+        /// the delay plus the main-actor hop can outlast any guessed timeout,
+        /// and a missed wait is indistinguishable from "never ran".
+        func waitForFirstAction(within budget: Duration) async throws {
+            let deadline = ContinuousClock.now.advanced(by: budget)
+            while values.isEmpty, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+    }
+
     @Test func onlyTheLastScheduledActionRuns() async throws {
         let debouncer = Debouncer(delay: .milliseconds(30))
-        var runs: [Int] = []
+        let log = ActionLog()
         for value in 1...3 {
-            debouncer.schedule { runs.append(value) }
+            debouncer.schedule { log.append(value) }
         }
-        try await Task.sleep(for: .milliseconds(150))
-        #expect(runs == [3])
+        try await log.waitForFirstAction(within: .seconds(5))
+        #expect(log.values == [3])
     }
 
     @Test func flushRunsThePendingActionImmediately() async {

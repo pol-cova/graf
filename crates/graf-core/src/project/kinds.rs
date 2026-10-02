@@ -27,28 +27,6 @@ impl FileKind {
             _ => Self::Other,
         }
     }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Latex => "TEX",
-            Self::Typst => "TYP",
-            Self::Bibtex => "BIB",
-            Self::Style => "STY",
-            Self::Image => "IMG",
-            Self::Pdf => "PDF",
-            Self::Other => "",
-        }
-    }
-
-    /// Engine the file compiles with, if any. One classifier for root
-    /// detection and compile routing.
-    pub fn as_engine(self) -> Option<crate::compiler::EngineKind> {
-        match self {
-            Self::Latex => Some(crate::compiler::EngineKind::Latex),
-            Self::Typst => Some(crate::compiler::EngineKind::Typst),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -56,12 +34,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn engine_mapping_follows_extension() {
+    fn kind_follows_the_last_extension() {
+        assert_eq!(FileKind::from_path(Path::new("paper.tex")), FileKind::Latex);
         assert_eq!(
-            FileKind::from_path(Path::new("paper.tex")).as_engine(),
-            Some(crate::compiler::EngineKind::Latex)
+            FileKind::from_path(Path::new("dotted.name.typ")),
+            FileKind::Typst
         );
-        assert_eq!(FileKind::from_path(Path::new("refs.bib")).as_engine(), None);
-        assert_eq!(FileKind::from_path(Path::new("fig.png")).as_engine(), None);
+        assert_eq!(FileKind::from_path(Path::new("refs.bib")), FileKind::Bibtex);
+        assert_eq!(
+            FileKind::from_path(Path::new("chapter.cls")),
+            FileKind::Style
+        );
+        assert_eq!(FileKind::from_path(Path::new("fig.png")), FileKind::Image);
+        assert_eq!(FileKind::from_path(Path::new("out.pdf")), FileKind::Pdf);
+        assert_eq!(FileKind::from_path(Path::new("notes")), FileKind::Other);
     }
 }
