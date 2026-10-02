@@ -38,3 +38,43 @@ jobs:
         run: GRAF_CORE_PROFILE=dev ./scripts/build_core_xcframework.sh
       - run: swift build --package-path apple
       - run: swift test --package-path apple
+      # The configuration that ships. Release builds differ from debug, and
+      # there is no other platform to fall back on, so it is checked here
+      # rather than first on a tag push.
+      - name: Build the release configuration
+        run: swift build --package-path apple -c release --product Graf
+      - name: Assemble the app bundle
+        # No signing identity, so build_app.sh falls back to an ad-hoc
+        # signature; --no-dmg skips packaging. This covers bundling without
+        # needing the release certificates, which only CI can use.
+        env:
+          GRAF_SKIP_COMPILERS: "1"
+        run: ./scripts/build_app.sh --no-dmg
+      - name: Verify the bundle is complete and executable
+        run: |
+          app="target/release/bundle/Graf.app"
+          test -x "$app/Contents/MacOS/Graf"
+          test -f "$app/Contents/Info.plist"
+          test -f "$app/Contents/Resources/AppIcon.icns"
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Launch it the way a user does, then confirm it actually came up.
+          # A release build that cannot open a window reaches users first.
+          #
+          # `kill -0` only probes liveness and never signals, so this step
+          # does not have to terminate the app. An earlier version killed it
+          # and inspected the exit status, which fails under the runner's
+          # `bash -e`: our own SIGTERM makes the step exit 143 before any
+          # assertion runs.
+          "$app/Contents/MacOS/Graf" &
+          pid=$!
+          sleep 5
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "Graf stayed up for 5s after launch"
+          else
+            wait "$pid" 2>/dev/null; code=$?
+            echo "Graf exited during startup with status ${code}" >&2
+            exit 1
+          fi
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true

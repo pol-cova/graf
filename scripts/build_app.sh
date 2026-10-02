@@ -17,8 +17,23 @@ CONFIGURATION="${GRAF_CONFIGURATION:-release}"
 MAKE_DMG=1
 [[ "${1:-}" == "--no-dmg" ]] && MAKE_DMG=0
 
+# The version gate names the crate instead of taking packages[0]. This is a
+# workspace now, so the first entry is whichever member Cargo happens to
+# order first (currently graf-core) and would silently compare the wrong
+# crate if any member declared an explicit version. Fails loudly if the
+# crate is missing or the version is absent.
 VERSION="$(cargo metadata --no-deps --format-version 1 \
-    | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+    | python3 -c '
+import json, sys
+packages = json.load(sys.stdin)["packages"]
+matches = [p for p in packages if p["name"] == "graf-core"]
+if not matches:
+    sys.exit("graf-core not found in the cargo workspace")
+version = matches[0].get("version")
+if not version:
+    sys.exit("graf-core has no version")
+print(version)
+')"
 ARCH="$(uname -m)"
 BUNDLE_DIR="target/${CONFIGURATION}/bundle/Graf.app"
 CONTENTS_DIR="${BUNDLE_DIR}/Contents"
