@@ -36,7 +36,7 @@ struct QuickOpenView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Go to section or file", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 17))
+                        .font(Theme.Chrome.headingUI)
                         .focused($fieldFocused)
                         .onSubmit { activate(inNewTab: false) }
                 }
@@ -72,7 +72,7 @@ struct QuickOpenView: View {
                 Divider()
 
                 Text("↩ go   ⌘↩ open in new tab   esc back to writing")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Theme.Chrome.captionMonoUI)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
@@ -105,24 +105,24 @@ struct QuickOpenView: View {
             switch result {
             case let .section(item):
                 Text("section")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Theme.Chrome.captionMonoUI)
                     .foregroundStyle(selected ? Color.grafLink : .secondary)
                     .frame(width: 56, alignment: .leading)
-                Text(item.title).font(.system(size: 14, weight: selected ? .medium : .regular))
+                Text(item.title).font(selected ? Theme.Chrome.bodyEmphasizedUI : Theme.Chrome.bodyUI)
                 Spacer()
-                Text("line \(item.line)").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("line \(item.line)").font(Theme.Chrome.calloutUI).foregroundStyle(.secondary)
             case let .file(file):
                 Text(fileKindLabel(file.kind))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(Theme.Chrome.captionMonoUI)
                     .foregroundStyle(selected ? Color.grafLink : .secondary)
                     .frame(width: 56, alignment: .leading)
                 Text(file.relative)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(Theme.Chrome.rowMonoUI)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
                 if file.path == workspace.fileURL.path {
-                    Text("open").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("open").font(Theme.Chrome.calloutUI).foregroundStyle(.secondary)
                 }
             }
         }
