@@ -38,3 +38,33 @@ jobs:
         run: GRAF_CORE_PROFILE=dev ./scripts/build_core_xcframework.sh
       - run: swift build --package-path apple
       - run: swift test --package-path apple
+      # The configuration that ships. Release builds differ from debug, and
+      # there is no other platform to fall back on, so it is checked here
+      # rather than first on a tag push.
+      - name: Build the release configuration
+        run: swift build --package-path apple -c release --product Graf
+      - name: Assemble the app bundle
+        # No signing identity, so build_app.sh falls back to an ad-hoc
+        # signature; --no-dmg skips packaging. This covers bundling without
+        # needing the release certificates, which only CI can use.
+        env:
+          GRAF_SKIP_COMPILERS: "1"
+        run: ./scripts/build_app.sh --no-dmg
+      - name: Verify the bundle is complete and executable
+        run: |
+          app="target/release/bundle/Graf.app"
+          test -x "$app/Contents/MacOS/Graf"
+          test -f "$app/Contents/Info.plist"
+          test -f "$app/Contents/Resources/AppIcon.icns"
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # Launch it the way a user does, then confirm it actually came up.
+          # A release build that cannot open a window reaches users first.
+          "$app/Contents/MacOS/Graf" &
+          pid=$!
+          sleep 5
+          kill "$pid" 2>/dev/null || true
+          # Exited 0 (clean quit) or 143 (SIGTERM) both mean it stayed up
+          # for the whole window instead of crashing on launch.
+          wait "$pid" 2>/dev/null; code=$?
+          test "$code" = 0 -o "$code" = 143

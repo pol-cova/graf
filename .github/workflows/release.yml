@@ -22,9 +22,22 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
 
-      - name: Verify tag matches Cargo version
+      - name: Verify tag matches the core version
+        # Names graf-core rather than taking packages[0]: the workspace
+        # member order is not a contract, and all members inherit
+        # [workspace.package] only until one declares its own version.
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          version="$(cargo metadata --no-deps --format-version 1 | python3 -c '
+          import json, sys
+          packages = json.load(sys.stdin)["packages"]
+          matches = [p for p in packages if p["name"] == "graf-core"]
+          if not matches:
+              sys.exit("graf-core not found in the cargo workspace")
+          version = matches[0].get("version")
+          if not version:
+              sys.exit("graf-core has no version")
+          print(version)
+          ')"
           test "${GITHUB_REF_NAME}" = "v${version}"
 
       - name: Require release credentials
