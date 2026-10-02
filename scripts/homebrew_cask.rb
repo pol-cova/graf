@@ -8,9 +8,9 @@ cask "graf" do
   homepage "https://github.com/pol-cova/graf"
 
   depends_on arch: :arm64
-  depends_on macos: ">= :monterey"
+  depends_on macos: ">= :sequoia"
 
-  app "graf.app"
+  app "Graf.app"
 
   zap trash: [
     "~/.config/graf",

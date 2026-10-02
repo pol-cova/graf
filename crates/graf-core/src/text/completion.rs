@@ -1,0 +1,248 @@
+use crate::project::bibtex::{BibtexIndex, LabelIndex};
+use crate::text::buffer::clamp_str_boundary;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub label: String,
+    pub detail: String,
+    pub insert_text: String,
+    pub kind: CompletionKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionKind {
+    Citation,
+    Reference,
+    Environment,
+    Command,
+}
+
+impl CompletionKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Citation => "CITE",
+            Self::Reference => "REF",
+            Self::Environment => "ENV",
+            Self::Command => "CMD",
+        }
+    }
+}
+
+pub fn compute_completions(
+    buffer_content: &str,
+    cursor_offset: usize,
+    bib_index: &BibtexIndex,
+    label_index: &LabelIndex,
+) -> Vec<CompletionItem> {
+    let end = clamp_str_boundary(buffer_content, cursor_offset);
+    let safe_prefix = &buffer_content[..end];
+    let line_start = safe_prefix.rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let prefix = &safe_prefix[line_start..];
+
+    if let Some(cite_pos) = prefix.rfind("\\cite{") {
+        let after = &prefix[cite_pos + 6..];
+        if !after.contains('}') && !after.contains('\n') {
+            return bib_index
+                .search(after)
+                .into_iter()
+                .take(MAX_COMPLETIONS)
+                .map(|e| CompletionItem {
+                    label: e.key.clone(),
+                    detail: e.display_summary(),
+                    insert_text: format!("{}}}", completion_suffix(&e.key, after)),
+                    kind: CompletionKind::Citation,
+                })
+                .collect();
+        }
+    }
+
+    let ref_prefixes = ["\\ref{", "\\eqref{", "\\autoref{", "\\pageref{"];
+    for ref_prefix in ref_prefixes {
+        if let Some(ref_pos) = prefix.rfind(ref_prefix) {
+            let after = &prefix[ref_pos + ref_prefix.len()..];
+            if !after.contains('}') && !after.contains('\n') {
+                return label_index
+                    .search(after)
+                    .into_iter()
+                    .take(MAX_COMPLETIONS)
+                    .map(|l| CompletionItem {
+                        label: l.to_string(),
+                        detail: "Cross-reference label".to_string(),
+                        insert_text: format!("{}}}", completion_suffix(l, after)),
+                        kind: CompletionKind::Reference,
+                    })
+                    .collect();
+            }
+        }
+    }
+
+    if let Some(begin_pos) = prefix.rfind("\\begin{") {
+        let after = &prefix[begin_pos + 7..];
+        if !after.contains('}') && !after.contains('\n') {
+            // Names in the table are already lowercase; folding each
+            // candidate per keystroke was pure waste.
+            let query_lower = after.to_lowercase();
+            return COMMON_ENVS
+                .into_iter()
+                .filter(|(name, _)| name.contains(&query_lower))
+                .take(MAX_COMPLETIONS)
+                .map(|(name, detail)| CompletionItem {
+                    label: (*name).to_string(),
+                    detail: (*detail).to_string(),
+                    insert_text: format!(
+                        "{}}}\n    \n\\end{{{name}}}",
+                        completion_suffix(name, after)
+                    ),
+                    kind: CompletionKind::Environment,
+                })
+                .collect();
+        }
+    }
+
+    if let Some(slash_pos) = prefix.rfind('\\') {
+        let after = &prefix[slash_pos + 1..];
+        if after.chars().count() >= 2
+            && !after.contains(' ')
+            && !after.contains('{')
+            && !after.contains('}')
+            && !after.contains('\n')
+            && after.chars().all(|c| c.is_alphabetic())
+        {
+            let query_lower = after.to_lowercase();
+            return COMMON_COMMANDS
+                .into_iter()
+                .filter(|(name, _, _)| name.starts_with(query_lower.as_str()))
+                .take(MAX_COMPLETIONS)
+                .map(|(name, detail, snippet)| CompletionItem {
+                    label: format!("\\{name}"),
+                    detail: (*detail).to_string(),
+                    insert_text: completion_suffix(snippet, after).to_string(),
+                    kind: CompletionKind::Command,
+                })
+                .collect();
+        }
+    }
+
+    Vec::new()
+}
+
+/// Cap on returned completions; the UI only shows a handful.
+const MAX_COMPLETIONS: usize = 50;
+
+type EnvEntry = (&'static str, &'static str);
+type CommandEntry = (&'static str, &'static str, &'static str);
+
+/// LaTeX environments and commands are lowercase, so this table is shared
+/// directly with case-insensitive matching without per-candidate folding.
+const COMMON_ENVS: [EnvEntry; 11] = [
+    ("equation", "Numbered mathematical equation"),
+    ("align", "Aligned equations"),
+    ("figure", "Floating figure with caption"),
+    ("table", "Floating table"),
+    ("itemize", "Bulleted list"),
+    ("enumerate", "Numbered list"),
+    ("abstract", "Paper abstract section"),
+    ("proof", "Mathematical proof block"),
+    ("theorem", "Theorem statement block"),
+    ("lemma", "Lemma statement block"),
+    ("lstlisting", "Source code listing"),
+];
+
+const COMMON_COMMANDS: [CommandEntry; 12] = [
+    ("begin", "Environment", "begin{}"),
+    ("section", "Section heading", "section{}"),
+    ("subsection", "Subsection heading", "subsection{}"),
+    ("subsubsection", "Subsubsection heading", "subsubsection{}"),
+    ("textbf", "Bold font weight", "textbf{}"),
+    ("textit", "Italic font slant", "textit{}"),
+    ("usepackage", "Include LaTeX package", "usepackage{}"),
+    (
+        "newcommand",
+        "Define custom command macro",
+        "newcommand{}{}",
+    ),
+    ("frac", "Fraction numerator over denominator", "frac{}{}"),
+    ("sqrt", "Square root", "sqrt{}"),
+    ("label", "Cross-reference anchor label", "label{}"),
+    ("caption", "Figure or table caption", "caption{}"),
+];
+
+fn completion_suffix<'a>(candidate: &'a str, typed: &str) -> &'a str {
+    candidate.strip_prefix(typed).unwrap_or(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_citation_completion() {
+        let mut bib = BibtexIndex::new();
+        bib.parse_and_load(
+            r#"
+@article{vaswani2017attention,
+  title = {Attention Is All You Need},
+  author = {Ashish Vaswani}
+}
+"#,
+        );
+        let labels = LabelIndex::default();
+
+        let content = "See paper \\cite{vas";
+        let completions = compute_completions(content, content.len(), &bib, &labels);
+
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].label, "vaswani2017attention");
+        assert_eq!(completions[0].kind, CompletionKind::Citation);
+    }
+
+    #[test]
+    fn test_ref_completion() {
+        let bib = BibtexIndex::new();
+        let mut labels = LabelIndex::default();
+        labels.parse_and_load(
+            "\\section{Intro}\\label{sec:intro}\n\\begin{equation}\\label{eq:maxwell}",
+        );
+
+        let content = "As seen in equation \\eqref{eq:";
+        let completions = compute_completions(content, content.len(), &bib, &labels);
+
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].label, "eq:maxwell");
+        assert_eq!(completions[0].kind, CompletionKind::Reference);
+    }
+
+    #[test]
+    fn waits_for_two_command_characters() {
+        let bib = BibtexIndex::new();
+        let labels = LabelIndex::default();
+
+        assert!(compute_completions("\\", 1, &bib, &labels).is_empty());
+        assert!(compute_completions("\\b", 2, &bib, &labels).is_empty());
+    }
+
+    #[test]
+    fn completes_begin_command() {
+        let bib = BibtexIndex::new();
+        let labels = LabelIndex::default();
+        let content = "\\beg";
+
+        let completions = compute_completions(content, content.len(), &bib, &labels);
+
+        assert_eq!(completions[0].label, "\\begin");
+        assert_eq!(completions[0].insert_text, "in{}");
+    }
+
+    #[test]
+    fn test_environment_completion() {
+        let bib = BibtexIndex::new();
+        let labels = LabelIndex::default();
+
+        let content = "\\begin{equa";
+        let completions = compute_completions(content, content.len(), &bib, &labels);
+
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].label, "equation");
+        assert_eq!(completions[0].kind, CompletionKind::Environment);
+    }
+}

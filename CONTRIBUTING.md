@@ -8,19 +8,21 @@ For substantial changes, open an issue first so the approach can be discussed. B
 
 ## Development setup
 
-You need stable Rust, the native build dependencies for your platform, and the tools listed in the README.
+You need Xcode 16 or later and stable Rust with the `aarch64-apple-darwin` target.
 
 ```bash
 git clone https://github.com/pol-cova/graf.git
 cd graf
-cargo run
+./scripts/build_core_xcframework.sh
+swift build --package-path apple
 ```
 
 ## Making changes
 
 - Keep changes focused and avoid unrelated refactors.
-- Preserve local-first behavior and native GPUI rendering.
-- Do not block the UI thread with compilation, file scanning, or rendering work.
+- Preserve local-first behavior and native macOS UI (SwiftUI, AppKit, TextKit, PDFKit).
+- Keep logic in `graf-core`. The Swift app renders and routes input.
+- Do not block the main thread with compilation, file scanning, or rendering work.
 - Add tests for non-trivial logic.
 - Update public documentation when behavior changes.
 
@@ -31,6 +33,7 @@ cargo fmt --check
 cargo check
 cargo clippy --all-targets -- -D warnings
 cargo test
+swift test --package-path apple
 ```
 
 ## Pull requests

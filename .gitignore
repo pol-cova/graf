@@ -1,4 +1,10 @@
 /target
+
+# Swift package build products and generated bindings
+/apple/.build/
+/apple/.swiftpm/
+/apple/Frameworks/
+/apple/Sources/GrafCore/graf_ffi.swift
 .docs/
 docs/
 *.trace/

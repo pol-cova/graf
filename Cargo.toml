@@ -1,27 +1,11 @@
-[package]
-name = "graf"
+[workspace]
+resolver = "3"
+members = ["crates/graf-core", "crates/graf-ffi", "crates/uniffi-bindgen-swift"]
+# The bindgen tool is only needed when packaging the XCFramework.
+default-members = ["crates/graf-core", "crates/graf-ffi"]
+
+[workspace.package]
 version = "1.0.0-alpha"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/pol-cova/graf"
-readme = "README.md"
-description = "Native editor for LaTeX and Typst"
-
-[[bin]]
-name = "graf"
-path = "src/main.rs"
-
-[dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", features = ["profiler"] }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
-log = "0.4"
-env_logger = "0.11"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-unicode-segmentation = "1.12"
-tempfile = "3.14"
-
-[profile.profiling]
-inherits = "release"
-debug = true
-

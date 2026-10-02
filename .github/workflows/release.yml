@@ -8,35 +8,8 @@ permissions:
   contents: write
 
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang cmake g++ libasound2-dev libfontconfig-dev libglib2.0-dev \
-            libssl-dev libvulkan1 libwayland-dev libx11-xcb-dev \
-            libxkbcommon-x11-dev libzstd-dev lld llvm pkg-config
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build Linux archive
-        run: |
-          cargo build --release
-          archive="graf-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
-          tar -czf "$archive" -C target/release graf -C ../.. README.md LICENSE
-          shasum -a 256 "$archive" > "${archive}.sha256"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux-release
-          path: |
-            graf-*-linux-x86_64.tar.gz
-            graf-*-linux-x86_64.tar.gz.sha256
-
   release:
-    needs: linux
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       GRAF_CODESIGN_IDENTITY: Developer ID Application
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -45,6 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
 
       - name: Verify tag matches Cargo version
@@ -87,19 +62,13 @@ jobs:
           dmg="target/release/graf-${GITHUB_REF_NAME}-arm64.dmg"
           shasum -a 256 "$dmg" > "${dmg}.sha256"
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: linux-release
-          path: target/release
-
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           dmg="target/release/graf-${GITHUB_REF_NAME}-arm64.dmg"
-          linux="target/release/graf-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
           gh release create "$GITHUB_REF_NAME" \
-            "$dmg" "${dmg}.sha256" "$linux" "${linux}.sha256" \
+            "$dmg" "${dmg}.sha256" \
             --verify-tag --generate-notes --title "graf ${GITHUB_REF_NAME}"
 
       - name: Update Homebrew tap
