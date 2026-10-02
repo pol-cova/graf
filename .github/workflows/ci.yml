@@ -60,11 +60,21 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           # Launch it the way a user does, then confirm it actually came up.
           # A release build that cannot open a window reaches users first.
+          #
+          # `kill -0` only probes liveness and never signals, so this step
+          # does not have to terminate the app. An earlier version killed it
+          # and inspected the exit status, which fails under the runner's
+          # `bash -e`: our own SIGTERM makes the step exit 143 before any
+          # assertion runs.
           "$app/Contents/MacOS/Graf" &
           pid=$!
           sleep 5
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "Graf stayed up for 5s after launch"
+          else
+            wait "$pid" 2>/dev/null; code=$?
+            echo "Graf exited during startup with status ${code}" >&2
+            exit 1
+          fi
           kill "$pid" 2>/dev/null || true
-          # Exited 0 (clean quit) or 143 (SIGTERM) both mean it stayed up
-          # for the whole window instead of crashing on launch.
-          wait "$pid" 2>/dev/null; code=$?
-          test "$code" = 0 -o "$code" = 143
+          wait "$pid" 2>/dev/null || true
