@@ -1,0 +1,18 @@
+[package]
+name = "graf-canvas"
+description = "Reads legacy .graf canvas scenes and exports them as SVG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# serde derives are needed by the model itself, not only by tests. serde_json
+# is used by the CLI and the tests, and deliberately not exposed through the
+# library API: callers hand in a `&str` and get back a plain document.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "graf-canvas"
+path = "src/main.rs"
