@@ -18,9 +18,7 @@ use graf_core::compiler::typst::TypstEngine;
 use graf_core::project::recovery::RecoveryJournal;
 use graf_core::project::settings::GrafSettings;
 use graf_core::project::state::ProjectState;
-use graf_core::project::{
-    linter, outline, persistence, stats, templates, text_search, tree, zotero,
-};
+use graf_core::project::{outline, persistence, stats, templates, text_search, tree, zotero};
 use graf_core::text::completion;
 
 uniffi::setup_scaffolding!();
@@ -305,30 +303,6 @@ pub fn stats(text: String, engine: Engine) -> Stats {
         reading_minutes: stats.reading_time_mins,
         estimated_pages: stats.estimated_pages,
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct StyleWarning {
-    /// One-based line and zero-based column of the match.
-    pub line: u64,
-    pub column: u64,
-    pub length: u64,
-    pub message: String,
-    pub suggestion: Option<String>,
-}
-
-#[uniffi::export]
-pub fn lint(text: String, engine: Engine) -> Vec<StyleWarning> {
-    linter::lint_academic_text(&text, engine == Engine::Typst)
-        .into_iter()
-        .map(|warning| StyleWarning {
-            line: warning.line as u64,
-            column: warning.col as u64,
-            length: warning.length as u64,
-            message: warning.message,
-            suggestion: warning.suggestion,
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]

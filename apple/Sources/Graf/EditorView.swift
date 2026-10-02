@@ -110,7 +110,7 @@ final class EditorCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelega
     /// so that load is not mistaken for an edit.
     private var isLoading = false
     private var handledJump: UUID?
-    private var proseSize = Theme.defaultProseSize
+    private var proseSize = AppSettings.shared.proseSize
 
     init(workspace: Workspace) {
         self.workspace = workspace

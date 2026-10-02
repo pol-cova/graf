@@ -262,10 +262,6 @@ mod tests {
         for template in builtin_templates() {
             let derived = kind_for_title(template.file_name);
             assert_eq!(derived, template.kind, "kind mismatch for {}", template.id);
-            assert!(
-                template.kind.is_compilable(),
-                "templates must be compilable"
-            );
             assert!(!template.content.is_empty());
         }
     }

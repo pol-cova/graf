@@ -22,7 +22,7 @@ Everything needed to work here is in this file. `.docs/` and `docs/` are the mai
 - Never upload document content without an explicit user action.
 - Use native Apple UI: SwiftUI with AppKit where it matters (TextKit 2 for text, PDFKit for preview). Do not add Electron, a WebView, React, or browser UI.
 - Keep logic in `graf-core`. The Swift front end renders and routes input; it does not reimplement compiling, parsing, or persistence.
-- Swift owns the live text. Pass snapshots to Rust when compiling, saving, linting, or building the outline, never on every keystroke.
+- Swift owns the live text. Pass snapshots to Rust when compiling, saving, or building the outline, never on every keystroke.
 - Run compilation, project scans, and other expensive work off the main thread on both sides of the bridge.
 - Keep compiler-specific behavior inside `crates/graf-core/src/compiler/`.
 - Keep persistent document state separate from temporary view state.
@@ -79,10 +79,10 @@ Debug builds can render their own window to a PNG, which needs no screen-recordi
 ## Architecture
 
 - `crates/graf-core/src/compiler/`: engine interface, diagnostics, Tectonic, Typst, and compile controller
-- `crates/graf-core/src/project/`: documents, project tree, persistence, settings, templates, recovery, bibliography, outline, linting, and stats
-- `crates/graf-core/src/text/`: text buffer, completion, find and replace, and table formatting
+- `crates/graf-core/src/project/`: documents, project tree, persistence, settings, templates, recovery, bibliography, outline, and stats
+- `crates/graf-core/src/text/`: completion candidates, and a UTF-8 boundary clamp for caret offsets
 - `crates/graf-core/src/util.rs`: app data paths and temporary directories
-- `crates/graf-ffi/`: UniFFI bridge with a coarse API for Swift (`Compiler`, outline, stats, bibliography, labels, lint, templates, project creation). Keep it a thin mapping layer; logic belongs in `graf-core`.
+- `crates/graf-ffi/`: UniFFI bridge with a coarse API for Swift (`Compiler`, outline, stats, bibliography, labels, templates, project creation). Keep it a thin mapping layer; logic belongs in `graf-core`.
 - `crates/uniffi-bindgen-swift/`: build tool that generates the Swift bindings
 - `scripts/build_core_xcframework.sh`: builds `apple/Frameworks/GrafCore.xcframework` and the generated `apple/Sources/GrafCore/graf_ffi.swift`. Both are gitignored; never commit generated bindings.
 - `apple/Package.swift`: the Swift package. Open it in Xcode or build it with `swift build`.

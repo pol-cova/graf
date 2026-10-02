@@ -72,8 +72,6 @@ enum Theme {
         NSColor(srgbRed: components.0 / 255, green: components.1 / 255, blue: components.2 / 255, alpha: 1)
     }
 
-    /// Prose size when no setting applies (the setting defaults to this too).
-    static let defaultProseSize: CGFloat = 19
     static let columnWidth: CGFloat = 660
 
     /// Type for interface chrome, named by role so a size is chosen once and
